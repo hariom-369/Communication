@@ -1,0 +1,101 @@
+/* Tessera primitives. Requires tokens.css. */
+
+.t-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.t-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--t-space-2);
+  min-height: 2.75rem; /* 44px touch target */
+  padding: 0 var(--t-space-4);
+  border: 1px solid transparent;
+  border-radius: var(--t-radius-md);
+  font: 600 var(--t-text-md) / var(--t-leading-md) var(--t-font-sans);
+  cursor: pointer;
+  transition:
+    background-color var(--t-motion-fast) var(--t-motion-easing),
+    border-color var(--t-motion-fast) var(--t-motion-easing);
+}
+.t-button--sm {
+  min-height: 2.25rem;
+  padding: 0 var(--t-space-3);
+  font-size: var(--t-text-sm);
+}
+.t-button:focus-visible {
+  outline: 3px solid var(--t-color-focus-ring);
+  outline-offset: 2px;
+}
+.t-button[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.t-button--primary {
+  background: var(--t-color-accent);
+  color: var(--t-color-on-accent);
+}
+.t-button--primary:hover:not([aria-disabled='true']) {
+  background: var(--t-color-accent-hover);
+}
+.t-button--secondary {
+  background: var(--t-color-surface);
+  border-color: var(--t-color-border);
+  color: var(--t-color-text);
+}
+.t-button--ghost {
+  background: transparent;
+  color: var(--t-color-accent);
+}
+.t-button--danger {
+  background: var(--t-color-danger);
+  color: var(--t-color-on-danger);
+}
+.t-button__spinner {
+  width: 1em;
+  height: 1em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: t-spin calc(var(--t-motion-slow) * 2.5) linear infinite;
+}
+
+.t-skeleton {
+  display: block;
+  background: var(--t-color-skeleton);
+  border-radius: var(--t-radius-sm);
+  animation: t-pulse calc(var(--t-motion-slow) * 5) ease-in-out infinite;
+}
+.t-skeleton--tile {
+  border-radius: var(--t-radius-md);
+}
+.t-skeleton--circle {
+  border-radius: var(--t-radius-pill);
+}
+
+@keyframes t-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes t-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-button__spinner,
+  .t-skeleton {
+    animation: none;
+  }
+}

@@ -377,3 +377,19 @@ link, or (if phone numbers are enabled) per-number lookup with strict rate limit
 truncated-hash queries. Private contact discovery (SGX/ORAM-style) is a post-GA research item.
 
 **Status.** PROPOSED (S-11).
+
+## ADR-032 — Toolchain versions and substitutions (Phase 1)
+
+**Decision.**
+- **TypeScript 6.0.x**, not 7.x: typescript-eslint (typed linting, which enforces several security
+  rules) supports TypeScript `<6.1`. Revisit when typescript-eslint supports TS 7.
+- **ESLint 10** without `eslint-plugin-jsx-a11y` (which does not support ESLint 10); accessibility
+  is enforced by axe-core assertions in component tests instead, plus manual audits (Phase 14).
+  ESLint 9 was rejected because it is out of support.
+- **Node.js 24 LTS** in CI and production (`.nvmrc`); `engines` allows ≥ 22.12 for local work.
+- **ioredis** as the Valkey client (protocol compatible, mature); `iovalkey` is pre-1.0.
+- **No `packages/config` / `packages/types`**: see [repository-structure.md](repository-structure.md).
+- Dependency versions are pinned exactly (`save-exact`); install scripts are disabled by default
+  (`onlyBuiltDependencies: []`); CI actions are pinned by commit SHA.
+
+**Status.** ACCEPTED (tooling only; no open review items).

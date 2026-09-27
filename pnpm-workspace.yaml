@@ -1,0 +1,7 @@
+packages:
+  - 'packages/*'
+  - 'services/*'
+  - 'apps/*'
+
+# Supply-chain control: dependency install scripts are blocked unless listed here.
+onlyBuiltDependencies: []

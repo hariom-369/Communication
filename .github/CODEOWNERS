@@ -1,0 +1,11 @@
+# Default owner.
+* @hariom-369
+
+# Security-sensitive areas. Add the security/cryptography reviewers' handles here once assigned
+# (docs/review-register.md, A-05); until then the default owner must review these paths.
+/docs/crypto-design.md       @hariom-369
+/docs/e2ee.md                @hariom-369
+/docs/threat-model.md        @hariom-369
+/packages/platform/          @hariom-369
+/services/api/src/platform/  @hariom-369
+/.github/                    @hariom-369

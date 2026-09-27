@@ -34,6 +34,7 @@ Supporting documents:
 - [decisions.md](decisions.md) — architecture decision log (ADR-style): decision, alternatives, trade-offs
 - [review-register.md](review-register.md) — assumptions, risks, **specialist security review** and **legal review** items
 - [research-sources.md](research-sources.md) — primary sources consulted and what was taken from each
+- [phase-reports/](phase-reports/phase-1.md) — exact status reported at the end of each implementation phase
 - [groups.md](groups.md), [channels.md](channels.md) — groups, communities, channels
 - [privacy.md](privacy.md) — privacy center and **exact server-visible metadata inventory**
 - [notifications.md](notifications.md), [search.md](search.md), [ai.md](ai.md)
