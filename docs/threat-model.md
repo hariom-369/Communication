@@ -1,0 +1,87 @@
+# Threat model
+
+Status: PROPOSED — to be re-reviewed at the end of every phase and by the external security
+reviewer before public beta. Method: asset/actor analysis + STRIDE per trust boundary, then
+the threat register below.
+
+Scales: **Probability** L (unlikely in 3 years) / M (plausible) / H (expected).
+**Impact** L (minor, contained) / M (some users, recoverable) / H (many users or
+confidentiality of private content) / C (critical: platform-wide compromise of
+private content or safety).
+
+## 1. Assets
+
+| Asset | Sensitivity |
+|---|---|
+| A1 Private message/call/media plaintext | Critical — only on endpoints |
+| A2 Device private keys, ASK, BRK, recovery keys | Critical — only on endpoints / with user |
+| A3 Account credentials (password hashes, passkey public keys, TOTP secrets) | High |
+| A4 Session tokens | High |
+| A5 Social graph & metadata (who/when/IP/groups) | High |
+| A6 Profile data, email, phone | High (personal data under DPDP) |
+| A7 Channel/community public content | Medium (integrity, availability) |
+| A8 Admin capabilities and audit log | High |
+| A9 Payment and billing data (tokens only; card data never touches us) | High |
+| A10 Build pipeline and signing keys | Critical (can compromise A1 via code delivery) |
+
+## 2. Trust boundaries
+
+TB1 Browser ↔ edge (Internet) · TB2 Edge ↔ API/realtime · TB3 Services ↔ datastores ·
+TB4 Main thread ↔ crypto worker · TB5 App origin ↔ user-content origin ·
+TB6 Staff ↔ admin plane · TB7 CI/CD ↔ production · TB8 Tessera ↔ third parties
+(push services, payment, email/SMS, SFU/TURN clients).
+
+## 3. STRIDE summary per boundary
+
+| Boundary | S | T | R | I | D | E |
+|---|---|---|---|---|---|---|
+| TB1 | phishing, stolen cookies | MITM (TLS/HSTS) | audit log | metadata to network (TLS) | DDoS (WAF/Shield) | — |
+| TB2 | forged realtime tickets | request tampering (validation) | request IDs | error leakage | resource exhaustion (limits) | authz bypass (policy tests) |
+| TB3 | service impersonation (mTLS/IAM) | SQLi (parameterised) | DB audit | DB leak (hashing, E2EE) | pool exhaustion | over-privileged roles |
+| TB4 | XSS driving worker | state corruption | — | key exfil | — | — |
+| TB6 | admin account takeover | evidence tampering (hash chain) | immutable audit | insider browsing | — | privilege escalation (RBAC, 4-eyes) |
+| TB7 | malicious PR/dependency | artifact tampering (signing) | provenance | secret leak | — | CI → prod creds |
+
+## 4. Threat register
+
+| ID | Threat | Prob. | Impact | Mitigation | Residual risk | Detection | Recovery |
+|---|---|---|---|---|---|---|---|
+| T-01 | **Malicious user** sends spam, harassment, malware | H | M | Rate limits, new-account throttles, block/report, privacy controls (who can message/add me), client-side file warnings | Private-chat abuse invisible to us until reported | Report volume, graph signals (many first-contacts), rate-limit hits | Restrictions/suspension; blocklists |
+| T-02 | **Stolen session** cookie (XSS, malware, shared PC) | M | H | HttpOnly `__Host-` cookie, CSP/Trusted Types, device-signature on key ops, session list + revoke, short idle on shared devices, new-login alerts | Attacker with cookie can use account (not read E2EE history without device keys) until revoked | Concurrent-use anomalies (IP/UA jumps), device-signature failures | Revoke sessions, rotate, notify |
+| T-03 | **Compromised device** (malware, stolen unlocked) | M | H | Remote revoke, PCS via updates after removal, ASK rotation option, disappearing messages | Past messages on device exposed | User report, unfamiliar device in list | Revoke device; ASK rotate; re-key groups |
+| T-04 | **Compromised server** (attacker controls API/DB) | L | C | E2EE (no plaintext/keys server-side), clients verify ASK-signed device certs (no ghost devices), clients enforce group policy, commits signed | Metadata exposed; could withhold/delay messages; could serve malicious web JS (T-17); could substitute ASK before first contact (TOFU) | Intrusion detection, integrity monitoring, key-transparency (future), client-side anomaly alerts | Incident response; key rotation; forced client update |
+| T-05 | **Malicious administrator / insider** | M | H | Admin RBAC, JIT elevation, 4-eyes for sensitive actions, no admin access to E2EE content (impossible by design), immutable audit log, prod data access via break-glass only | Insider can see metadata within role scope | Audit alerting on unusual queries/bulk exports | Revoke access; legal; notify affected users as required |
+| T-06 | **Database leak** | M | H | Argon2id+pepper hashes, hashed session tokens, E2EE ciphertext only, KMS-encrypted secrets, encryption at rest, minimal PII | Metadata + emails/phones exposed | DB access anomaly, canary records | DPDP breach process (72 h), CERT-In (6 h), force resets |
+| T-07 | **Object-storage leak** | L | M | E2EE blobs + backups client-encrypted; Block Public Access; bucket policies; random keys | Public-content leak only; ciphertext sizes | S3 access logs/GuardDuty | Rotate, revoke URLs |
+| T-08 | **MITM** on network | L | H | TLS 1.3, HSTS preload, E2EE independent of TLS, DTLS fingerprints via MLS | State-level CA compromise mitigated by E2EE (content), not metadata | CT log monitoring for our domains | Revoke certs |
+| T-09 | **Phishing** for credentials | H | H | Passkeys first (phishing-resistant), no SMS 2FA, login alerts, brand-lookalike domain monitoring | Password-only users phishable | Login risk signals | Account recovery flow |
+| T-10 | **Account takeover** (stuffing, reuse) | H | H | Breached-password check, rate limits, MFA prompts on risk, passkeys | Users without MFA | Credential-stuffing detection | Lock + reset + notify |
+| T-11 | **QR/device-link phishing** (victim scans attacker's link QR) | M | H | Link confirmation shows device + location, explicit warning copy, new-device notices to contacts & own devices, trusted-device requirement | Social engineering can still succeed | New-device alerts, user report | Revoke device, ASK rotate |
+| T-12 | **SIM-swap** | M | M | Phone is never sole factor; SMS not a 2FA factor; recovery requires multiple factors + waiting period | Phone-only recovery path does not exist by design | Carrier port signals (if MNV available), recovery requests | Cancel recovery from any session |
+| T-13 | **Malicious browser extension** | M | H | Out of our control; CSP doesn't stop extensions; recommend desktop app; detect DOM tampering heuristics (limited) | High — extension with page access can read plaintext | Limited | User guidance |
+| T-14 | **XSS** in web app | M | C | React escaping, no HTML rendering of user content, Trusted Types, strict CSP, user-content origin sandbox, crypto in worker | XSS could drive the worker to decrypt/sign | CSP reports, WAF | Hotfix deploy, revoke sessions if exploited |
+| T-15 | **Cross-site WebSocket hijacking** | M | H | Origin allow-list, single-use tickets from CSRF-protected endpoint, no cookie auth on WSS | Low | Auth-failure metrics | — |
+| T-16 | **Spam / bot account farms** | H | M | Sign-up friction by risk, email/phone verification, device attestation for native later, new-account limits, graph-based detection | Adaptive adversaries | Signup velocity, clustering | Mass action tooling |
+| T-17 | **Web code-delivery compromise** (malicious JS served) | L | C | Signed reproducible releases, transparency log, SW signature pinning, CI hardening, 2-person release approval | Signing-key holder or coerced operator can still ship malicious code to web | Third-party manifest monitors | Revoke release, incident disclosure |
+| T-18 | **DDoS** (L3/4/7) | H | M | CloudFront/Shield, WAF rate rules, autoscaling, per-route limits, WSS connection limits, TURN quotas | Large-scale attacks cost money/availability | Traffic anomaly alerts | Scale out, geo/ASN blocks |
+| T-19 | **Supply-chain compromise** (CI, action, registry) | M | C | Pinned actions, OIDC short-lived creds, protected branches, signed artifacts, SLSA provenance, admission control | Upstream zero-day | Provenance verification failures | Rollback to last verified build |
+| T-20 | **Malicious dependency** (typo-squat, hijacked maintainer) | M | C | Dependency review, install-script allow-list, `cargo deny`, lockfiles, minimal deps in crypto-core, OSV monitoring | Undetected malicious update | Diff review of lockfile changes | Pin, remove, rotate secrets |
+| T-21 | **Metadata leakage** (social graph, timing, sizes) | H | M | Minimise retention, padding of ciphertext, relay calls option, no content in push, restricted internal access | Server sees who talks to whom and when | — | Retention limits bound exposure |
+| T-22 | **Device theft** (locked) | M | M | Encrypted local store (LSK), OS lock screen, remote revoke, optional app lock (PIN, WebAuthn) | Browser profile on unlocked OS accessible | User report | Revoke device |
+| T-23 | **Backup compromise** | L | H | Client-side encryption with 256-bit keys, no password-only mode, rollback detection, alerts on wrap changes | Recovery key theft = full backup access | Alerts on backup ops | Rotate BRK, delete old backups |
+| T-24 | **Replay / duplicate messages** | M | L | MLS generation reuse guard, message_id dedupe, server idempotency | — | Dedupe counters | — |
+| T-25 | **Malformed encrypted envelopes / parser bugs** | M | H | Rust parsing, length limits, fuzzing, no panics across WASM | Zero-days in dependencies | Crash telemetry (no content) | Patch release |
+| T-26 | **Device impersonation** (register device for victim) | L | H | Device certificate must be ASK-signed; clients reject otherwise; device ops need session + device signature | Server compromise + TOFU window | Clients report cert validation failures | Revoke, investigate |
+| T-27 | **KeyPackage exhaustion** | M | L | Claim rate limits, last-resort KeyPackage | Slightly weaker initial FS | Claim-rate alerts | Replenish |
+| T-28 | **Legal compulsion / lawful access requests** | M | H | E2EE limits what can be produced; transparency report; legal review of each request | Metadata disclosure where legally compelled | Request tracking | — |
+
+## 5. Assumptions
+
+Endpoint OS and browser are not compromised (T-03/T-13 are residual); AWS/KMS operate as
+documented; OpenMLS/libsodium are correct; users verify safety numbers only rarely (hence
+key transparency on the roadmap).
+
+## 6. Review cadence
+
+Updated at each phase exit; full external review before public beta (S-13) and annually;
+any new data flow or third-party integration requires a threat-model delta in its PR.
