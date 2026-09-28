@@ -1,4 +1,11 @@
 import {
+  claimedKeyPackagesSchema,
+  commitResponseSchema,
+  keyPackageCountSchema,
+  ownKeysSchema,
+  userKeysSchema,
+  welcomeListSchema,
+  type RegisterDevice,
   conversationListSchema,
   conversationSchema,
   messageListSchema,
@@ -94,7 +101,10 @@ export const endpoints = {
     ),
   conversation: (id: string) =>
     api('GET', `/conversations/${encodeURIComponent(id)}`, conversationSchema),
-  sendMessage: (id: string, body: { clientMessageId: string; epoch: number; ciphertext: string }) =>
+  sendMessage: (
+    id: string,
+    body: { clientMessageId: string; senderDeviceId: string; epoch: number; ciphertext: string },
+  ) =>
     api(
       'POST',
       `/conversations/${encodeURIComponent(id)}/messages`,
@@ -119,6 +129,39 @@ export const endpoints = {
     api('PUT', `/conversations/${encodeURIComponent(id)}/disappearing`, conversationSchema, {
       seconds,
     }),
+  commit: (
+    id: string,
+    body: {
+      clientMessageId: string;
+      senderDeviceId: string;
+      epoch: number;
+      commit: string;
+      welcome: string | null;
+      welcomeTargets: readonly { userId: string; deviceId: string }[];
+    },
+  ) => api('POST', `/conversations/${encodeURIComponent(id)}/commits`, commitResponseSchema, body),
+  welcomes: (deviceId: string) =>
+    api('GET', `/welcomes?deviceId=${encodeURIComponent(deviceId)}`, welcomeListSchema),
+  ackWelcome: (id: string) =>
+    api('DELETE', `/welcomes/${encodeURIComponent(id)}`, okResponseSchema),
+
+  ownKeys: () => api('GET', '/keys/me', ownKeysSchema),
+  userKeys: (userId: string) =>
+    api('GET', `/keys/users/${encodeURIComponent(userId)}`, userKeysSchema),
+  registerDevice: (body: RegisterDevice) => api('POST', '/keys/devices', ownKeysSchema, body),
+  resetIdentity: (body: RegisterDevice) => api('POST', '/keys/identity/reset', ownKeysSchema, body),
+  keyPackageCount: (deviceId: string) =>
+    api('GET', `/keys/devices/${encodeURIComponent(deviceId)}/key-packages`, keyPackageCountSchema),
+  uploadKeyPackages: (deviceId: string, keyPackages: string[], lastResortKeyPackage?: string) =>
+    api(
+      'POST',
+      `/keys/devices/${encodeURIComponent(deviceId)}/key-packages`,
+      keyPackageCountSchema,
+      lastResortKeyPackage === undefined ? { keyPackages } : { keyPackages, lastResortKeyPackage },
+    ),
+  claimKeyPackages: (userId: string) =>
+    api('POST', '/keys/claim', claimedKeyPackagesSchema, { userId }),
+
   realtimeTicket: () => api('POST', '/realtime/ticket', realtimeTicketSchema, {}),
   presence: (userId: string) =>
     api('GET', `/presence/${encodeURIComponent(userId)}`, presenceSchema),

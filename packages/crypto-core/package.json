@@ -1,0 +1,16 @@
+{
+  "name": "@tessera/crypto-core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Rust crypto core compiled to WebAssembly (see Cargo.toml). Built artefacts live in pkg/.",
+  "type": "module",
+  "exports": {
+    ".": "./pkg/crypto_core.js",
+    "./wasm": "./pkg/crypto_core_bg.wasm"
+  },
+  "scripts": {
+    "build": "scripts/build-wasm.sh",
+    "test": "cargo test --locked",
+    "lint": "cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo clippy --locked --target wasm32-unknown-unknown -- -D warnings"
+  }
+}

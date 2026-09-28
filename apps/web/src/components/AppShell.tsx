@@ -4,23 +4,19 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 
 import { errorMessage } from '../api/client.js';
 import { endpoints } from '../api/endpoints.js';
-import { activeCodec } from '../messaging/codec.js';
 import { useSession } from '../state/session.js';
 
 import { Brand } from './Brand.js';
 import { OfflineBanner } from './OfflineBanner.js';
 
 const NAV: readonly { to: string; label: string }[] = [
-  ...(activeCodec === null ? [] : [{ to: '/chats', label: 'Chats' }]),
+  { to: '/chats', label: 'Chats' },
   { to: '/settings/security', label: 'Security' },
   { to: '/settings/privacy', label: 'Privacy' },
   { to: '/settings/account', label: 'Account' },
 ];
 
-/**
- * Signed-in layout. Desktop: navigation rail + content. Mobile: top bar + content.
- * Only sections that exist are listed — conversations arrive in Phase 3.
- */
+/** Signed-in layout. Desktop: navigation rail + content. Mobile: top bar + content. */
 export function AppShell(): ReactNode {
   const { me, clear } = useSession();
   const navigate = useNavigate();

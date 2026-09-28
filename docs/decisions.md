@@ -500,4 +500,72 @@ Every screen of a development build shows a permanent "not end-to-end encrypted"
 guaranteeing no plaintext message path can reach staging or production (implementation plan,
 Phase 3 row).
 
-**Status.** ACCEPTED. Removed when the MLS codec lands (Phase 4).
+**Status.** SUPERSEDED in Phase 4: the development codec, its build and the server switch are
+removed; migration 0004 deletes any ciphersuite-0 conversation and the database now rejects
+ciphersuite 0.
+
+## ADR-039 — Phase 4 implementation choices for the crypto core
+
+**Decision.**
+- **Crypto provider:** `openmls_rust_crypto` 0.6 (RustCrypto) with OpenMLS 0.9, both pinned
+  exactly. Reason: pure Rust, builds for `wasm32-unknown-unknown` without C toolchains. The
+  libcrux provider remains the preferred option where it covers the suite; the choice is part of
+  S-01.
+- **Ciphersuite:** baseline `0x0001` (MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519) only. The
+  X-Wing hybrid suite waits on S-02.
+- **Device certificate encoding:** a fixed-layout big-endian binary structure (version, user id,
+  device id, MLS signature key, identity-key version, creation time, ciphersuites, Ed25519
+  signature over a domain-separated body) instead of the Protobuf sketched in crypto-design §3.2.
+  A fixed layout is canonical by construction: the signed bytes are the transmitted bytes, so
+  there is no canonicalisation step to get wrong. The TypeScript server parser is tested against
+  certificates produced by the Rust core.
+- **Certificate transport:** MLS leaf-node extension `0xF0A1` (private-use range), advertised in
+  leaf capabilities. Every client validates each leaf that joins or changes (KeyPackage, Welcome
+  tree, Add/Update proposals and the committer's path) against the pinned identity key.
+- **Application payload:** the existing versioned JSON content schema inside the MLS message,
+  padded by the core to size buckets (64 B … 32 KiB powers of two, then 8 KiB steps up to 56 KiB).
+  Protobuf (ADR-020) is deferred until a second client platform needs a shared binary schema.
+- **Wire format policy:** handshake messages are MLS PublicMessages (signed, so the delivery
+  service can order them), application messages are always PrivateMessages.
+
+**Status.** PROPOSED — implemented; NEEDS-SECURITY-REVIEW S-01 (provider, handshake visibility)
+and S-04 (certificate format and validation).
+
+## ADR-040 — One encryption device per account until device linking (Phase 4)
+
+**Decision.** In Phase 4 an account has one active encryption device. The first device creates
+the Account Signing Key automatically. Signing in on another browser shows a "Set up encryption
+on this device" screen; continuing creates a **new** identity key (version + 1), which:
+- requires re-authentication (step-up);
+- revokes every previous device and its KeyPackages;
+- tells contacts, who see a blocking "security key changed" notice before they can send again;
+- does not transfer history (it stays on the devices that received it).
+
+Linking additional devices with the existing identity (QR, history transfer) is Phase 5.
+
+**Why.** Adding a device without its user's identity key would need either server trust (the
+ghost-device problem ADR-007 exists to prevent) or the linking protocol of Phase 5. A visible,
+authenticated identity reset is honest and safe in the meantime.
+
+**Status.** PROPOSED — implemented; NEEDS-SECURITY-REVIEW S-04 (reset UX, key-change flow).
+
+## ADR-041 — MLS delivery on the Phase 3 mailbox
+
+**Decision.**
+- Conversations start at epoch 0 with no group. The first member device whose creating commit
+  the server accepts (compare-and-set on epoch 0) owns the group; any competing device drops its
+  unconfirmed group and joins by Welcome. Both "drop" operations run atomically in the crypto
+  worker (a race found during E2E testing is recorded in the Phase 4 report).
+- Group membership follows the key directory: any member device that notices a missing active
+  device (or a revoked one) commits the Add/Remove; conflicts are resolved by the same
+  compare-and-set. Devices of a contact whose identity changed are not added until the user
+  accepts the change.
+- Self-updates (post-compromise security) are issued after 7 days or 100 sent messages.
+- **Decrypted history lives on the device** (encrypted local store); the server keeps only
+  undelivered ciphertext (ADR-010). The "load earlier messages from the server" feature of Phase
+  3 is removed: the server cannot provide history a device could decrypt.
+- The server checks framing, epoch, membership and device ownership, but does **not** yet verify
+  MLS signatures on commits (crypto-design §5 rule 2, defence in depth). Clients verify
+  everything; the server-side check needs an MLS parser on the server and is tracked with S-01.
+
+**Status.** PROPOSED — implemented; NEEDS-SECURITY-REVIEW S-01 (delivery-service rules).

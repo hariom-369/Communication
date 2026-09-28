@@ -16,6 +16,7 @@ import {
   parsePepper,
   SessionService,
 } from './modules/auth/index.js';
+import { KeysService, keysRoutes } from './modules/keys/index.js';
 import { MessagingService, messagingRoutes } from './modules/messaging/index.js';
 import { metaRoutes } from './modules/meta/index.js';
 import { RealtimeService, realtimeRoutes } from './modules/realtime/index.js';
@@ -42,7 +43,6 @@ export type ModuleConfig = Pick<
   | 'BUILD_VERSION'
   | 'BUILD_COMMIT'
   | 'VALKEY_KEY_PREFIX'
-  | 'MESSAGING_DEV_PLAINTEXT'
   | 'MAILBOX_RETENTION_DAYS'
   | 'REALTIME_WS_PATH'
 >;
@@ -59,6 +59,7 @@ export interface Modules {
   readonly sessions: SessionAuthenticator;
   readonly audit: AuditLog;
   readonly messaging: MessagingService;
+  readonly keys: KeysService;
 }
 
 const DAY_MS = 24 * 60 * 60_000;
@@ -108,12 +109,20 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
     infra.db,
     accounts,
     publisher,
+    { retentionDays: config.MAILBOX_RETENTION_DAYS },
+    infra.logger,
+  );
+  const keys = new KeysService(
+    infra.db,
+    audit,
+    publisher,
     {
-      allowDevPlaintext: config.MESSAGING_DEV_PLAINTEXT,
-      retentionDays: config.MAILBOX_RETENTION_DAYS,
+      contactsOf: (userId) => messaging.contactsOf(userId),
+      sharesConversation: (a, b) => messaging.areContacts(a, b),
     },
     infra.logger,
   );
+  messaging.useDevices(keys);
   const realtime = new RealtimeService(infra.valkey, config.VALKEY_KEY_PREFIX, {
     privacySettings: (userId) => accounts.privacySettings(userId),
     areContacts: (a, b) => messaging.areContacts(a, b),
@@ -125,10 +134,12 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
       ...accountsRoutes({ accounts, sessions: auth, security: auth }),
       ...authRoutes({ auth, sessions, passkeys }),
       ...messagingRoutes({ messaging }),
+      ...keysRoutes({ keys }),
       ...realtimeRoutes({ realtime, websocketPath: config.REALTIME_WS_PATH }),
     ],
     sessions,
     audit,
     messaging,
+    keys,
   };
 }

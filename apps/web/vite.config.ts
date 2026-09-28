@@ -14,7 +14,9 @@ const REALTIME_TARGET = process.env['TESSERA_REALTIME_URL'] ?? 'ws://127.0.0.1:8
 
 export const CONTENT_SECURITY_POLICY = [
   "default-src 'none'",
-  "script-src 'self'",
+  // WebAssembly compilation for the crypto worker (docs/security.md §3, ADR-006); no eval.
+  "script-src 'self' 'wasm-unsafe-eval'",
+  "worker-src 'self'",
   "style-src 'self'",
   "img-src 'self' data:",
   "font-src 'self'",
@@ -24,7 +26,8 @@ export const CONTENT_SECURITY_POLICY = [
   "form-action 'self'",
   "frame-ancestors 'none'",
   "require-trusted-types-for 'script'",
-  "trusted-types 'none'",
+  // One policy, for the crypto worker's same-origin script URL (src/crypto/client.ts).
+  'trusted-types tessera-worker',
 ].join('; ');
 
 const productionHeaders = {
@@ -44,6 +47,7 @@ const proxy = {
 
 export default defineConfig({
   plugins: [react()],
+  worker: { format: 'es' },
   build: {
     sourcemap: true,
     modulePreload: { polyfill: false }, // the polyfill injects inline script

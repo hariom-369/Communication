@@ -72,13 +72,6 @@ describe('api config', () => {
     ]);
   });
 
-  it('never allows unprotected (development) messaging in production', () => {
-    expect(issueKeys({ ...production, MESSAGING_DEV_PLAINTEXT: 'true' })).toEqual([
-      'MESSAGING_DEV_PLAINTEXT',
-    ]);
-    expect(loadApiConfig(base).MESSAGING_DEV_PLAINTEXT).toBe(false);
-  });
-
   it('requires every secret and endpoint to be configured explicitly', () => {
     expect(issueKeys({}).sort()).toEqual([
       'ALLOWED_ORIGINS',

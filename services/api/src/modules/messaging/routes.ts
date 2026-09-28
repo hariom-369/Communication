@@ -1,6 +1,8 @@
 import { AppError } from '@tessera/platform';
 import {
   ackSchema,
+  commitResponseSchema,
+  commitSchema,
   conversationListQuerySchema,
   conversationListSchema,
   conversationSchema,
@@ -13,6 +15,8 @@ import {
   sendMessageSchema,
   setDisappearingSchema,
   syncResponseSchema,
+  welcomeListQuerySchema,
+  welcomeListSchema,
 } from '@tessera/validation';
 import { z } from 'zod';
 
@@ -124,6 +128,7 @@ export function messagingRoutes(deps: MessagingModuleDeps): RouteDefinition[] {
           throw new AppError('BAD_REQUEST', { detail: 'Empty message.' });
         const result = await deps.messaging.send(context.session.userId, params.id, {
           clientMessageId: body.clientMessageId,
+          senderDeviceId: body.senderDeviceId,
           epoch: body.epoch,
           ciphertext,
         });
@@ -167,6 +172,75 @@ export function messagingRoutes(deps: MessagingModuleDeps): RouteDefinition[] {
       successStatus: 200,
       handler: async ({ params, body }, context) => {
         await deps.messaging.acknowledge(context.session.userId, params.id, body.seq);
+        return { ok: true as const };
+      },
+    }),
+    defineRoute({
+      id: 'messaging.commit',
+      method: 'POST',
+      url: '/api/v1/conversations/:id/commits',
+      summary: 'Append an MLS commit for the current epoch (compare-and-set; 409 if another won)',
+      tags: ['messaging'],
+      auth: { kind: 'session' },
+      authorize: ownAccount,
+      rateLimit: limits.send,
+      audit: {
+        kind: 'none',
+        reason: 'Group key updates are message traffic (metadata minimisation)',
+      },
+      schema: { params: conversationParams, body: commitSchema, response: commitResponseSchema },
+      successStatus: 201,
+      // Commit (≤ 64 KiB) + Welcome (≤ 64 KiB) as base64 inside JSON.
+      bodyLimit: 192 * 1024,
+      handler: async ({ params, body }, context) => {
+        const commit = Buffer.from(body.commit, 'base64');
+        if (commit.length === 0) throw new AppError('BAD_REQUEST', { detail: 'Empty commit.' });
+        const result = await deps.messaging.commit(context.session.userId, params.id, {
+          clientMessageId: body.clientMessageId,
+          senderDeviceId: body.senderDeviceId,
+          epoch: body.epoch,
+          commit,
+          welcome: body.welcome === null ? null : Buffer.from(body.welcome, 'base64'),
+          welcomeTargets: body.welcomeTargets,
+        });
+        return {
+          seq: result.message.seq,
+          epoch: result.epoch,
+          serverTime: result.message.serverTime,
+          duplicate: result.duplicate,
+        };
+      },
+    }),
+    defineRoute({
+      id: 'messaging.list_welcomes',
+      method: 'GET',
+      url: '/api/v1/welcomes',
+      summary: 'MLS Welcomes waiting for one of your devices',
+      tags: ['messaging'],
+      auth: { kind: 'session' },
+      authorize: ownAccount,
+      rateLimit: limits.read,
+      audit: { kind: 'none', reason: 'Read-only' },
+      schema: { querystring: welcomeListQuerySchema, response: welcomeListSchema },
+      successStatus: 200,
+      handler: async ({ query }, context) => ({
+        welcomes: await deps.messaging.welcomes(context.session.userId, query.deviceId),
+      }),
+    }),
+    defineRoute({
+      id: 'messaging.ack_welcome',
+      method: 'DELETE',
+      url: '/api/v1/welcomes/:id',
+      summary: 'Discard a Welcome after processing it',
+      tags: ['messaging'],
+      auth: { kind: 'session' },
+      authorize: ownAccount,
+      rateLimit: limits.ack,
+      audit: { kind: 'none', reason: 'Delivery state only' },
+      schema: { params: conversationParams, response: okResponseSchema },
+      successStatus: 200,
+      handler: async ({ params }, context) => {
+        await deps.messaging.acknowledgeWelcome(context.session.userId, params.id);
         return { ok: true as const };
       },
     }),

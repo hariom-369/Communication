@@ -27,7 +27,7 @@ Status: PROPOSED · Decisions: ADR-001, 027
 │   └── calling/              # TURN creds, LiveKit tokens, call state (may start as api module + worker)
 ├── packages/
 │   ├── crypto-core/          # (Phase 4) Rust crate (OpenMLS, device certs, blob crypto) → WASM (+ UniFFI later)
-│   ├── crypto/               # (Phase 4) TypeScript bindings/types for the worker RPC (no crypto logic)
+│   ├── (crypto RPC facade)   # lives in apps/web/src/crypto until a second client needs it
 │   ├── protocol/             # (Phase 3) Protobuf definitions (buf) + generated TS
 │   ├── platform/             # server runtime: validated config, allow-list logger, AppError, health server, lifecycle
 │   ├── shared/               # pure utilities (ids, assertNever) — no I/O
@@ -61,6 +61,9 @@ Rules:
 - `packages/shared` and `packages/validation` are dependency leaves (no I/O, no framework).
 - `apps/*` may not import `services/*`; `services/*` may not import `apps/*`.
 - Module code in `services/api/src/modules/X` may import only `modules/Y/index.ts`.
-- Only `packages/crypto-core` contains cryptographic operations; `packages/crypto` is a typed RPC facade.
+- Only `packages/crypto-core` contains cryptographic operations. The web app's typed worker RPC
+  (`apps/web/src/crypto`) contains no cryptographic logic; the one exception is the at-rest
+  encryption of the local store with a non-extractable WebCrypto key (ADR-006), which WebCrypto
+  must perform because the key cannot leave it.
 - Generated code is committed only where required for reproducible builds (protocol TS, OpenAPI document) and verified in CI (`git diff --exit-code` after regeneration).
 - The web client does not use a generated API client: request/response schemas are shared from `packages/validation`, which is the single source of truth for both sides (the OpenAPI document is generated from the same schemas for other consumers).

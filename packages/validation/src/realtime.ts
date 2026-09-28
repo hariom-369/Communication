@@ -50,6 +50,10 @@ export const serverFrameSchema = z.discriminatedUnion('type', [
     state: z.enum(['start', 'stop']),
   }),
   z.object({ type: z.literal('conversation'), conversationId: z.string() }),
+  /** A Welcome is waiting for one of this user's devices. */
+  z.object({ type: z.literal('welcome'), conversationId: z.string() }),
+  /** A contact's keys changed (new device, identity reset): re-fetch and re-check. */
+  z.object({ type: z.literal('keys_changed'), userId: z.string() }),
   z.object({ type: z.literal('reconnect'), afterMs: z.number() }),
 ]);
 export type ServerFrame = z.infer<typeof serverFrameSchema>;
@@ -77,6 +81,8 @@ export const realtimeEventSchema = z.discriminatedUnion('type', [
     state: z.enum(['start', 'stop']),
   }),
   z.object({ type: z.literal('conversation'), conversationId: z.string() }),
+  z.object({ type: z.literal('welcome'), conversationId: z.string() }),
+  z.object({ type: z.literal('keys_changed'), userId: z.string() }),
   /** Sessions of this user were revoked or rotated; realtime re-validates open connections. */
   z.object({ type: z.literal('sessions_changed') }),
 ]);

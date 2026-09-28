@@ -12,6 +12,8 @@ import { Composer } from './Composer.js';
 import { peerOf } from './ConversationList.js';
 import { lastSeen } from './format.js';
 import { MessageBubble } from './MessageBubble.js';
+import { SafetyNumber } from './SafetyNumber.js';
+import { SecurityNotices } from './SecurityNotices.js';
 import type { Presence } from './types.js';
 
 const TIMERS = [
@@ -63,7 +65,6 @@ export function ConversationView({ conversation }: { conversation: ConversationS
   const [context, setContext] = useState<{ kind: 'reply' | 'edit'; id: string } | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [error, setError] = useState<string>();
-  const [loadingOlder, setLoadingOlder] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
   const { timeline, meta } = conversation;
   const conversationId = meta.id;
@@ -90,21 +91,9 @@ export function ConversationView({ conversation }: { conversation: ConversationS
     userId === myId
       ? 'You'
       : `@${meta.members.find((m) => m.userId === userId)?.username ?? 'someone'}`;
-  const firstSeq = timeline.order
-    .map((id) => timeline.byId[id]?.seq)
-    .find((seq): seq is number => typeof seq === 'number');
-  const olderOnServer =
-    firstSeq !== undefined && firstSeq > Math.max(conversation.earliestAvailableSeq, 1);
-
-  async function loadOlder() {
-    setLoadingOlder(true);
-    try {
-      await store?.loadOlder(conversationId);
-    } catch (caught) {
-      setError(errorMessage(caught));
-    }
-    setLoadingOlder(false);
-  }
+  const verified = conversation.security.verified.includes(peer.userId);
+  const username = (userId: string) =>
+    meta.members.find((m) => m.userId === userId)?.username ?? 'someone';
 
   async function setTimer(seconds: 0 | 86400 | 604800 | 7776000) {
     setError(undefined);
@@ -123,7 +112,10 @@ export function ConversationView({ conversation }: { conversation: ConversationS
             ←
           </Link>
           <div className="conversation__title">
-            <h2 id="conversation-title">@{peer.username}</h2>
+            <h2 id="conversation-title">
+              @{peer.username}
+              {verified ? <span className="verified-badge"> · Verified</span> : null}
+            </h2>
             <p className="conversation__presence" aria-live="polite">
               {conversation.typing.includes(peer.userId)
                 ? 'typing…'
@@ -144,6 +136,11 @@ export function ConversationView({ conversation }: { conversation: ConversationS
           </Button>
         </header>
         {error === undefined ? null : <Alert tone="danger">{error}</Alert>}
+        <SecurityNotices
+          conversation={conversation}
+          username={username}
+          onVerify={() => setDetailsOpen(true)}
+        />
         {meta.disappearingSeconds > 0 ? (
           <p className="conversation__notice">
             Disappearing messages are on: new messages disappear after{' '}
@@ -151,19 +148,6 @@ export function ConversationView({ conversation }: { conversation: ConversationS
           </p>
         ) : null}
         <div className="timeline">
-          {olderOnServer ? (
-            <div className="timeline__older">
-              <Button
-                size="sm"
-                variant="ghost"
-                loading={loadingOlder}
-                loadingLabel="Loading"
-                onClick={() => void loadOlder()}
-              >
-                Load earlier messages
-              </Button>
-            </div>
-          ) : null}
           {timeline.order.length === 0 ? (
             <p className="empty timeline__empty">Say hello to @{peer.username}.</p>
           ) : (
@@ -227,6 +211,17 @@ export function ConversationView({ conversation }: { conversation: ConversationS
       {detailsOpen ? (
         <aside className="conversation__details" aria-labelledby="details-heading">
           <h2 id="details-heading">Details</h2>
+          <h3>Encryption</h3>
+          <p className="t-field__hint">
+            Messages in this chat are end-to-end encrypted: only the devices of the people in it can
+            read them.
+          </p>
+          <SafetyNumber
+            conversationId={conversationId}
+            userId={peer.userId}
+            username={peer.username}
+            verified={verified}
+          />
           <h3>Members</h3>
           <ul className="plain-list">
             {meta.members.map((member) => (

@@ -163,10 +163,51 @@ export interface DirectPairsTable {
 export interface MailboxMessagesTable {
   conversation_id: string;
   seq: ColumnType<string, number, number>;
+  /** 1 = application (MLS PrivateMessage), 2 = commit (MLS PublicMessage). */
+  kind: 1 | 2;
   client_message_id: string;
   sender_user_id: string;
+  sender_device_id: string | null;
   epoch: ColumnType<string, number, number>;
   ciphertext: Buffer;
+  created_at: Timestamp;
+  expires_at: Date;
+}
+
+export interface AccountKeysTable {
+  user_id: string;
+  public_key: Buffer;
+  version: number;
+  updated_at: Timestamp;
+}
+
+export interface DevicesTable {
+  id: string;
+  user_id: string;
+  ask_version: number;
+  signature_key: Buffer;
+  certificate: Buffer;
+  created_at: Timestamp;
+  last_seen_at: Timestamp;
+  revoked_at: NullableTimestamp;
+}
+
+export interface KeyPackagesTable {
+  id: string;
+  device_id: string;
+  key_package: Buffer;
+  last_resort: ColumnType<boolean, boolean | undefined, boolean>;
+  created_at: Timestamp;
+  expires_at: Date;
+}
+
+export interface MlsWelcomesTable {
+  id: string;
+  conversation_id: string;
+  target_user_id: string;
+  target_device_id: string;
+  commit_seq: ColumnType<string, number, number>;
+  welcome: Buffer;
   created_at: Timestamp;
   expires_at: Date;
 }
@@ -189,6 +230,10 @@ export interface Database {
   conversation_members: ConversationMembersTable;
   direct_pairs: DirectPairsTable;
   mailbox_messages: MailboxMessagesTable;
+  mls_welcomes: MlsWelcomesTable;
+  account_keys: AccountKeysTable;
+  devices: DevicesTable;
+  key_packages: KeyPackagesTable;
 }
 
 /** Owning module of every table ('platform' = infrastructure code outside modules/). */
@@ -210,4 +255,8 @@ export const TABLE_OWNERS: Readonly<Record<keyof Database, string>> = {
   conversation_members: 'messaging',
   direct_pairs: 'messaging',
   mailbox_messages: 'messaging',
+  mls_welcomes: 'messaging',
+  account_keys: 'keys',
+  devices: 'keys',
+  key_packages: 'keys',
 };

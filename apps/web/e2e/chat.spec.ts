@@ -3,9 +3,9 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
 import { signUpWithPassword, trackCspViolations } from './support.js';
 
 /**
- * Messaging transport end to end: two users, two browser contexts, the real API, realtime
- * service, PostgreSQL and Valkey. Runs against the development messaging build, which shows a
- * permanent "not end-to-end encrypted" banner (E2EE arrives in Phase 4).
+ * Messaging end to end: two users, two browser contexts, the production build (crypto worker +
+ * WebAssembly MLS core under the strict CSP), the real API, realtime service, PostgreSQL and
+ * Valkey.
  */
 
 async function newUser(
@@ -45,7 +45,6 @@ test.describe('chat', () => {
     const bob = await newUser(browser);
     const violations = trackCspViolations(alice.page);
 
-    await expect(alice.page.getByRole('note')).toContainText('not end-to-end encrypted');
     await startChat(alice.page, bob.username);
     await send(alice.page, 'Hello Bob 👋');
 
@@ -66,6 +65,9 @@ test.describe('chat', () => {
     await bob.page.keyboard.press('Enter');
     await expect(bubble(alice.page, 'Hi Alice!')).toBeVisible();
 
+    // Nothing in a normal conversation is ever reported as undecryptable, on either side.
+    for (const page of [alice.page, bob.page])
+      await expect(page.getByText(/couldn’t be decrypted/)).toHaveCount(0);
     expect(violations).toEqual([]);
     await alice.close();
     await bob.close();

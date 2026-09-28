@@ -102,7 +102,6 @@ export async function startIntegrationApp(): Promise<IntegrationApp> {
       BUILD_VERSION: 'it',
       BUILD_COMMIT: 'it',
       VALKEY_KEY_PREFIX: keyPrefix,
-      MESSAGING_DEV_PLAINTEXT: true,
       MAILBOX_RETENTION_DAYS: 30,
       REALTIME_WS_PATH: '/rt/v1/ws',
     },

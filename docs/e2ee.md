@@ -1,6 +1,8 @@
 # End-to-end encryption architecture
 
-Status: NEEDS-SECURITY-REVIEW · Decisions: ADR-004..011, 013, 014, 016, 017, 021
+Status: Phase 4 IMPLEMENTED for 1:1 chats on one device per account (ADR-040) —
+NEEDS-SECURITY-REVIEW (S-01..S-04) before any release to users · Decisions: ADR-004..011, 013,
+014, 016, 017, 021, 039..041. Implementation status per section: [crypto-design.md §0](crypto-design.md).
 Protocol details: [crypto-design.md](crypto-design.md) · Devices: [multi-device.md](multi-device.md) ·
 Backups: [encrypted-backups.md](encrypted-backups.md)
 
@@ -117,6 +119,12 @@ indices, commits/proposals (PublicMessage, until acked/30 days), application cip
 server can delete early). It never stores epoch secrets, application keys, or plaintext.
 
 ## 9. Verification UX
+
+Phase 4 implements: the 60-digit safety number with "Mark as verified" (verified contacts show
+a badge), and a blocking key-change notice — messages are held until the user continues — that
+survives reloads. The QR code, per-device lists and "new device" notices arrive with device
+linking (Phase 5).
+
 
 - Contact info → "Verify": shows 60-digit safety number (12 groups of 5) + QR.
   Derivation in [crypto-design.md §8](crypto-design.md).

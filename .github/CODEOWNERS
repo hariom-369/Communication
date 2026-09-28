@@ -9,3 +9,7 @@
 /packages/platform/          @hariom-369
 /services/api/src/platform/  @hariom-369
 /.github/                    @hariom-369
+/packages/crypto-core/       @hariom-369
+/apps/web/src/crypto/        @hariom-369
+/apps/web/src/messaging/e2ee.ts @hariom-369
+/services/api/src/modules/keys/ @hariom-369

@@ -35,11 +35,6 @@ const schema = z
     /** WebAuthn relying-party ID: the registrable domain of the web app (e.g. tessera.example). */
     WEBAUTHN_RP_ID: z.string().min(1),
     WEBAUTHN_RP_NAME: z.string().min(1).default('Tessera'),
-    /**
-     * Accept conversations with ciphersuite 0 (no end-to-end protection). For local development
-     * of the messaging transport before E2EE lands (Phase 4). Forbidden in production.
-     */
-    MESSAGING_DEV_PLAINTEXT: env.boolean(false),
     MAILBOX_RETENTION_DAYS: env.positiveInt(30),
     /** Path (on the web origin) that the edge routes to services/realtime. */
     REALTIME_WS_PATH: z
@@ -75,13 +70,6 @@ const schema = z
         code: 'custom',
         path: ['DATABASE_URL'],
         message: 'Must set sslmode=verify-full in production',
-      });
-    }
-    if (config.MESSAGING_DEV_PLAINTEXT) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['MESSAGING_DEV_PLAINTEXT'],
-        message: 'Unprotected messaging is never allowed in production',
       });
     }
     if (!config.PUBLIC_WEB_URL.startsWith('https://')) {

@@ -68,7 +68,7 @@ export function MessageBubble(props: MessageBubbleProps): ReactNode {
         )}
         {message.undecodable ? (
           <p className="bubble__text bubble__text--muted">
-            This message can’t be shown in this version of Tessera.
+            This message couldn’t be decrypted on this device.
           </p>
         ) : message.deleted ? (
           <p className="bubble__text bubble__text--muted">

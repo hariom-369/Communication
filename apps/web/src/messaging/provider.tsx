@@ -8,31 +8,29 @@ import {
 } from 'react';
 
 import { endpoints } from '../api/endpoints.js';
+import { startCryptoWorker } from '../crypto/client.js';
 import { useSession } from '../state/session.js';
 
-import { activeCodec } from './codec.js';
+import { E2eeSession } from './e2ee.js';
 import { MessagingStore, type MessagingSnapshot } from './store.js';
 
 const StoreContext = createContext<MessagingStore | null>(null);
 
 /**
- * Runs the messaging store for the signed-in user while mounted. Renders children without a
- * store when this build has no message codec (messaging unavailable in this build).
+ * Runs end-to-end encryption (a dedicated crypto worker) and the messaging store for the
+ * signed-in user while mounted.
  */
 export function MessagingProvider({ children }: { children: ReactNode }): ReactNode {
   const { me } = useSession();
   const userId = me?.id;
-  const store = useMemo(
-    () =>
-      activeCodec === null || userId === undefined
-        ? null
-        : new MessagingStore({
-            api: endpoints,
-            codec: activeCodec,
-            me: { id: userId },
-          }),
-    [userId],
-  );
+  const store = useMemo(() => {
+    if (userId === undefined) return null;
+    return new MessagingStore({
+      api: endpoints,
+      security: new E2eeSession(startCryptoWorker, endpoints, userId),
+      me: { id: userId },
+    });
+  }, [userId]);
 
   useEffect(() => {
     if (store === null) return;
@@ -72,6 +70,7 @@ export function useMessagingStore(): MessagingStore | null {
 
 const EMPTY: MessagingSnapshot = {
   status: 'connecting',
+  device: 'starting',
   conversations: [],
   loaded: false,
   error: null,

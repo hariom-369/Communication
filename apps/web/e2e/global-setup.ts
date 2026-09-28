@@ -121,7 +121,6 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     WEBAUTHN_RP_ID: 'localhost',
     TRUST_PROXY_HOPS: '1',
     SHUTDOWN_DRAIN_MS: '0',
-    MESSAGING_DEV_PLAINTEXT: 'true',
   };
   const apiDir = path.join(ROOT, 'services/api');
   const migrate = start('node', ['dist/cli/migrate.js'], apiEnv, apiDir);
@@ -150,15 +149,14 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   );
   await waitFor('http://127.0.0.1:59091/readyz');
 
-  // The E2E suite exercises the development messaging build (the only build with chats until
-  // E2EE lands); `verify:bundle` separately guarantees the normal build contains none of it.
+  // The production build, exactly as deployed (strict CSP applied by `vite preview`).
   const webDir = path.join(ROOT, 'apps/web');
-  if (!existsSync(path.join(webDir, 'dist-dev-messaging', 'index.html'))) {
-    throw new Error('Run `pnpm --filter @tessera/web build:dev-messaging` before the E2E tests.');
+  if (!existsSync(path.join(webDir, 'dist', 'index.html'))) {
+    throw new Error('Run `pnpm build` before the E2E tests.');
   }
   const web = start(
     'pnpm',
-    ['exec', 'vite', 'preview', '--host', 'localhost', '--outDir', 'dist-dev-messaging'],
+    ['exec', 'vite', 'preview', '--host', 'localhost'],
     {
       TESSERA_API_URL: `http://127.0.0.1:${API_PORT}`,
       TESSERA_REALTIME_URL: 'ws://127.0.0.1:58081',

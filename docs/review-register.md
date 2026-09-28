@@ -4,6 +4,14 @@ Status: OPEN. An ADR cannot be ACCEPTED while one of its items here is open.
 
 ## 1. Specialist security / cryptography review (S-items)
 
+**Ready for review (Phase 4).** S-01..S-04 now have working code to review:
+`packages/crypto-core` (Rust: `client.rs` trust checks and group handling, `identity.rs`
+certificates, `safety.rs`, `padding.rs`, fuzz targets), `apps/web/src/crypto` (worker, encrypted
+local store), `apps/web/src/messaging/e2ee.ts` (group creation, membership sync, key-change
+handling), `services/api/src/modules/keys` and the commit/Welcome paths in
+`services/api/src/modules/messaging`. Deviations from the design are listed in
+[crypto-design.md §0](crypto-design.md) and ADR-039..041. Nothing ships to users before sign-off.
+
 | ID | Item | Blocks | Why it needs a specialist |
 |---|---|---|---|
 | **S-01** | Protocol choice (MLS/OpenMLS vs libsignal vs others), OpenMLS version & crypto provider (RustCrypto vs libcrux), use of PublicMessage for handshakes, DS rules | ADR-004, Phase 4 | Foundational; errors here compromise all private content |

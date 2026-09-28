@@ -1,0 +1,32 @@
+name: Fuzz crypto core
+
+# Continuous fuzzing of every parser that handles bytes from the server or other clients
+# (docs/crypto-design.md §11). Nightly, plus on demand.
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [certificate, padding, snapshot, inbound]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Nightly toolchain and cargo-fuzz
+        run: |
+          rustup toolchain install nightly --profile minimal
+          cargo install cargo-fuzz --locked
+      - name: Fuzz for 30 minutes
+        working-directory: packages/crypto-core
+        run: cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=1800

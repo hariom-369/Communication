@@ -5,7 +5,8 @@ import { z } from 'zod';
  * Control messages (reactions, edits, deletions, read markers) are ordinary messages in the
  * conversation, so they are protected and ordered exactly like text (docs/messaging.md §6).
  *
- * Phase 4 moves this model into the Protobuf envelope carried by MLS (docs/crypto-design.md §9).
+ * Encoded as JSON inside the MLS application message, then padded to a size bucket by the crypto
+ * core (docs/crypto-design.md §9; ADR-039 records why JSON rather than Protobuf for now).
  */
 export const MAX_TEXT_LENGTH = 16_000;
 
@@ -39,14 +40,3 @@ export const contentSchema = z.object({
 });
 export type MessageContent = z.infer<typeof contentSchema>;
 export type MessageBody = MessageContent['body'];
-
-/** Turns content into transport bytes and back. Implementations must never throw on decode. */
-export interface MessageCodec {
-  /** Stable identifier (used in diagnostics and the production bundle check). */
-  readonly name: string;
-  readonly ciphersuite: number;
-  /** True when content is NOT end-to-end encrypted (development codec). */
-  readonly unprotected: boolean;
-  encode(content: MessageContent): Promise<string>;
-  decode(ciphertext: string): Promise<MessageContent | null>;
-}

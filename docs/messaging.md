@@ -2,6 +2,20 @@
 
 Status: Phase 3 IMPLEMENTED (transport; E2EE in Phase 4) · Decisions: ADR-008, 009, 010, 020, 028, 036, 038 · Transport: [realtime.md](realtime.md)
 
+## 0a. Phase 4 changes
+
+- Payloads are MLS messages (ADR-004/041): `kind` = `application` (PrivateMessage) or `commit`
+  (PublicMessage), attributed to the sending device (`senderDeviceId`, which must be one of the
+  sender's active devices).
+- Commits: `POST /api/v1/conversations/{id}/commits`, accepted only for the current epoch
+  (compare-and-set, 409 otherwise); Welcomes are stored per target device
+  (`GET /api/v1/welcomes`, `DELETE /api/v1/welcomes/{id}`).
+- Application messages must use the conversation's current epoch; on 409 the client processes
+  the new commit and re-encrypts.
+- History is stored decrypted on the device (encrypted at rest) and shown from there; the
+  server's copy is only for delivery. "Load earlier messages from the server" was removed.
+- The development plaintext codec (ADR-038) is gone; ciphersuite 0 is rejected everywhere.
+
 ## 0. Phase 3 implementation status
 
 Implemented in `services/api` (`messaging` module, migration `0003_messaging.sql`) and

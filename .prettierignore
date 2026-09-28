@@ -7,4 +7,6 @@ docs
 services/api/openapi.json
 test-results
 playwright-report
-dist-dev-messaging
+packages/crypto-core/pkg
+packages/crypto-core/target
+packages/crypto-core/fuzz/target

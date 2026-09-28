@@ -4,6 +4,10 @@
 
 - Node.js 24 LTS (`.nvmrc`; ≥ 22.12 works for local development) and pnpm 10 (`corepack enable`).
 - Docker (for local PostgreSQL 17 and Valkey 8).
+- Rust via rustup: the crypto core pins its toolchain and the `wasm32-unknown-unknown` target in
+  `packages/crypto-core/rust-toolchain.toml` (installed automatically on first build), plus the
+  matching WebAssembly bindings generator:
+  `cargo install wasm-bindgen-cli --version 0.2.129 --locked`.
 
 ## Setup
 
@@ -24,9 +28,9 @@ cp services/realtime/.env.example services/realtime/.env   # local only
 | `pnpm openapi` | regenerate `services/api/openapi.json` (CI fails if it is stale) |
 | `pnpm --filter @tessera/web dev` | web app with hot reload on http://localhost:5173 (proxies `/api` to :8080 and `/rt` to :8081) |
 | `pnpm --filter @tessera/realtime start` | realtime WebSocket service on :8081 (after `pnpm build`) |
-| `pnpm --filter @tessera/web build:dev-messaging` | web build **with** the development (unencrypted) chat, into `dist-dev-messaging/` — never deploy it (ADR-038) |
-| `pnpm --filter @tessera/web verify:bundle` | fails if the production bundle contains development-only messaging code (run after `pnpm build`) |
-| `pnpm --filter @tessera/web test:e2e` | end-to-end tests: starts API + realtime + SMTP capture and serves the `dist-dev-messaging` build (needs the `TEST_*` variables; run `pnpm build` and `build:dev-messaging` first) |
+| `pnpm --filter @tessera/crypto-core lint` | `rustfmt --check` and `clippy -D warnings` for native and wasm32 targets (`pnpm test` runs `cargo test`) |
+| `cargo +nightly fuzz run <target>` (in `packages/crypto-core`) | fuzz `certificate`, `padding`, `snapshot` or `inbound` (needs `cargo install cargo-fuzz`; CI fuzzes nightly) |
+| `pnpm --filter @tessera/web test:e2e` | end-to-end tests: starts API + realtime + SMTP capture and serves the production build (needs the `TEST_*` variables; run `pnpm build` first) |
 | `pnpm --filter @tessera/api migrate` | apply database migrations (after `pnpm build`) |
 
 Integration tests need these variables and **fail rather than skip** without them:
@@ -38,9 +42,9 @@ export TEST_VALKEY_URL=redis://localhost:6379
 
 Locally, Mailpit (in the compose file) shows every email at http://127.0.0.1:8025.
 
-To try chat locally, set `MESSAGING_DEV_PLAINTEXT=true` in `services/api/.env` (rejected in
-production) and run the web app with `VITE_DEV_PLAINTEXT_MESSAGING=true`. Every screen then shows
-a "not end-to-end encrypted" banner.
+Chats are end-to-end encrypted in every build. To try them locally, use two browser profiles
+(each keeps its own encryption keys in IndexedDB). Changes to `packages/crypto-core` or to
+`docs/crypto-design.md` need review by the cryptography code owner.
 
 ## Adding an API endpoint
 

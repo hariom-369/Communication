@@ -42,6 +42,8 @@ export default tseslint.config(
     ignores: [
       '**/dist/**',
       '**/dist-*/**',
+      '**/pkg/**',
+      '**/target/**',
       '**/coverage/**',
       '**/.turbo/**',
       '**/node_modules/**',

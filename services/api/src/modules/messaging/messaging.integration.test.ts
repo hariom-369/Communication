@@ -13,6 +13,7 @@ import { sql } from 'kysely';
 import { Redis } from 'ioredis';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { registerDevice } from '../../test/devices.js';
 import { requireEnv } from '../../test/integration-env.js';
 import {
   createActiveUser,
@@ -40,16 +41,21 @@ afterAll(async () => {
   await env.close();
 });
 
-type User = Awaited<ReturnType<typeof createActiveUser>> & { id: string };
+type User = Awaited<ReturnType<typeof createActiveUser>> & { id: string; deviceId: string };
+
+/** Each test client's registered encryption device. */
+const devices = new Map<TestClient, string>();
 
 async function user(): Promise<User> {
   const created = await createActiveUser(env);
   const me = (await created.client.get('/api/v1/accounts/me')).json<{ id: string }>();
-  return { ...created, id: me.id };
+  const deviceId = await registerDevice(created.client, me.id);
+  devices.set(created.client, deviceId);
+  return { ...created, id: me.id, deviceId };
 }
 
 async function openDirect(from: TestClient, username: string): Promise<Conversation> {
-  const response = await from.post('/api/v1/conversations/direct', { username, ciphersuite: 0 });
+  const response = await from.post('/api/v1/conversations/direct', { username, ciphersuite: 1 });
   expect(response.statusCode, response.body).toBe(200);
   return conversationSchema.parse(response.json());
 }
@@ -59,10 +65,16 @@ const ciphertext = (bytes = 32) => randomBytes(bytes).toString('base64');
 async function send(
   client: TestClient,
   conversationId: string,
-  body: { clientMessageId?: string; epoch?: number; ciphertext?: string } = {},
+  body: {
+    clientMessageId?: string;
+    epoch?: number;
+    ciphertext?: string;
+    senderDeviceId?: string;
+  } = {},
 ) {
   return client.post(`/api/v1/conversations/${conversationId}/messages`, {
     clientMessageId: body.clientMessageId ?? newId(),
+    senderDeviceId: body.senderDeviceId ?? devices.get(client),
     epoch: body.epoch ?? 0,
     ciphertext: body.ciphertext ?? ciphertext(),
   });
@@ -92,7 +104,7 @@ describe("'messaging.open_direct'", () => {
     expect(fromAlice.members.map((m) => m.username).sort()).toEqual(
       [alice.username, bob.username].sort(),
     );
-    expect(fromAlice).toMatchObject({ kind: 'direct', ciphersuite: 0, epoch: 0, lastSeq: 0 });
+    expect(fromAlice).toMatchObject({ kind: 'direct', ciphersuite: 1, epoch: 0, lastSeq: 0 });
     expect(await eventsFor(bob.id, 'conversation')).toEqual([
       { type: 'conversation', conversationId: fromAlice.id },
     ]);
@@ -118,23 +130,28 @@ describe("'messaging.open_direct'", () => {
     for (const username of [alice.username, 'nobody_by_this_name', hidden.username]) {
       const response = await alice.client.post('/api/v1/conversations/direct', {
         username,
-        ciphersuite: 0,
+        ciphersuite: 1,
       });
       expect(response.json(), username).toMatchObject({ code: 'NOT_FOUND', status: 404 });
     }
   });
 
-  it('rejects ciphersuites the server does not support', async () => {
+  it('rejects ciphersuites the server does not support, including the old unprotected one', async () => {
     const alice = await user();
     const bob = await user();
     const response = await alice.client.post('/api/v1/conversations/direct', {
       username: bob.username,
-      ciphersuite: 1,
+      ciphersuite: 0x004d,
     });
     expect(response.json()).toMatchObject({
       code: 'BAD_REQUEST',
       detail: 'Unsupported ciphersuite.',
     });
+    const unprotected = await alice.client.post('/api/v1/conversations/direct', {
+      username: bob.username,
+      ciphersuite: 0,
+    });
+    expect(unprotected.statusCode).toBe(400);
   });
 });
 
@@ -424,15 +441,23 @@ describe("'realtime.ticket' and 'realtime.presence'", () => {
     const columns = await sql<{ table_name: string; column_name: string; data_type: string }>`
       SELECT table_name, column_name, data_type FROM information_schema.columns
       WHERE table_schema = 'public'
-        AND table_name IN ('conversations', 'conversation_members', 'direct_pairs', 'mailbox_messages')
+        AND table_name IN ('conversations', 'conversation_members', 'direct_pairs', 'mailbox_messages',
+                           'mls_welcomes', 'account_keys', 'devices', 'key_packages')
         AND data_type IN ('text', 'character varying', 'json', 'jsonb', 'bytea')
       ORDER BY table_name, column_name`.execute(env.db);
     // Only two CHECK-constrained enums are text; the single payload column is bytea, never
     // parsed by the server. A new text/json column here must be justified in review.
     expect(columns.rows).toEqual([
+      { table_name: 'account_keys', column_name: 'public_key', data_type: 'bytea' },
       { table_name: 'conversation_members', column_name: 'role', data_type: 'text' },
       { table_name: 'conversations', column_name: 'kind', data_type: 'text' },
+      // Public key material only (Ed25519 public keys, signed certificates, KeyPackages).
+      { table_name: 'devices', column_name: 'certificate', data_type: 'bytea' },
+      { table_name: 'devices', column_name: 'signature_key', data_type: 'bytea' },
+      { table_name: 'key_packages', column_name: 'key_package', data_type: 'bytea' },
       { table_name: 'mailbox_messages', column_name: 'ciphertext', data_type: 'bytea' },
+      // MLS Welcome: encrypted to the invited device's KeyPackage (RFC 9420 §12.4.3.1).
+      { table_name: 'mls_welcomes', column_name: 'welcome', data_type: 'bytea' },
     ]);
   });
 });

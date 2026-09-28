@@ -51,9 +51,16 @@ describe('PasswordHasher', () => {
       return performance.now() - start;
     };
     await hasher.burn('warm up');
-    const real = await time(() => hasher.verify('guess-guess-guess', stored));
-    const burned = await time(() => hasher.burn('guess-guess-guess'));
-    expect(burned).toBeGreaterThan(real * 0.5);
+    // Interleaved samples compared by median, so a burst of CPU contention from other processes
+    // (e.g. parallel test suites) affects both sides alike instead of skewing one measurement.
+    const real: number[] = [];
+    const burned: number[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      real.push(await time(() => hasher.verify('guess-guess-guess', stored)));
+      burned.push(await time(() => hasher.burn('guess-guess-guess')));
+    }
+    const median = (values: number[]) => [...values].sort((a, b) => a - b)[2]!;
+    expect(median(burned)).toBeGreaterThan(median(real) * 0.5);
   });
 
   it('rejects malformed pepper configuration', () => {

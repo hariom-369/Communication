@@ -4,7 +4,6 @@ import { createBrowserRouter, Navigate, RouterProvider, useLocation } from 'reac
 
 import { AppShell } from './components/AppShell.js';
 import { HOME_PATH } from './home.js';
-import { activeCodec } from './messaging/codec.js';
 import { MessagingProvider } from './messaging/provider.js';
 import { ChatsPage } from './pages/chats/ChatsPage.js';
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage.js';
@@ -131,12 +130,8 @@ const router = createBrowserRouter([
       { path: '/settings/security', element: <SecurityPage /> },
       { path: '/settings/privacy', element: <PrivacyPage /> },
       { path: '/settings/account', element: <AccountPage /> },
-      ...(activeCodec === null
-        ? []
-        : [
-            { path: '/chats', element: <ChatsPage /> },
-            { path: '/chats/:conversationId', element: <ChatsPage /> },
-          ]),
+      { path: '/chats', element: <ChatsPage /> },
+      { path: '/chats/:conversationId', element: <ChatsPage /> },
     ],
   },
   { path: '*', element: <NotFoundPage /> },

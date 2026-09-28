@@ -1,9 +1,10 @@
 import { AppError, type Logger } from '@tessera/platform';
 import { newId } from '@tessera/shared';
 import {
-  DEV_PLAINTEXT_CIPHERSUITE,
+  SUPPORTED_CIPHERSUITES,
   type Conversation,
   type MailboxMessage,
+  type WelcomeMessage,
 } from '@tessera/validation';
 import { sql, type Kysely, type Transaction } from 'kysely';
 
@@ -20,13 +21,19 @@ import type { RealtimePublisher } from '../../platform/realtime-publisher.js';
  * - authorization: every read and write checks current membership;
  * - retention: ciphertext is deleted when every member acknowledged it or after the retention
  *   window (or the disappearing timer, if shorter).
- * The server never interprets `ciphertext`.
+ * - MLS delivery service (ADR-009, crypto-design §5): commits are accepted only for the
+ *   conversation's current epoch (compare-and-set) and advance it; Welcomes are held per target
+ *   device until acknowledged.
+ * The server never interprets `ciphertext`, commits or Welcomes; it cannot decrypt them.
  */
 
 export interface MessagingConfig {
-  /** Accept ciphersuite 0 (unprotected). Development only; production config forbids it. */
-  readonly allowDevPlaintext: boolean;
   readonly retentionDays: number;
+}
+
+/** Device checks, provided by the keys module. */
+export interface MessagingDevices {
+  isActiveDevice(userId: string, deviceId: string): Promise<boolean>;
 }
 
 export interface MessagingDirectory {
@@ -72,6 +79,7 @@ export class MessagingService {
   readonly #publisher: RealtimePublisher;
   readonly #config: MessagingConfig;
   readonly #logger: Logger;
+  #devices: MessagingDevices | null = null;
 
   constructor(
     db: Kysely<Database>,
@@ -87,9 +95,18 @@ export class MessagingService {
     this.#logger = logger;
   }
 
+  /** Wired by the composition root (keys and messaging depend on each other's interfaces). */
+  useDevices(devices: MessagingDevices): void {
+    this.#devices = devices;
+  }
+
+  async #requireActiveDevice(userId: string, deviceId: string): Promise<void> {
+    if (this.#devices === null || !(await this.#devices.isActiveDevice(userId, deviceId)))
+      throw new AppError('FORBIDDEN', { detail: 'This device is not registered for encryption.' });
+  }
+
   #assertCiphersuite(ciphersuite: number): void {
-    if (ciphersuite === DEV_PLAINTEXT_CIPHERSUITE && this.#config.allowDevPlaintext) return;
-    // Phase 3 supports no real suites yet; MLS suites are added in Phase 4.
+    if (SUPPORTED_CIPHERSUITES.includes(ciphersuite)) return;
     throw new AppError('BAD_REQUEST', { detail: 'Unsupported ciphersuite.' });
   }
 
@@ -203,8 +220,9 @@ export class MessagingService {
   async send(
     userId: string,
     conversationId: string,
-    input: { clientMessageId: string; epoch: number; ciphertext: Buffer },
+    input: { clientMessageId: string; senderDeviceId: string; epoch: number; ciphertext: Buffer },
   ): Promise<{ message: MailboxMessage; duplicate: boolean }> {
+    await this.#requireActiveDevice(userId, input.senderDeviceId);
     const result = await this.#db.transaction().execute(async (trx) => {
       const conversation = await this.#lockMembership(trx, userId, conversationId);
       const existing = await trx
@@ -233,8 +251,10 @@ export class MessagingService {
         .values({
           conversation_id: conversationId,
           seq,
+          kind: 1,
           client_message_id: input.clientMessageId,
           sender_user_id: userId,
+          sender_device_id: input.senderDeviceId,
           epoch: input.epoch,
           ciphertext: input.ciphertext,
           created_at: now,
@@ -263,6 +283,146 @@ export class MessagingService {
       this.#publisher.publish(members, { type: 'message', conversationId, message });
     }
     return { message, duplicate: result.duplicate };
+  }
+
+  /**
+   * Appends an MLS commit if `epoch` is the conversation's current epoch, advancing it
+   * (compare-and-set, ADR-009); otherwise 409 and the client processes the winning commit and
+   * re-bases. Welcomes for added devices are stored per target device.
+   */
+  async commit(
+    userId: string,
+    conversationId: string,
+    input: {
+      clientMessageId: string;
+      senderDeviceId: string;
+      epoch: number;
+      commit: Buffer;
+      welcome: Buffer | null;
+      welcomeTargets: readonly { userId: string; deviceId: string }[];
+    },
+  ): Promise<{ message: MailboxMessage; epoch: number; duplicate: boolean }> {
+    await this.#requireActiveDevice(userId, input.senderDeviceId);
+    if ((input.welcome === null) !== (input.welcomeTargets.length === 0))
+      throw new AppError('BAD_REQUEST', {
+        detail: 'A welcome needs targets, and targets a welcome.',
+      });
+    const members = await this.#memberIds(this.#db, conversationId);
+    for (const target of input.welcomeTargets) {
+      if (
+        !members.includes(target.userId) ||
+        this.#devices === null ||
+        !(await this.#devices.isActiveDevice(target.userId, target.deviceId))
+      )
+        throw new AppError('BAD_REQUEST', { detail: 'Welcome target is not a member device.' });
+    }
+
+    const result = await this.#db.transaction().execute(async (trx) => {
+      const conversation = await this.#lockMembership(trx, userId, conversationId);
+      const existing = await trx
+        .selectFrom('mailbox_messages')
+        .selectAll()
+        .where('conversation_id', '=', conversationId)
+        .where('sender_user_id', '=', userId)
+        .where('client_message_id', '=', input.clientMessageId)
+        .executeTakeFirst();
+      if (existing !== undefined) {
+        if (existing.kind !== 2) throw new AppError('CONFLICT', { detail: 'Id already used.' });
+        return { row: existing, epoch: Number(existing.epoch) + 1, duplicate: true };
+      }
+      if (input.epoch !== Number(conversation.epoch)) {
+        throw new AppError('CONFLICT', {
+          detail: 'Another change to this conversation was accepted first.',
+        });
+      }
+      const seq = Number(conversation.last_seq) + 1;
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + this.#config.retentionDays * DAY_MS);
+      const row = await trx
+        .insertInto('mailbox_messages')
+        .values({
+          conversation_id: conversationId,
+          seq,
+          kind: 2,
+          client_message_id: input.clientMessageId,
+          sender_user_id: userId,
+          sender_device_id: input.senderDeviceId,
+          epoch: input.epoch,
+          ciphertext: input.commit,
+          created_at: now,
+          expires_at: expiresAt,
+        })
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      await trx
+        .updateTable('conversations')
+        .set({ last_seq: seq, epoch: input.epoch + 1 })
+        .where('id', '=', conversationId)
+        .execute();
+      await trx
+        .updateTable('conversation_members')
+        .set({ acked_seq: seq })
+        .where('conversation_id', '=', conversationId)
+        .where('user_id', '=', userId)
+        .execute();
+      if (input.welcome !== null && input.welcomeTargets.length > 0) {
+        const welcome = input.welcome;
+        await trx
+          .insertInto('mls_welcomes')
+          .values(
+            input.welcomeTargets.map((target) => ({
+              id: newId(),
+              conversation_id: conversationId,
+              target_user_id: target.userId,
+              target_device_id: target.deviceId,
+              commit_seq: seq,
+              welcome,
+              created_at: now,
+              expires_at: expiresAt,
+            })),
+          )
+          .execute();
+      }
+      return { row, epoch: input.epoch + 1, duplicate: false };
+    });
+
+    const message = toMessage(result.row);
+    if (!result.duplicate) {
+      this.#publisher.publish(members, { type: 'message', conversationId, message });
+      const targets = [...new Set(input.welcomeTargets.map((target) => target.userId))];
+      if (targets.length > 0) this.#publisher.publish(targets, { type: 'welcome', conversationId });
+    }
+    return { message, epoch: result.epoch, duplicate: result.duplicate };
+  }
+
+  /** Welcomes waiting for one of the caller's devices. */
+  async welcomes(userId: string, deviceId: string): Promise<WelcomeMessage[]> {
+    await this.#requireActiveDevice(userId, deviceId);
+    const rows = await this.#db
+      .selectFrom('mls_welcomes')
+      .select(['id', 'conversation_id', 'commit_seq', 'welcome'])
+      .where('target_user_id', '=', userId)
+      .where('target_device_id', '=', deviceId)
+      .where('expires_at', '>', new Date())
+      .orderBy('created_at', 'asc')
+      .limit(100)
+      .execute();
+    return rows.map((row) => ({
+      id: row.id,
+      conversationId: row.conversation_id,
+      commitSeq: Number(row.commit_seq),
+      welcome: row.welcome.toString('base64'),
+    }));
+  }
+
+  /** The device processed (or permanently rejected) a Welcome: delete it. */
+  async acknowledgeWelcome(userId: string, welcomeId: string): Promise<void> {
+    const deleted = await this.#db
+      .deleteFrom('mls_welcomes')
+      .where('id', '=', welcomeId)
+      .where('target_user_id', '=', userId)
+      .executeTakeFirst();
+    if (Number(deleted.numDeletedRows) === 0) throw new AppError('NOT_FOUND');
   }
 
   async messages(
@@ -349,6 +509,21 @@ export class MessagingService {
     return this.get(userId, conversationId);
   }
 
+  /** Users who share an active conversation with `userId`. */
+  async contactsOf(userId: string): Promise<string[]> {
+    const rows = await this.#db
+      .selectFrom('conversation_members as mine')
+      .innerJoin('conversation_members as other', 'other.conversation_id', 'mine.conversation_id')
+      .select('other.user_id')
+      .distinct()
+      .where('mine.user_id', '=', userId)
+      .where('mine.left_at', 'is', null)
+      .where('other.left_at', 'is', null)
+      .where('other.user_id', '!=', userId)
+      .execute();
+    return rows.map((row) => row.user_id);
+  }
+
   /** True if the two users share an active conversation ("contacts" for privacy purposes). */
   async areContacts(userA: string, userB: string): Promise<boolean> {
     const [low, high] = userA < userB ? [userA, userB] : [userB, userA];
@@ -406,6 +581,11 @@ export class MessagingService {
       total += n;
       if (n < SWEEP_BATCH) break;
     }
+    const welcomes = await this.#db
+      .deleteFrom('mls_welcomes')
+      .where('expires_at', '<=', new Date())
+      .executeTakeFirst();
+    total += Number(welcomes.numDeletedRows);
     if (total > 0) this.#logger.info('messaging.sweep', { count: total });
     return total;
   }
@@ -500,8 +680,10 @@ export class MessagingService {
 
 function toMessage(row: {
   seq: string;
+  kind: 1 | 2;
   client_message_id: string;
   sender_user_id: string;
+  sender_device_id: string | null;
   epoch: string;
   ciphertext: Buffer;
   created_at: Date;
@@ -509,8 +691,10 @@ function toMessage(row: {
 }): MailboxMessage {
   return {
     seq: Number(row.seq),
+    kind: row.kind === 2 ? 'commit' : 'application',
     clientMessageId: row.client_message_id,
     senderUserId: row.sender_user_id,
+    senderDeviceId: row.sender_device_id ?? '',
     epoch: Number(row.epoch),
     ciphertext: row.ciphertext.toString('base64'),
     serverTime: row.created_at.toISOString(),

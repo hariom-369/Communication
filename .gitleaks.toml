@@ -1,0 +1,7 @@
+# gitleaks configuration: the default rules, plus one narrowly scoped exception.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Cargo lockfiles contain only crate names, versions and registry checksums (e.g. the crate name 'libcrux-secrets' matches the generic-api-key rule)."
+paths = ['''(^|/)Cargo\.lock$''']

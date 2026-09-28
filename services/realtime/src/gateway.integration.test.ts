@@ -132,7 +132,7 @@ async function createUser(): Promise<{ userId: string; sessionId: string }> {
 async function createConversation(memberIds: string[]): Promise<string> {
   const id = randomUUID();
   await db.query(
-    `INSERT INTO conversations (id, kind, ciphersuite, created_by) VALUES ($1, 'direct', 0, $2)`,
+    `INSERT INTO conversations (id, kind, ciphersuite, created_by) VALUES ($1, 'direct', 1, $2)`,
     [id, memberIds[0]],
   );
   for (const member of memberIds) {
@@ -244,8 +244,10 @@ async function waitForSubscribers(userId: string, count: number): Promise<void> 
 
 const sampleMessage = (seq: number) => ({
   seq,
+  kind: 'application' as const,
   clientMessageId: randomUUID(),
   senderUserId: randomUUID(),
+  senderDeviceId: randomUUID(),
   epoch: 0,
   ciphertext: 'AAAA',
   serverTime: new Date().toISOString(),

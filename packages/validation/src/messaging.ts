@@ -8,17 +8,28 @@ import { idSchema } from './common.js';
  */
 
 /**
- * Ciphersuite of a conversation. `0` = no protection, **development only**: the API refuses it
- * unless MESSAGING_DEV_PLAINTEXT is enabled, which production configuration forbids. Real suites
- * (MLS, ADR-004/005) are introduced in Phase 4.
+ * MLS ciphersuite of a conversation (RFC 9420 registry value). Phase 4 supports only the
+ * mandatory baseline suite 0x0001, MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519
+ * (docs/crypto-design.md §2); the hybrid post-quantum suite waits on review S-02.
  */
-export const DEV_PLAINTEXT_CIPHERSUITE = 0;
-export const ciphersuiteSchema = z.number().int().min(0).max(0xffff);
+export const MLS_CIPHERSUITE = 0x0001;
+export const SUPPORTED_CIPHERSUITES: readonly number[] = [MLS_CIPHERSUITE];
+export const ciphersuiteSchema = z.number().int().min(1).max(0xffff);
 
 /** Maximum ciphertext size per message (docs/messaging.md §8). Media travels as blobs. */
 export const MAX_CIPHERTEXT_BYTES = 64 * 1024;
 
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+
+/** Base64 bytes with a decoded-size bound. */
+export function base64Bytes(maxBytes: number, minBytes = 1): z.ZodString {
+  return z
+    .string()
+    .min(Math.ceil(minBytes / 3) * 4)
+    .max(Math.ceil(maxBytes / 3) * 4)
+    .regex(BASE64, { message: 'Must be base64' });
+}
+
 export const ciphertextSchema = z
   .string()
   .min(4)
@@ -71,9 +82,50 @@ export const conversationListSchema = z.object({
 export const sendMessageSchema = z.strictObject({
   /** Client-generated UUIDv7; resending with the same id is idempotent. */
   clientMessageId: idSchema,
+  /** The caller's device that encrypted the message (must be one of the caller's active devices). */
+  senderDeviceId: idSchema,
   epoch: z.number().int().nonnegative(),
+  /** MLS PrivateMessage. */
   ciphertext: ciphertextSchema,
 });
+
+/** Largest Welcome accepted (it carries the ratchet tree; bounded by the group-size cap). */
+export const MAX_WELCOME_BYTES = 64 * 1024;
+
+/**
+ * MLS commit for the delivery service (ADR-009): accepted only if `epoch` equals the
+ * conversation's current epoch (compare-and-set), otherwise 409 and the client re-bases.
+ */
+export const commitSchema = z.strictObject({
+  clientMessageId: idSchema,
+  senderDeviceId: idSchema,
+  epoch: z.number().int().nonnegative(),
+  /** MLS PublicMessage containing the Commit. */
+  commit: ciphertextSchema,
+  /** Welcome for the devices this commit adds, delivered to each of `welcomeTargets`. */
+  welcome: base64Bytes(MAX_WELCOME_BYTES).nullable(),
+  welcomeTargets: z.array(z.strictObject({ userId: idSchema, deviceId: idSchema })).max(100),
+});
+
+export const commitResponseSchema = z.object({
+  seq: z.number().int().positive(),
+  /** The conversation's epoch after this commit. */
+  epoch: z.number().int().positive(),
+  serverTime: z.iso.datetime(),
+  duplicate: z.boolean(),
+});
+
+export const welcomeSchema = z.object({
+  id: z.string(),
+  conversationId: z.string(),
+  /** Sequence number of the commit that added this device: history before it is not readable. */
+  commitSeq: z.number().int().positive(),
+  welcome: z.string(),
+});
+export type WelcomeMessage = z.infer<typeof welcomeSchema>;
+
+export const welcomeListQuerySchema = z.strictObject({ deviceId: idSchema });
+export const welcomeListSchema = z.object({ welcomes: z.array(welcomeSchema) });
 
 export const sendMessageResponseSchema = z.object({
   seq: z.number().int().positive(),
@@ -83,8 +135,11 @@ export const sendMessageResponseSchema = z.object({
 
 export const mailboxMessageSchema = z.object({
   seq: z.number().int().positive(),
+  /** `commit` messages are MLS handshakes every member device must process in order. */
+  kind: z.enum(['application', 'commit']),
   clientMessageId: z.string(),
   senderUserId: z.string(),
+  senderDeviceId: z.string(),
   epoch: z.number().int().nonnegative(),
   ciphertext: z.string(),
   serverTime: z.iso.datetime(),

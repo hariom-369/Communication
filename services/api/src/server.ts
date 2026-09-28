@@ -91,7 +91,10 @@ async function main(): Promise<void> {
     intervalMs: 5 * 60_000,
     pool: database.pool,
     logger,
-    task: () => modules.messaging.sweep(),
+    task: async () => {
+      await modules.messaging.sweep();
+      await modules.keys.sweep();
+    },
   });
   lifecycle.onShutdown({ name: 'mailbox_sweeper', run: () => sweeper.stop() });
 

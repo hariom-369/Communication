@@ -2,10 +2,10 @@ import { Alert } from '@tessera/ui';
 import type { ReactNode } from 'react';
 import { useParams } from 'react-router';
 
-import { activeCodec } from '../../messaging/codec.js';
 import { useMessaging } from '../../messaging/provider.js';
 
 import { ConversationList } from './ConversationList.js';
+import { EncryptionSetup } from './EncryptionSetup.js';
 import { ConversationView } from './ConversationView.js';
 
 /**
@@ -19,14 +19,16 @@ export function ChatsPage(): ReactNode {
     (conversation) => conversation.meta.id === conversationId,
   );
 
+  if (snapshot.device !== 'ready')
+    return (
+      <div className="chats chats--setup">
+        <h1>Chats</h1>
+        <EncryptionSetup status={snapshot.device} />
+      </div>
+    );
+
   return (
     <div className={conversationId === undefined ? 'chats' : 'chats chats--open'}>
-      {activeCodec?.unprotected === true ? (
-        <div className="dev-banner" role="note">
-          <strong>Development build.</strong> Messages in this build are <strong>not</strong>{' '}
-          end-to-end encrypted.
-        </div>
-      ) : null}
       {conversationId === undefined ? null : (
         // On phones the chat list (and its heading) is hidden while a conversation is open.
         <h1 className="visually-hidden chats__mobile-heading">Chats</h1>

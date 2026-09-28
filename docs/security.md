@@ -42,6 +42,12 @@ X-Frame-Options: DENY                               (legacy)
 Cache-Control: no-store                            (all authenticated API responses)
 ```
 
+Web app, as implemented (Phase 4, `apps/web/vite.config.ts`): `script-src 'self'
+'wasm-unsafe-eval'` (WebAssembly compilation for the crypto worker; no `unsafe-eval`),
+`worker-src 'self'`, `connect-src 'self'` (API and realtime share the origin, ADR-033), and
+Trusted Types with exactly one policy, `tessera-worker`, which only produces same-origin script
+URLs for the crypto worker.
+
 ## 4. Input validation and output encoding
 
 - All inputs validated with Zod at the edge of the API (strict objects — unknown keys

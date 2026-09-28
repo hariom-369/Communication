@@ -32,7 +32,7 @@ function preview(conversation: ConversationView): string {
     const message = conversation.timeline.byId[conversation.timeline.order[i] ?? ''];
     if (message === undefined) continue;
     if (message.deleted) return 'Message deleted';
-    if (message.undecodable) return 'Unsupported message';
+    if (message.undecodable) return 'Message couldn’t be decrypted';
     return message.text;
   }
   return 'No messages yet';

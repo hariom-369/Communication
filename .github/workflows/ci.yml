@@ -16,7 +16,7 @@ jobs:
   verify:
     name: Format, lint, typecheck, build, unit tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -26,13 +26,18 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
+      - name: Rust toolchain (pinned in packages/crypto-core/rust-toolchain.toml) and wasm-bindgen
+        working-directory: packages/crypto-core
+        run: |
+          rustup show active-toolchain
+          cargo install wasm-bindgen-cli --version 0.2.129 --locked
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm build
-      - name: Production web bundle contains no development messaging code
-        run: pnpm --filter @tessera/web verify:bundle
+      - name: Crypto core lint (rustfmt, clippy native + wasm32)
+        run: pnpm --filter @tessera/crypto-core lint
       - run: pnpm test
       - name: OpenAPI contract is up to date
         run: |
@@ -42,7 +47,7 @@ jobs:
   integration:
     name: Integration tests (PostgreSQL + Valkey)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:17-alpine
@@ -72,6 +77,11 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
+      - name: Rust toolchain (pinned in packages/crypto-core/rust-toolchain.toml) and wasm-bindgen
+        working-directory: packages/crypto-core
+        run: |
+          rustup show active-toolchain
+          cargo install wasm-bindgen-cli --version 0.2.129 --locked
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:integration
 
@@ -108,9 +118,13 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
+      - name: Rust toolchain (pinned in packages/crypto-core/rust-toolchain.toml) and wasm-bindgen
+        working-directory: packages/crypto-core
+        run: |
+          rustup show active-toolchain
+          cargo install wasm-bindgen-cli --version 0.2.129 --locked
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm --filter @tessera/web build:dev-messaging
       - run: pnpm --filter @tessera/web exec playwright install --with-deps chromium
       - run: pnpm --filter @tessera/web test:e2e
 
