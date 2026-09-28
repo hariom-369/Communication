@@ -1,0 +1,25 @@
+{
+  "name": "@tessera/realtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@tessera/platform": "workspace:*",
+    "@tessera/validation": "workspace:*",
+    "ioredis": "6.0.0",
+    "pg": "8.23.0",
+    "ws": "8.22.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1",
+    "@types/ws": "8.18.1"
+  }
+}

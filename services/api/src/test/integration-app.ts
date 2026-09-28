@@ -14,7 +14,7 @@ import type { Database } from '../db/schema.js';
 import { MIGRATIONS_DIR } from '../paths.js';
 import type { EmailMessage, Mailer } from '../platform/email.js';
 import { SESSION_COOKIE } from '../platform/http/routes.js';
-import { loadMigrations, migrate } from '../platform/migrations.js';
+import { loadMigrations, migrate } from '@tessera/platform';
 import { ValkeyRateLimiter } from '../platform/rate-limit.js';
 import { createValkey } from '../platform/valkey.js';
 
@@ -57,6 +57,7 @@ export interface IntegrationApp {
   modules: Modules;
   logs: MemoryDestination;
   logger: Logger;
+  keyPrefix: string;
   close(): Promise<void>;
 }
 
@@ -84,6 +85,7 @@ export async function startIntegrationApp(): Promise<IntegrationApp> {
   const valkey = createValkey(requireEnv('TEST_VALKEY_URL'), 'tessera-it');
   await valkey.connect();
   const mailer = new RecordingMailer();
+  const keyPrefix = name.replaceAll('_', '-').slice(0, 32);
   const key = () => randomBytes(32).toString('base64');
   const modules = composeModules(
     {
@@ -97,7 +99,10 @@ export async function startIntegrationApp(): Promise<IntegrationApp> {
       SESSION_ABSOLUTE_DAYS: 90,
       BUILD_VERSION: 'it',
       BUILD_COMMIT: 'it',
-      VALKEY_KEY_PREFIX: name.replaceAll('_', '-').slice(0, 32),
+      VALKEY_KEY_PREFIX: keyPrefix,
+      MESSAGING_DEV_PLAINTEXT: true,
+      MAILBOX_RETENTION_DAYS: 30,
+      REALTIME_WS_PATH: '/rt/v1/ws',
     },
     { db, valkey, mailer, logger },
   );
@@ -121,6 +126,7 @@ export async function startIntegrationApp(): Promise<IntegrationApp> {
     modules,
     logs,
     logger,
+    keyPrefix,
     close: async () => {
       await app.close();
       await db.destroy();

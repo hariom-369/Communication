@@ -16,9 +16,12 @@ import {
   parsePepper,
   SessionService,
 } from './modules/auth/index.js';
+import { MessagingService, messagingRoutes } from './modules/messaging/index.js';
 import { metaRoutes } from './modules/meta/index.js';
+import { RealtimeService, realtimeRoutes } from './modules/realtime/index.js';
 import type { Mailer } from './platform/email.js';
 import type { RouteDefinition, SessionAuthenticator } from './platform/http/routes.js';
+import { ValkeyRealtimePublisher } from './platform/realtime-publisher.js';
 import { parseKeyring, SecretBox } from './platform/secrets.js';
 
 /**
@@ -39,6 +42,9 @@ export type ModuleConfig = Pick<
   | 'BUILD_VERSION'
   | 'BUILD_COMMIT'
   | 'VALKEY_KEY_PREFIX'
+  | 'MESSAGING_DEV_PLAINTEXT'
+  | 'MAILBOX_RETENTION_DAYS'
+  | 'REALTIME_WS_PATH'
 >;
 
 export interface ModuleInfrastructure {
@@ -52,6 +58,7 @@ export interface Modules {
   readonly routes: RouteDefinition[];
   readonly sessions: SessionAuthenticator;
   readonly audit: AuditLog;
+  readonly messaging: MessagingService;
 }
 
 const DAY_MS = 24 * 60 * 60_000;
@@ -59,10 +66,21 @@ const DAY_MS = 24 * 60 * 60_000;
 export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure): Modules {
   const audit = new AuditLog(infra.db);
   const accounts = new AccountService(infra.db, infra.mailer, audit);
-  const sessions = new SessionService(infra.db, {
-    idleMs: config.SESSION_IDLE_DAYS * DAY_MS,
-    absoluteMs: config.SESSION_ABSOLUTE_DAYS * DAY_MS,
-  });
+  const publisher = new ValkeyRealtimePublisher(
+    infra.valkey,
+    config.VALKEY_KEY_PREFIX,
+    infra.logger,
+  );
+  const sessions = new SessionService(
+    infra.db,
+    {
+      idleMs: config.SESSION_IDLE_DAYS * DAY_MS,
+      absoluteMs: config.SESSION_ABSOLUTE_DAYS * DAY_MS,
+    },
+    (userId) => {
+      publisher.publish([userId], { type: 'sessions_changed' });
+    },
+  );
   const passkeys = new PasskeyService(
     infra.db,
     new ChallengeStore(infra.valkey, config.VALKEY_KEY_PREFIX),
@@ -86,13 +104,31 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
     publicWebUrl: config.PUBLIC_WEB_URL,
   });
 
+  const messaging = new MessagingService(
+    infra.db,
+    accounts,
+    publisher,
+    {
+      allowDevPlaintext: config.MESSAGING_DEV_PLAINTEXT,
+      retentionDays: config.MAILBOX_RETENTION_DAYS,
+    },
+    infra.logger,
+  );
+  const realtime = new RealtimeService(infra.valkey, config.VALKEY_KEY_PREFIX, {
+    privacySettings: (userId) => accounts.privacySettings(userId),
+    areContacts: (a, b) => messaging.areContacts(a, b),
+  });
+
   return {
     routes: [
       ...metaRoutes({ build: { version: config.BUILD_VERSION, commit: config.BUILD_COMMIT } }),
       ...accountsRoutes({ accounts, sessions: auth, security: auth }),
       ...authRoutes({ auth, sessions, passkeys }),
+      ...messagingRoutes({ messaging }),
+      ...realtimeRoutes({ realtime, websocketPath: config.REALTIME_WS_PATH }),
     ],
     sessions,
     audit,
+    messaging,
   };
 }

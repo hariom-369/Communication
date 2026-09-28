@@ -22,3 +22,10 @@ export {
   type Logger,
   type LoggerOptions,
 } from './logger.js';
+export {
+  MigrationError,
+  loadMigrations,
+  migrate,
+  migrationsHealthCheck,
+  type Migration,
+} from './migrations.js';

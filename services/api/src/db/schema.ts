@@ -133,6 +133,44 @@ export interface AuditLogTable {
   hash: Buffer;
 }
 
+export interface ConversationsTable {
+  id: string;
+  kind: 'direct';
+  ciphersuite: number;
+  epoch: ColumnType<string, number | undefined, number>;
+  last_seq: ColumnType<string, number | undefined, number>;
+  last_activity_at: Timestamp;
+  disappearing_seconds: ColumnType<number, number | undefined, number>;
+  created_by: string;
+  created_at: Timestamp;
+}
+
+export interface ConversationMembersTable {
+  conversation_id: string;
+  user_id: string;
+  role: 'owner' | 'member';
+  acked_seq: ColumnType<string, number | undefined, number>;
+  joined_at: Timestamp;
+  left_at: NullableTimestamp;
+}
+
+export interface DirectPairsTable {
+  user_low: string;
+  user_high: string;
+  conversation_id: string;
+}
+
+export interface MailboxMessagesTable {
+  conversation_id: string;
+  seq: ColumnType<string, number, number>;
+  client_message_id: string;
+  sender_user_id: string;
+  epoch: ColumnType<string, number, number>;
+  ciphertext: Buffer;
+  created_at: Timestamp;
+  expires_at: Date;
+}
+
 export interface Database {
   schema_migrations: SchemaMigrationsTable;
   users: UsersTable;
@@ -147,6 +185,10 @@ export interface Database {
   password_resets: PasswordResetsTable;
   login_events: LoginEventsTable;
   audit_log: AuditLogTable;
+  conversations: ConversationsTable;
+  conversation_members: ConversationMembersTable;
+  direct_pairs: DirectPairsTable;
+  mailbox_messages: MailboxMessagesTable;
 }
 
 /** Owning module of every table ('platform' = infrastructure code outside modules/). */
@@ -164,4 +206,8 @@ export const TABLE_OWNERS: Readonly<Record<keyof Database, string>> = {
   password_resets: 'auth',
   login_events: 'auth',
   audit_log: 'audit',
+  conversations: 'messaging',
+  conversation_members: 'messaging',
+  direct_pairs: 'messaging',
+  mailbox_messages: 'messaging',
 };

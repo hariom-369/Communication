@@ -55,10 +55,20 @@ export interface SessionRecord {
 export class SessionService implements SessionAuthenticator {
   readonly #db: Kysely<Database>;
   readonly #policy: SessionPolicy;
+  readonly #onRevoked: (userId: string) => void;
 
-  constructor(db: Kysely<Database>, policy: SessionPolicy) {
+  /**
+   * @param onRevoked called after sessions of a user are revoked or rotated, so long-lived
+   *   connections (WebSockets) can be re-validated and closed.
+   */
+  constructor(
+    db: Kysely<Database>,
+    policy: SessionPolicy,
+    onRevoked: (userId: string) => void = () => undefined,
+  ) {
     this.#db = db;
     this.#policy = policy;
+    this.#onRevoked = onRevoked;
   }
 
   async issue(
@@ -143,6 +153,7 @@ export class SessionService implements SessionAuthenticator {
         .where('id', '=', issued.id)
         .execute();
     }
+    if (options.executor === undefined) this.#onRevoked(current.userId);
     return issued;
   }
 
@@ -174,7 +185,17 @@ export class SessionService implements SessionAuthenticator {
     executor?: Executor,
   ): Promise<boolean> {
     const result = await this.#revokeWhere(executor ?? this.#db, userId, reason, sessionId);
+    if (executor === undefined && result > 0) this.#onRevoked(userId);
     return result > 0;
+  }
+
+  /**
+   * Tells listeners that `userId`'s sessions changed. Methods called with an external transaction
+   * do not notify (the hint would race the commit); their callers invoke this after committing.
+   * Revocation is enforced on every request regardless; this only closes open WebSockets sooner.
+   */
+  notifyRevoked(userId: string): void {
+    this.#onRevoked(userId);
   }
 
   /** Revokes all of the user's sessions except `exceptId` (log out everywhere else). */
@@ -190,6 +211,8 @@ export class SessionService implements SessionAuthenticator {
       .where('revoked_at', 'is', null);
     if (options.exceptId !== undefined) query = query.where('id', '!=', options.exceptId);
     const result = await query.executeTakeFirst();
+    if (options.executor === undefined && Number(result.numUpdatedRows) > 0)
+      this.#onRevoked(userId);
     return Number(result.numUpdatedRows);
   }
 

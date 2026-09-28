@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { MIGRATIONS_DIR } from '../paths.js';
 import { withTemporaryDatabase } from '../test/database.js';
 
-import { loadMigrations, migrate, MigrationError, migrationsHealthCheck } from './migrations.js';
+import { loadMigrations, migrate, MigrationError, migrationsHealthCheck } from '@tessera/platform';
 
 const logger = createLogger({
   service: 'test',

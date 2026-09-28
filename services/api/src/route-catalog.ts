@@ -29,6 +29,9 @@ export function routeCatalog(): { routes: RouteDefinition[]; close(): Promise<vo
       BUILD_VERSION: 'catalog',
       BUILD_COMMIT: 'catalog',
       VALKEY_KEY_PREFIX: 'catalog',
+      MESSAGING_DEV_PLAINTEXT: false,
+      MAILBOX_RETENTION_DAYS: 30,
+      REALTIME_WS_PATH: '/rt/v1/ws',
     },
     {
       db: new Kysely<Database>({ dialect: new PostgresDialect({ pool }) }),

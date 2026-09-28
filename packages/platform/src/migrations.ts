@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { HealthCheck, Logger } from '@tessera/platform';
+import type { HealthCheck } from './health.js';
+import type { Logger } from './logger.js';
 import type pg from 'pg';
 
 /**

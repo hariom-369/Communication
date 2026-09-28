@@ -121,6 +121,8 @@ export interface RouteDefinition<
   readonly audit: AuditRequirement;
   readonly schema: S;
   readonly successStatus: 200 | 201 | 202;
+  /** Overrides the global request body limit (bytes) for this route only. */
+  readonly bodyLimit?: number;
   // Method syntax (bivariant parameters) lets specific routes be collected as RouteDefinition[].
   handler(input: RouteInput<S>, context: RouteContext<A>): Promise<z.infer<S['response']>>;
 }
@@ -214,6 +216,7 @@ function registerRoute(
     method: route.method,
     url: route.url,
     config: { routeId: route.id },
+    ...(route.bodyLimit === undefined ? {} : { bodyLimit: route.bodyLimit }),
     schema: {
       summary: route.summary,
       tags: [...route.tags],

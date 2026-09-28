@@ -152,6 +152,7 @@ export class AuthService {
         executor: trx,
       });
     });
+    this.#d.sessions.notifyRevoked(account.id);
     if (!firstCredential)
       await this.#notify(securityNoticeEmail(account.email, 'Your password was changed'));
     return issued;
@@ -559,6 +560,7 @@ export class AuthService {
       );
       return owner;
     });
+    this.#d.sessions.notifyRevoked(account.id);
     await this.#notify(
       securityNoticeEmail(account.email, 'Your password was reset', [
         'All sessions were signed out.',

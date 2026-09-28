@@ -268,6 +268,37 @@ export class AccountService {
     return row === undefined ? null : toAccount(row);
   }
 
+  /**
+   * Finds an active account by exact username for starting a conversation. Accounts that opted
+   * out of username discovery are indistinguishable from non-existent ones.
+   */
+  async discoverableByUsername(username: string): Promise<{ id: string; username: string } | null> {
+    const row = await this.#db
+      .selectFrom('users')
+      .innerJoin('privacy_settings', 'privacy_settings.user_id', 'users.id')
+      .select(['users.id', 'users.username', 'privacy_settings.settings'])
+      .where('users.username', '=', username.trim().toLowerCase())
+      .where('users.status', '=', 'active')
+      .executeTakeFirst();
+    if (row === undefined) return null;
+    const settings = privacySettingsSchema.safeParse(row.settings);
+    const discoverable = settings.success
+      ? settings.data.discoverableByUsername
+      : DEFAULT_PRIVACY_SETTINGS.discoverableByUsername;
+    return discoverable ? { id: row.id, username: row.username } : null;
+  }
+
+  /** Usernames for a set of user ids (unknown ids are omitted). */
+  async usernames(userIds: readonly string[]): Promise<Map<string, string>> {
+    if (userIds.length === 0) return new Map();
+    const rows = await this.#db
+      .selectFrom('users')
+      .select(['id', 'username'])
+      .where('id', 'in', [...userIds])
+      .execute();
+    return new Map(rows.map((row) => [row.id, row.username]));
+  }
+
   async byEmail(email: string): Promise<Account | null> {
     return this.#byEmail(this.#db, email);
   }

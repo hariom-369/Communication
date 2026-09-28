@@ -23,7 +23,11 @@
     "@tessera/shared": "workspace:*",
     "@tessera/validation": "workspace:*",
     "fastify": "5.12.5",
+    "pg": "8.23.0",
     "pino": "10.3.1",
     "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
   }
 }

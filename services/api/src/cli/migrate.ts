@@ -3,7 +3,7 @@ import { createLogger } from '@tessera/platform';
 import { loadApiConfig } from '../config.js';
 import { MIGRATIONS_DIR } from '../paths.js';
 import { createDatabase } from '../platform/db.js';
-import { loadMigrations, migrate } from '../platform/migrations.js';
+import { loadMigrations, migrate } from '@tessera/platform';
 
 /** Pre-deploy migration job entry point (docs/deployment.md §3). */
 async function main(): Promise<number> {

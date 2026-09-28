@@ -6,7 +6,8 @@ import { loadApiConfig } from './config.js';
 import { MIGRATIONS_DIR } from './paths.js';
 import { createDatabase, databaseHealthCheck } from './platform/db.js';
 import { SmtpMailer } from './platform/email.js';
-import { loadMigrations, migrationsHealthCheck } from './platform/migrations.js';
+import { loadMigrations, migrationsHealthCheck } from '@tessera/platform';
+import { startSingletonTask } from './platform/periodic.js';
 import {
   InProcessRateLimiter,
   ResilientRateLimiter,
@@ -80,6 +81,16 @@ async function main(): Promise<void> {
     },
   });
   const modules = composeModules(config, { db: database.db, valkey, mailer, logger });
+
+  const sweeper = startSingletonTask({
+    name: 'mailbox_sweeper',
+    lockKey: 0x6d61696c, // "mail"
+    intervalMs: 5 * 60_000,
+    pool: database.pool,
+    logger,
+    task: () => modules.messaging.sweep(),
+  });
+  lifecycle.onShutdown({ name: 'mailbox_sweeper', run: () => sweeper.stop() });
 
   const app = await buildApp({
     logger,
