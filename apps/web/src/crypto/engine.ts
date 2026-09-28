@@ -2,6 +2,8 @@ import type { CryptoClient } from '@tessera/crypto-core';
 
 import { LocalStore } from './local-store.js';
 import type {
+  EncryptedBackup,
+  HistoryBundle,
   CommitOutput,
   CryptoApi,
   DeviceRef,
@@ -31,8 +33,11 @@ import type {
 export interface CoreModule {
   readonly CryptoClient: {
     create(userId: string, askVersion: number, now: number): CryptoClient;
+    createPending(userId: string, now: number): CryptoClient;
     restore(snapshot: Uint8Array): CryptoClient;
   };
+  parseLinkCode(code: string): string;
+  verifyLinkCode(code: string, shortId: string, hpkePublic: string, signaturePublic: string): void;
 }
 
 export class CryptoError extends Error {
@@ -268,7 +273,150 @@ export class CryptoEngine {
       await this.#persist();
       return output;
     },
+
+    reset: async (userId) => {
+      this.#store?.close();
+      this.#store = null;
+      this.#client?.free();
+      this.#client = null;
+      this.#identity = null;
+      await LocalStore.destroy(userId, this.#factory);
+      this.#store = await LocalStore.open(userId, this.#factory);
+    },
+
+    createPending: async (userId) => {
+      const client = this.#core.CryptoClient.createPending(userId, now());
+      await this.#s.commit({ state: new Uint8Array(client.snapshot()), clearCursors: true });
+      this.#client?.free();
+      this.#client = client;
+      this.#identity = JSON.parse(client.identity()) as Identity;
+      return this.#identity;
+    },
+
+    linkRequest: () =>
+      Promise.resolve(
+        JSON.parse(this.#c.linkRequest()) as { hpkePublic: string; signaturePublic: string },
+      ),
+
+    linkCode: (shortId) => Promise.resolve(this.#c.linkCode(shortId)),
+
+    parseLinkCode: (code) => Promise.resolve(this.#core.parseLinkCode(code)),
+
+    verifyLinkCode: (code, shortId, hpkePublic, signaturePublic) => {
+      this.#core.verifyLinkCode(code, shortId, hpkePublic, signaturePublic);
+      return Promise.resolve();
+    },
+
+    approveLink: async (
+      code,
+      shortId,
+      deviceId,
+      hpkePublic,
+      signaturePublic,
+      trusted,
+      includeHistory,
+    ) => {
+      const history = includeHistory ? await this.#bundle() : new Uint8Array();
+      return this.#c.approveLink(
+        code,
+        shortId,
+        deviceId,
+        hpkePublic,
+        signaturePublic,
+        trusted,
+        history,
+        now(),
+      );
+    },
+
+    completeLink: async (sealed, shortId, expectedAsk, version) => {
+      const history = this.#c.completeLink(sealed, shortId, expectedAsk, version);
+      this.#identity = JSON.parse(this.#c.identity()) as Identity;
+      await this.#persistWithBundle(history);
+      return this.#identity;
+    },
+
+    observeDevices: async (userId, deviceIds) => {
+      const added = JSON.parse(
+        this.#c.observeDevices(userId, JSON.stringify(deviceIds)),
+      ) as string[];
+      await this.#persist();
+      return added;
+    },
+
+    backupEnable: async () => {
+      const result = JSON.parse(this.#c.backupEnable()) as { recoveryKey: string; wrap: string };
+      await this.#persist();
+      this.#identity = JSON.parse(this.#c.identity()) as Identity;
+      return result;
+    },
+
+    backupNewRecoveryKey: () =>
+      Promise.resolve(
+        JSON.parse(this.#c.backupNewRecoveryKey()) as { recoveryKey: string; wrap: string },
+      ),
+
+    backupPasskeyWrap: (prfOutput) =>
+      Promise.resolve(this.#c.backupPasskeyWrap(fromBase64(prfOutput))),
+
+    backupOwns: (manifest, mac) => Promise.resolve(this.#c.backupOwns(manifest, mac)),
+
+    backupExport: async (version) => {
+      const app = await this.#bundle();
+      return JSON.parse(this.#c.backupExport(app, version, undefined, now())) as EncryptedBackup;
+    },
+
+    backupRestore: async (kind, secret, wrap, backup, expectedAsk, version) => {
+      const result = JSON.parse(
+        this.#c.backupRestore(
+          kind,
+          secret,
+          wrap,
+          backup.blob,
+          backup.manifest,
+          backup.mac,
+          expectedAsk,
+          version,
+          now(),
+        ),
+      ) as { app: string; version: number; createdAt: number };
+      this.#identity = JSON.parse(this.#c.identity()) as Identity;
+      await this.#persistWithBundle(fromBase64(result.app));
+      return { identity: this.#identity, version: result.version, createdAt: result.createdAt };
+    },
   };
+
+  /** All local history as a bundle (JSON bytes). */
+  async #bundle(): Promise<Uint8Array> {
+    const conversations: Record<string, HistoryRecord[]> = {};
+    for (const [id, records] of await this.#s.allHistory())
+      conversations[id] = records as HistoryRecord[];
+    const bundle: HistoryBundle = { v: 1, conversations };
+    return encoder.encode(JSON.stringify(bundle));
+  }
+
+  /** Persists the new identity state together with imported history, in one transaction. */
+  async #persistWithBundle(bytes: Uint8Array): Promise<void> {
+    const history: { conversationId: string; seq: number; record: HistoryRecord }[] = [];
+    if (bytes.length > 0) {
+      let bundle: HistoryBundle | null;
+      try {
+        bundle = JSON.parse(decoder.decode(bytes)) as HistoryBundle;
+      } catch {
+        bundle = null; // unreadable history is skipped; the identity still counts
+      }
+      if (bundle?.v === 1 && typeof bundle.conversations === 'object') {
+        for (const [conversationId, records] of Object.entries(bundle.conversations)) {
+          if (!Array.isArray(records)) continue;
+          for (const record of records) {
+            if (typeof record.seq === 'number' && Number.isSafeInteger(record.seq))
+              history.push({ conversationId, seq: record.seq, record });
+          }
+        }
+      }
+    }
+    await this.#persist({ history, clearCursors: true });
+  }
 
   async #ingest(
     conversationId: string,

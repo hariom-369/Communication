@@ -122,6 +122,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     TRUST_PROXY_HOPS: '1',
     SHUTDOWN_DRAIN_MS: '0',
   };
+  // Test workers use it to reset the per-IP sign-up limit between spec files (support.ts).
+  process.env['E2E_VALKEY_KEY_PREFIX'] = apiEnv.VALKEY_KEY_PREFIX;
   const apiDir = path.join(ROOT, 'services/api');
   const migrate = start('node', ['dist/cli/migrate.js'], apiEnv, apiDir);
   const migrateCode = await new Promise<number | null>((resolve) => migrate.on('exit', resolve));

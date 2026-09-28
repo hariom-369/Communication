@@ -1,6 +1,21 @@
 # Encrypted backups
 
-Status: NEEDS-SECURITY-REVIEW (S-06) · Decision: ADR-014
+Status: NEEDS-SECURITY-REVIEW (S-06) · Decisions: ADR-014, **042**
+
+> **Implemented in Phase 5 (ADR-042), with these differences from the design below:**
+> - The backup body uses the **STREAM** construction over XChaCha20-Poly1305 (64 KiB chunks,
+>   RustCrypto) instead of libsodium `secretstream`; header `TSB1` ‖ backup id ‖ nonce.
+> - Backups are stored in PostgreSQL (≤ 32 MiB, last 3 versions), not S3, until Phase 6.
+> - Contents: ASK, contact pins and verification states, decrypted history. Not yet: media and
+>   settings.
+> - The recovery key is confirmed with an "I have saved it" checkbox, not by re-typing groups; no
+>   QR yet.
+> - `prev_backup_hash` is part of the manifest format but not yet filled or checked, so rollback
+>   to an older (authentic) version is not yet detected. Forgery and tampering are.
+> - Backups run when the app is open, at most daily, plus "Back up now". A device only uploads if
+>   the latest backup was made with its own backup key.
+> - Passkeys are registered with the PRF extension; the PRF assertion uses a local challenge and
+>   is never sent to the server.
 
 ## 1. Goals
 

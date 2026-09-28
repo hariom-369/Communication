@@ -442,19 +442,37 @@ describe("'realtime.ticket' and 'realtime.presence'", () => {
       SELECT table_name, column_name, data_type FROM information_schema.columns
       WHERE table_schema = 'public'
         AND table_name IN ('conversations', 'conversation_members', 'direct_pairs', 'mailbox_messages',
-                           'mls_welcomes', 'account_keys', 'devices', 'key_packages')
+                           'mls_welcomes', 'account_keys', 'devices', 'key_packages',
+                           'link_sessions', 'backups', 'backup_wraps')
         AND data_type IN ('text', 'character varying', 'json', 'jsonb', 'bytea')
       ORDER BY table_name, column_name`.execute(env.db);
     // Only two CHECK-constrained enums are text; the single payload column is bytea, never
     // parsed by the server. A new text/json column here must be justified in review.
     expect(columns.rows).toEqual([
       { table_name: 'account_keys', column_name: 'public_key', data_type: 'bytea' },
+      // Backup ciphertext, its manifest (ids, sizes, hashes — no content) and MAC.
+      { table_name: 'backup_wraps', column_name: 'credential_id', data_type: 'text' },
+      { table_name: 'backup_wraps', column_name: 'kind', data_type: 'text' },
+      { table_name: 'backup_wraps', column_name: 'prf_salt', data_type: 'bytea' },
+      // The Backup Root Key encrypted under the recovery key / passkey PRF output.
+      { table_name: 'backup_wraps', column_name: 'wrap', data_type: 'bytea' },
+      { table_name: 'backups', column_name: 'blob', data_type: 'bytea' },
+      { table_name: 'backups', column_name: 'mac', data_type: 'bytea' },
+      { table_name: 'backups', column_name: 'manifest', data_type: 'text' },
       { table_name: 'conversation_members', column_name: 'role', data_type: 'text' },
       { table_name: 'conversations', column_name: 'kind', data_type: 'text' },
       // Public key material only (Ed25519 public keys, signed certificates, KeyPackages).
       { table_name: 'devices', column_name: 'certificate', data_type: 'bytea' },
+      // Device name chosen by its owner (validated charset), never message content.
+      { table_name: 'devices', column_name: 'label', data_type: 'text' },
       { table_name: 'devices', column_name: 'signature_key', data_type: 'bytea' },
       { table_name: 'key_packages', column_name: 'key_package', data_type: 'bytea' },
+      // Link requests: public keys, device name, and the HPKE-sealed payload (opaque).
+      { table_name: 'link_sessions', column_name: 'hpke_public', data_type: 'bytea' },
+      { table_name: 'link_sessions', column_name: 'label', data_type: 'text' },
+      { table_name: 'link_sessions', column_name: 'sealed', data_type: 'bytea' },
+      { table_name: 'link_sessions', column_name: 'short_id', data_type: 'bytea' },
+      { table_name: 'link_sessions', column_name: 'signature_public', data_type: 'bytea' },
       { table_name: 'mailbox_messages', column_name: 'ciphertext', data_type: 'bytea' },
       // MLS Welcome: encrypted to the invited device's KeyPackage (RFC 9420 §12.4.3.1).
       { table_name: 'mls_welcomes', column_name: 'welcome', data_type: 'bytea' },

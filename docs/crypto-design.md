@@ -4,22 +4,23 @@ Status: NEEDS-SECURITY-REVIEW (S-01..S-06) · This document specifies **how we u
 established primitives. It specifies no new cryptographic protocol. Any change to this file
 requires review by the designated cryptography reviewer (CODEOWNERS).
 
-## 0. Implementation status (Phase 4)
+## 0. Implementation status (Phase 5)
 
 Implemented in `packages/crypto-core` (Rust, compiled to WebAssembly for the web worker):
 
 | Section | Status |
 |---|---|
-| §1 Components | OpenMLS 0.9 + `openmls_rust_crypto` 0.6 (pinned); Ed25519 via `ed25519-dalek` 2.2 (strict verification); SHA-512 via `sha2`; constant-time comparison via `subtle`; `zeroize` on key seeds and padded plaintext. Blob encryption, HPKE key wrapping and Argon2id are not used yet (media: Phase 6, backups: Phase 5). |
+| §1 Components | OpenMLS 0.9 + `openmls_rust_crypto` 0.6 (pinned); Ed25519 via `ed25519-dalek` 2.2 (strict verification); SHA-512 via `sha2`; constant-time comparison via `subtle`; `zeroize` on key seeds and padded plaintext. Phase 5 adds HPKE (provider) for device linking, XChaCha20-Poly1305 + STREAM (`chacha20poly1305` 0.10 with `stream`) for backups, HKDF-SHA-256 and HMAC-SHA-256 (`hkdf`/`hmac` 0.13). **Deviation:** STREAM replaces libsodium `secretstream` (ADR-042). Media blob encryption: Phase 6. Argon2id is not used for keys. |
 | §2 Ciphersuites | `0x0001` only (ADR-039). |
 | §3.1 ASK | Implemented; version assigned by the server; reset = new key, version + 1 (ADR-040). |
 | §3.2 Device certificate | Implemented with a fixed binary layout instead of Protobuf (ADR-039); leaf extension `0xF0A1`; validated by every client on KeyPackages, Welcomes, Add/Update proposals and commit paths; also verified by the server (defence in depth). |
-| §3.3 Revocation | Only through identity reset in Phase 4 (all devices revoked); signed per-device revocation arrives with multi-device (Phase 5). |
+| §3.3 Revocation | Per-device revocation on the server (step-up, audited, emailed); other members remove the device from groups via directory reconciliation. **Not yet:** signed `DeviceRevocation`, ASK rotation keeping other devices (ADR-042). |
 | §4 KeyPackages | 100 one-time + 1 last-resort per device, 30-day lifetime, atomic claim (`FOR UPDATE SKIP LOCKED`), claim limits 50/h per claimer and 500/day per target, top-up below 25. **Not yet:** automatic 7-day rotation of the last-resort package. |
 | §5 Delivery service | Rules 1, 3, 4, 5 implemented. Rule 2 (server verifies commit signatures) **deferred** — clients verify (ADR-041). |
 | §6 FS/PCS | Sender-ratchet window 200 / forward distance 1000, `max_past_epochs = 2`, self-update after 7 days or 100 sent messages. Device-removal and compromise-signal triggers arrive with multi-device. |
 | §7 Replay/dedupe | OpenMLS reuse guard (tested), server idempotency, client cursor per conversation. |
-| §8 Safety numbers | Implemented as specified (version constant `0x5453`); verified against an independent Python implementation. The UI compares the 60 digits; QR comparison arrives with the camera-capable clients / device linking (the QR payload is already computed). |
+| §8 Safety numbers | Implemented as specified (version constant `0x5453`); verified against an independent Python implementation. The UI compares the 60 digits; QR comparison arrives with camera-capable clients (the QR payload is already computed). |
+| Multi-device / backups | Device linking (typed code + HPKE), full-access vs messages-only devices, history transfer, encrypted backups with recovery key or passkey PRF — ADR-042, [multi-device.md](multi-device.md), [encrypted-backups.md](encrypted-backups.md). Fuzz target `backup`; `inbound` also covers link payloads and backup restore. |
 | §9 Payload | Versioned JSON content (ADR-039) + length padding to buckets. |
 | §10 Local storage | IndexedDB per user, AES-256-GCM under a non-extractable key, AAD binds each record to its position; MLS state, history and cursor written in one transaction; state persisted before any ciphertext leaves the worker. |
 | §11 Parsing | Length limits before parsing; errors returned as values; fuzz targets for certificates, padding, snapshots and all inbound MLS bytes (nightly CI). WASM panics trap; the worker reloads from the last persisted state. |

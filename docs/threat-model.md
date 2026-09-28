@@ -85,3 +85,10 @@ key transparency on the roadmap).
 
 Updated at each phase exit; full external review before public beta (S-13) and annually;
 any new data flow or third-party integration requires a threat-model delta in its PR.
+
+**Phase 5 delta (multi-device, backups).** New flows: link requests and sealed link payloads
+relayed by the server, and encrypted backups plus wrapped keys stored by the server. The analysis
+is in [phase-reports/phase-5.md](phase-reports/phase-5.md) §Security implications and ADR-042.
+Residual risks: a user persuaded to approve an attacker's link code (T-11, mitigated by step-up,
+wording, email and contact notices); a removed device with full access keeps the identity key
+until "Start over"; backup rollback to an older authentic version is not yet detected.

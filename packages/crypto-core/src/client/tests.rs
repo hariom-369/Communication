@@ -622,7 +622,7 @@ fn a_genuine_certificate_on_someone_elses_signature_key_is_rejected() {
     introduce(&mut alice, &mut bob);
     let server = client(BOB);
     let identity = identity_bytes(&bob.user_id, &bob.device_id);
-    let forged = forged_key_package(&server, identity, bob.certificate());
+    let forged = forged_key_package(&server, identity, bob.certificate().unwrap());
     assert_eq!(
         alice
             .create_group(CONVERSATION, &[forged], &peers(&[BOB]), NOW)
@@ -640,7 +640,7 @@ fn a_certificate_for_another_device_or_user_is_rejected() {
     introduce(&mut alice, &mut mallory);
     // Bob's genuine certificate, but the credential claims a different device id.
     let other_device = identity_bytes(&bob.user_id, &[9u8; 16]);
-    let forged = forged_key_package(&bob, other_device, bob.certificate());
+    let forged = forged_key_package(&bob, other_device, bob.certificate().unwrap());
     assert_eq!(
         alice
             .create_group(CONVERSATION, &[forged], &peers(&[BOB]), NOW)
@@ -649,7 +649,7 @@ fn a_certificate_for_another_device_or_user_is_rejected() {
     );
     // Mallory presents Bob's genuine certificate under her own user id.
     let as_mallory = identity_bytes(&mallory.user_id, &bob.device_id);
-    let forged = forged_key_package(&bob, as_mallory, bob.certificate());
+    let forged = forged_key_package(&bob, as_mallory, bob.certificate().unwrap());
     assert_eq!(
         alice
             .create_group(CONVERSATION, &[forged], &peers(&[BOB, MALLORY]), NOW)

@@ -44,6 +44,23 @@ export function SecurityNotices(props: {
       </div>,
     );
   }
+  if (security.newDevices.length > 0)
+    notices.push(
+      <div key="new-devices" className="conversation__notice" role="status">
+        <p>
+          {security.newDevices.map((userId) => `@${props.username(userId)}`).join(', ')}{' '}
+          {security.newDevices.length === 1 ? 'added a new device' : 'added new devices'}. Their
+          security key is unchanged, so their devices are still verified by it.
+        </p>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => store?.security.dismissNewDevices(meta.id)}
+        >
+          Dismiss
+        </Button>
+      </div>,
+    );
   if (security.failed)
     notices.push(
       <Alert key="failed" tone="danger">

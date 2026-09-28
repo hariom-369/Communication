@@ -1,5 +1,5 @@
 import { Alert, Button, Skeleton, TextField } from '@tessera/ui';
-import { useState, type ReactNode, type SubmitEvent } from 'react';
+import { useDeferredValue, useMemo, useState, type ReactNode, type SubmitEvent } from 'react';
 import { NavLink, useNavigate } from 'react-router';
 
 import { errorMessage } from '../../api/client.js';
@@ -46,6 +46,19 @@ export function ConversationList({ activeId }: { activeId: string | undefined })
   const [username, setUsername] = useState('');
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
+  const results = useMemo(
+    () => (store === null ? [] : store.search(deferredQuery)),
+    // Re-run when history changes as well as when the query does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [store, deferredQuery, snapshot.conversations],
+  );
+  const searching = query.trim().length >= 2;
+  const nameOf = (conversationId: string) => {
+    const conversation = snapshot.conversations.find((c) => c.meta.id === conversationId);
+    return conversation === undefined ? '' : peerOf(conversation, me?.id ?? '').username;
+  };
 
   async function start(event: SubmitEvent) {
     event.preventDefault();
@@ -90,7 +103,44 @@ export function ConversationList({ activeId }: { activeId: string | undefined })
       </form>
       {error === undefined ? null : <Alert tone="danger">{error}</Alert>}
       {snapshot.error === null ? null : <Alert tone="warning">{snapshot.error}</Alert>}
-      {!snapshot.loaded && snapshot.error === null ? (
+      <div className="chat-list__search">
+        <TextField
+          label="Search messages"
+          hint="Searches the messages stored on this device."
+          type="search"
+          autoComplete="off"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
+      {searching ? (
+        results.length === 0 ? (
+          <p className="empty" role="status">
+            No messages on this device match “{query.trim()}”.
+          </p>
+        ) : (
+          <ul className="search-results" aria-label="Search results">
+            {results.map((result) => (
+              <li key={`${result.conversationId}/${result.messageId}`}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuery('');
+                    void navigate(`/chats/${result.conversationId}`);
+                  }}
+                >
+                  <span className="chat-item__name">
+                    @{nameOf(result.conversationId)} · {shortTime(result.sentAt)}
+                  </span>
+                  <span className="chat-item__preview">
+                    <Highlight text={result.text} query={deferredQuery.trim()} />
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )
+      ) : !snapshot.loaded && snapshot.error === null ? (
         <div role="status" aria-busy="true" aria-label="Loading chats" className="stack">
           <Skeleton height="3.5rem" shape="tile" />
           <Skeleton height="3.5rem" shape="tile" />
@@ -136,5 +186,21 @@ export function ConversationList({ activeId }: { activeId: string | undefined })
         </ul>
       )}
     </section>
+  );
+}
+
+/** Marks the first match (plain-text rendering; no HTML is interpreted). */
+function Highlight({ text, query }: { text: string; query: string }): ReactNode {
+  const index = text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase());
+  const snippetStart = Math.max(0, index - 40);
+  const snippet = (snippetStart > 0 ? '…' : '') + text.slice(snippetStart);
+  if (index < 0 || query === '') return snippet;
+  const offset = index - snippetStart + (snippetStart > 0 ? 1 : 0);
+  return (
+    <>
+      {snippet.slice(0, offset)}
+      <mark>{snippet.slice(offset, offset + query.length)}</mark>
+      {snippet.slice(offset + query.length)}
+    </>
   );
 }

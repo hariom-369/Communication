@@ -73,6 +73,7 @@ export interface SecurityPort {
   safetyNumber(userId: string): Promise<SafetyNumber>;
   setVerified(conversationId: string, userId: string, verified: boolean): Promise<void>;
   acknowledgeChange(conversationId: string, userId: string): Promise<void>;
+  dismissNewDevices(conversationId: string): void;
   resetIdentity(
     withStepUp: <T>(action: () => Promise<T>) => Promise<T | undefined>,
   ): Promise<boolean>;
@@ -88,6 +89,18 @@ export interface ConversationView {
   readonly security: ConversationSecurity;
   /** Messages waiting because of a security condition the user must resolve. */
   readonly blocked: SecurityBlocked['reason'] | null;
+}
+
+export interface SearchResult {
+  readonly conversationId: string;
+  readonly messageId: string;
+  readonly senderId: string;
+  readonly sentAt: number;
+  readonly text: string;
+}
+
+function normalize(text: string): string {
+  return text.normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase();
 }
 
 export interface MessagingSnapshot {
@@ -177,6 +190,9 @@ export class MessagingStore {
   #shareReadReceipts = false;
   #typingSweep: ReturnType<typeof setInterval> | null = null;
   #unsubscribeSecurity: (() => void) | null = null;
+  #started = false;
+  /** Realtime connected and conversations loaded (the device is set up). */
+  #live = false;
 
   constructor(options: StoreOptions) {
     this.#options = options;
@@ -257,27 +273,32 @@ export class MessagingStore {
 
   async start(): Promise<void> {
     this.#unsubscribeSecurity = this.#options.security.subscribe(() => {
+      // The device finished setting up (linked, restored or new key): start messaging.
+      if (this.#started && !this.#live && this.#options.security.status === 'ready')
+        void this.resume();
       this.#emit();
     });
+    this.#started = true;
     this.#typingSweep = setInterval(() => {
       this.#emit();
     }, 2000);
     await this.#options.security.start();
     this.#emit();
-    if (this.#options.security.status !== 'ready') return;
-    this.#realtime.start();
-    await this.#loadConversations();
+    await this.resume();
   }
 
   /** After the device was set up (e.g. identity reset), start messaging. */
   async resume(): Promise<void> {
     this.#emit();
-    if (this.#options.security.status !== 'ready') return;
+    if (this.#options.security.status !== 'ready' || this.#live) return;
+    this.#live = true;
     this.#realtime.start();
     await this.#loadConversations();
   }
 
   stop(): void {
+    this.#started = false;
+    this.#live = false;
     this.#realtime.stop();
     this.#unsubscribeSecurity?.();
     if (this.#typingSweep !== null) clearInterval(this.#typingSweep);
@@ -556,6 +577,9 @@ export class MessagingStore {
         this.#emit();
         return;
       }
+      case 'link_approved':
+        // For the device being linked, which polls (it has no realtime connection yet).
+        return;
       case 'ack':
       case 'error':
       case 'ready':
@@ -565,6 +589,31 @@ export class MessagingStore {
   }
 
   // ---- user actions ------------------------------------------------------------------------------
+
+  /**
+   * Searches decrypted history on this device only (docs/search.md: message content is never
+   * indexed on the server). Case- and accent-insensitive substring match, newest first.
+   */
+  search(query: string, limit = 50): SearchResult[] {
+    const needle = normalize(query.trim());
+    if (needle.length < 2) return [];
+    const results: SearchResult[] = [];
+    for (const conversation of this.#conversations.values()) {
+      for (const id of conversation.timeline.order) {
+        const message = conversation.timeline.byId[id];
+        if (message === undefined || message.deleted || message.undecodable) continue;
+        if (!normalize(message.text).includes(needle)) continue;
+        results.push({
+          conversationId: conversation.meta.id,
+          messageId: message.id,
+          senderId: message.senderId,
+          sentAt: message.sentAt,
+          text: message.text,
+        });
+      }
+    }
+    return results.sort((a, b) => b.sentAt - a.sentAt).slice(0, limit);
+  }
 
   async openDirect(username: string): Promise<string> {
     const meta = await this.#options.api.openDirect(username, MLS_CIPHERSUITE);

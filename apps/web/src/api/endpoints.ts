@@ -1,4 +1,13 @@
 import {
+  backupDownloadSchema,
+  backupStatusSchema,
+  linkCreatedSchema,
+  linkRequestSchema,
+  linkStatusSchema,
+  type AddBackupWrap,
+  type AddDevice,
+  type CreateLink,
+  type UploadBackup,
   claimedKeyPackagesSchema,
   commitResponseSchema,
   keyPackageCountSchema,
@@ -161,6 +170,30 @@ export const endpoints = {
     ),
   claimKeyPackages: (userId: string) =>
     api('POST', '/keys/claim', claimedKeyPackagesSchema, { userId }),
+
+  // ---- multi-device (docs/multi-device.md) ----
+  addDevice: (body: AddDevice) => api('POST', '/keys/devices/linked', ownKeysSchema, body),
+  revokeDevice: (deviceId: string) =>
+    api('DELETE', `/keys/devices/${encodeURIComponent(deviceId)}`, ownKeysSchema),
+  createLink: (body: CreateLink) => api('POST', '/keys/links', linkCreatedSchema, body),
+  /** `shortId` is base64url (7 characters). */
+  lookupLink: (shortId: string) =>
+    api('GET', `/keys/links/by-code/${encodeURIComponent(shortId)}`, linkRequestSchema),
+  approveLink: (linkId: string, body: { approverDeviceId: string; sealed: string }) =>
+    api('POST', `/keys/links/${encodeURIComponent(linkId)}/approve`, okResponseSchema, body),
+  linkStatus: (linkId: string) =>
+    api('GET', `/keys/links/${encodeURIComponent(linkId)}`, linkStatusSchema),
+
+  // ---- encrypted backups (docs/encrypted-backups.md) ----
+  backupStatus: () => api('GET', '/backups', backupStatusSchema),
+  addBackupKey: (body: AddBackupWrap) =>
+    api('POST', '/backups/keys', z.object({ id: z.string() }), body),
+  removeBackupKey: (id: string) =>
+    api('DELETE', `/backups/keys/${encodeURIComponent(id)}`, okResponseSchema),
+  uploadBackup: (body: UploadBackup) =>
+    api('POST', '/backups/versions', z.object({ version: z.number() }), body),
+  latestBackup: () => api('GET', '/backups/latest', backupDownloadSchema),
+  disableBackups: () => api('DELETE', '/backups', okResponseSchema),
 
   realtimeTicket: () => api('POST', '/realtime/ticket', realtimeTicketSchema, {}),
   presence: (userId: string) =>

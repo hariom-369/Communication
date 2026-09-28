@@ -712,6 +712,16 @@ export class AuthService {
   }
 
   /** Security notices are best-effort: a mail outage must not block the security action itself. */
+  /** Security notice by email for events raised by other modules (e.g. new encryption device). */
+  async securityNotice(
+    userId: string,
+    headline: string,
+    lines: readonly string[] = [],
+  ): Promise<void> {
+    const account = await this.#d.accounts.byId(userId);
+    if (account !== null) await this.#notify(securityNoticeEmail(account.email, headline, lines));
+  }
+
   async #notify(message: EmailMessage): Promise<void> {
     try {
       await this.#d.mailer.send(message);

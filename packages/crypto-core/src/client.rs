@@ -23,9 +23,11 @@ use openmls_traits::random::OpenMlsRand;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
+use crate::backup;
 use crate::error::{CoreError, Result};
 use crate::identity::{AccountKey, CertificateBody, DeviceCertificate};
 use crate::ids::{Id, format_id, parse_id};
+use crate::link;
 use crate::padding;
 use crate::safety;
 
@@ -60,6 +62,9 @@ pub struct Pin {
     pub verified: bool,
     /// The key changed since the user last acknowledged it.
     pub changed: bool,
+    /// Devices of this user seen so far (for "new device" notices); `None` until first seen.
+    #[serde(default)]
+    pub devices: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -75,12 +80,87 @@ struct PersistedState {
     version: u32,
     user_id: String,
     device_id: String,
-    ask_secret: String,
+    /// Absent on untrusted and pending devices.
+    #[serde(default)]
+    ask_secret: Option<String>,
+    #[serde(default)]
+    ask_public: Option<String>,
     ask_version: u32,
     signature_public_key: String,
-    certificate: String,
+    /// Absent while the device waits to be linked.
+    #[serde(default)]
+    certificate: Option<String>,
     pins: BTreeMap<String, Pin>,
     groups: BTreeMap<String, GroupMeta>,
+    #[serde(default)]
+    link_private: Option<String>,
+    #[serde(default)]
+    link_public: Option<String>,
+    #[serde(default)]
+    backup_root: Option<String>,
+}
+
+/// Sent from an existing device to a device being linked (HPKE-encrypted, docs/multi-device.md §3).
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LinkPayload {
+    version: u32,
+    user_id: String,
+    ask_public: String,
+    ask_version: u32,
+    /// Only for trusted devices.
+    ask_secret: Option<String>,
+    certificate: String,
+    pins: BTreeMap<String, Pin>,
+    /// Backup Root Key, so a trusted device can keep backups going.
+    backup_root: Option<String>,
+    /// Opaque application data (transferred history), base64.
+    history: String,
+}
+
+/// Plaintext inside an encrypted backup (docs/encrypted-backups.md §2).
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupContent {
+    format: u32,
+    user_id: String,
+    ask_public: String,
+    ask_version: u32,
+    ask_secret: String,
+    pins: BTreeMap<String, Pin>,
+    /// Opaque application data (history, settings), base64.
+    app: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupManifest {
+    pub format: u32,
+    pub backup_id: String,
+    pub version: u64,
+    pub prev_hash: Option<String>,
+    pub ciphertext_sha256: String,
+    pub size: u64,
+    pub created_at: u64,
+    pub user_id: String,
+}
+
+pub struct BackupOutput {
+    pub blob: Vec<u8>,
+    /// Exact bytes the MAC covers (JSON).
+    pub manifest: Vec<u8>,
+    pub mac: [u8; 32],
+}
+
+/// How the user proves they may open a backup.
+pub enum BackupSecret<'a> {
+    RecoveryKey(&'a str),
+    PasskeyPrf(&'a [u8]),
+}
+
+struct PendingLink {
+    private: Zeroizing<Vec<u8>>,
+    public: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -128,11 +208,18 @@ pub struct Client {
     provider: OpenMlsRustCrypto,
     user_id: Id,
     device_id: Id,
-    ask: AccountKey,
+    /// The account identity key's private half: only on trusted devices (multi-device §1).
+    ask: Option<AccountKey>,
+    /// The account identity key (all zeroes while a device waits to be linked).
+    ask_public: [u8; 32],
+    ask_version: u32,
     signer: SignatureKeyPair,
-    certificate: DeviceCertificate,
+    /// `None` while the device waits to be linked or restored.
+    certificate: Option<DeviceCertificate>,
     pins: BTreeMap<Id, Pin>,
     groups: BTreeMap<Id, GroupMeta>,
+    link: Option<PendingLink>,
+    backup_root: Option<Zeroizing<[u8; 32]>>,
 }
 
 fn mls<E>(what: &'static str) -> impl FnOnce(E) -> CoreError {
@@ -222,6 +309,41 @@ impl Client {
     /// Creates a new device identity with a fresh Account Signing Key (first device, or an
     /// identity reset). `ask_version` is the server-assigned version for the new key.
     pub fn create(user_id: &str, ask_version: u32, now: u64) -> Result<Self> {
+        let mut client = Self::new_device(user_id, now)?;
+        let seed: [u8; 32] = client
+            .provider
+            .rand()
+            .random_array()
+            .map_err(mls("random"))?;
+        client.install_identity(
+            AccountKey::from_seed(Zeroizing::new(seed), ask_version),
+            now,
+        )?;
+        Ok(client)
+    }
+
+    /// A device that will be linked from another device or restored from a backup: it has
+    /// its own MLS signature key and an ephemeral HPKE key for the link, but no certificate.
+    pub fn create_pending(user_id: &str, now: u64) -> Result<Self> {
+        let mut client = Self::new_device(user_id, now)?;
+        let ikm: [u8; 32] = client
+            .provider
+            .rand()
+            .random_array()
+            .map_err(mls("random"))?;
+        let pair = client
+            .provider
+            .crypto()
+            .derive_hpke_keypair(CIPHERSUITE.hpke_config(), &ikm)
+            .map_err(mls("hpke keygen"))?;
+        client.link = Some(PendingLink {
+            private: Zeroizing::new(pair.private.to_vec()),
+            public: pair.public,
+        });
+        Ok(client)
+    }
+
+    fn new_device(user_id: &str, now: u64) -> Result<Self> {
         let provider = OpenMlsRustCrypto::default();
         let user_id = parse_id(user_id)?;
         // UUIDv7 (RFC 9562, ADR-028): 48-bit Unix milliseconds, then random bits.
@@ -229,39 +351,79 @@ impl Client {
         device_id[..6].copy_from_slice(&now.saturating_mul(1000).to_be_bytes()[2..]);
         device_id[6] = (device_id[6] & 0x0f) | 0x70;
         device_id[8] = (device_id[8] & 0x3f) | 0x80;
-        let seed: [u8; 32] = provider.rand().random_array().map_err(mls("random"))?;
-        let ask = AccountKey::from_seed(Zeroizing::new(seed), ask_version);
         let signer =
             SignatureKeyPair::new(CIPHERSUITE.signature_algorithm()).map_err(mls("keygen"))?;
         signer.store(provider.storage()).map_err(mls("storage"))?;
-        let certificate = ask.certify(CertificateBody {
-            user_id,
-            device_id,
-            mls_signature_key: key32(signer.public(), "signature key")?,
-            ask_version,
-            created_at: now,
-            ciphersuites: vec![CIPHERSUITE_ID],
-        });
-        let mut pins = BTreeMap::new();
-        pins.insert(
-            user_id,
-            Pin {
-                key: B64.encode(ask.public_key()),
-                version: ask_version,
-                verified: true,
-                changed: false,
-            },
-        );
         Ok(Self {
             provider,
             user_id,
             device_id,
-            ask,
+            ask: None,
+            ask_public: [0; 32],
+            ask_version: 0,
             signer,
-            certificate,
-            pins,
+            certificate: None,
+            pins: BTreeMap::new(),
             groups: BTreeMap::new(),
+            link: None,
+            backup_root: None,
         })
+    }
+
+    /// Takes the account identity key (trusted device) and certifies this device with it.
+    fn install_identity(&mut self, ask: AccountKey, now: u64) -> Result<()> {
+        let certificate = ask.certify(CertificateBody {
+            user_id: self.user_id,
+            device_id: self.device_id,
+            mls_signature_key: key32(self.signer.public(), "signature key")?,
+            ask_version: ask.version,
+            created_at: now,
+            ciphersuites: vec![CIPHERSUITE_ID],
+        });
+        self.ask_public = ask.public_key();
+        self.ask_version = ask.version;
+        self.pin_own();
+        self.certificate = Some(certificate);
+        self.ask = Some(ask);
+        self.link = None;
+        Ok(())
+    }
+
+    fn pin_own(&mut self) {
+        let devices = self
+            .pins
+            .get(&self.user_id)
+            .and_then(|pin| pin.devices.clone());
+        self.pins.insert(
+            self.user_id,
+            Pin {
+                key: B64.encode(self.ask_public),
+                version: self.ask_version,
+                verified: true,
+                changed: false,
+                devices,
+            },
+        );
+    }
+
+    pub fn is_trusted(&self) -> bool {
+        self.ask.is_some()
+    }
+
+    pub fn is_pending(&self) -> bool {
+        self.certificate.is_none()
+    }
+
+    fn require_ask(&self) -> Result<&AccountKey> {
+        self.ask.as_ref().ok_or(CoreError::State(
+            "this device does not hold the account key",
+        ))
+    }
+
+    fn require_certificate(&self) -> Result<&DeviceCertificate> {
+        self.certificate
+            .as_ref()
+            .ok_or(CoreError::State("device is not linked yet"))
     }
 
     // ---------------------------------------------------------------- persistence
@@ -273,10 +435,11 @@ impl Client {
             version: STATE_VERSION,
             user_id: format_id(&self.user_id),
             device_id: format_id(&self.device_id),
-            ask_secret: B64.encode(*self.ask.secret_bytes()),
-            ask_version: self.ask.version,
+            ask_secret: self.ask.as_ref().map(|ask| B64.encode(*ask.secret_bytes())),
+            ask_public: Some(B64.encode(self.ask_public)),
+            ask_version: self.ask_version,
             signature_public_key: B64.encode(self.signer.public()),
-            certificate: B64.encode(self.certificate.encode()),
+            certificate: self.certificate.as_ref().map(|c| B64.encode(c.encode())),
             pins: self
                 .pins
                 .iter()
@@ -287,6 +450,9 @@ impl Client {
                 .iter()
                 .map(|(k, v)| (format_id(k), v.clone()))
                 .collect(),
+            link_private: self.link.as_ref().map(|l| B64.encode(l.private.as_slice())),
+            link_public: self.link.as_ref().map(|l| B64.encode(&l.public)),
+            backup_root: self.backup_root.as_ref().map(|k| B64.encode(k.as_ref())),
         };
         let json =
             Zeroizing::new(serde_json::to_vec(&state).map_err(|_| CoreError::State("encode"))?);
@@ -351,8 +517,29 @@ impl Client {
         if !cursor.is_empty() {
             return Err(CoreError::State("trailing bytes"));
         }
-        let seed = Zeroizing::new(key32(&decode_b64(&state.ask_secret, "ask")?, "ask")?);
-        let ask = AccountKey::from_seed(seed, state.ask_version);
+        let ask = match &state.ask_secret {
+            Some(secret) => Some(AccountKey::from_seed(
+                Zeroizing::new(key32(&decode_b64(secret, "ask")?, "ask")?),
+                state.ask_version,
+            )),
+            None => None,
+        };
+        let ask_public = match (&state.ask_public, &ask) {
+            (Some(public), _) => key32(&decode_b64(public, "ask public")?, "ask public")?,
+            (None, Some(ask)) => ask.public_key(),
+            (None, None) => [0; 32],
+        };
+        let link = match (&state.link_private, &state.link_public) {
+            (Some(private), Some(public)) => Some(PendingLink {
+                private: Zeroizing::new(decode_b64(private, "link key")?),
+                public: decode_b64(public, "link key")?,
+            }),
+            _ => None,
+        };
+        let backup_root = match &state.backup_root {
+            Some(root) => Some(Zeroizing::new(key32(&decode_b64(root, "brk")?, "brk")?)),
+            None => None,
+        };
         let public = decode_b64(&state.signature_public_key, "signature key")?;
         let signer = SignatureKeyPair::read(
             provider.storage(),
@@ -360,8 +547,13 @@ impl Client {
             CIPHERSUITE.signature_algorithm(),
         )
         .ok_or(CoreError::State("signature key missing"))?;
-        let certificate =
-            DeviceCertificate::decode(&decode_b64(&state.certificate, "certificate")?)?;
+        let certificate = match &state.certificate {
+            Some(encoded) => Some(DeviceCertificate::decode(&decode_b64(
+                encoded,
+                "certificate",
+            )?)?),
+            None => None,
+        };
         let mut pins = BTreeMap::new();
         for (user, pin) in state.pins {
             pins.insert(parse_id(&user)?, pin);
@@ -375,10 +567,14 @@ impl Client {
             user_id: parse_id(&state.user_id)?,
             device_id: parse_id(&state.device_id)?,
             ask,
+            ask_public,
+            ask_version: state.ask_version,
             signer,
             certificate,
             pins,
             groups,
+            link,
+            backup_root,
         })
     }
 
@@ -393,15 +589,15 @@ impl Client {
     }
 
     pub fn ask_public_key(&self) -> [u8; 32] {
-        self.ask.public_key()
+        self.ask_public
     }
 
     pub fn ask_version(&self) -> u32 {
-        self.ask.version
+        self.ask_version
     }
 
-    pub fn certificate(&self) -> Vec<u8> {
-        self.certificate.encode()
+    pub fn certificate(&self) -> Result<Vec<u8>> {
+        Ok(self.require_certificate()?.encode())
     }
 
     /// Records the Account Signing Key the server reports for a user (TOFU pinning).
@@ -417,7 +613,7 @@ impl Client {
         ed25519_dalek::VerifyingKey::from_bytes(&key)
             .map_err(|_| CoreError::Untrusted("account key"))?;
         let encoded = B64.encode(key);
-        if user == self.user_id && encoded != B64.encode(self.ask.public_key()) {
+        if user == self.user_id && encoded != B64.encode(self.ask_public) {
             // Our own identity is authoritative locally; a different server value is an attack
             // or a reset performed elsewhere, never something to adopt silently.
             return Err(CoreError::Untrusted("own account key mismatch"));
@@ -431,6 +627,7 @@ impl Client {
                         version,
                         verified: false,
                         changed: false,
+                        devices: None,
                     },
                 );
                 Ok(IdentityObservation::New)
@@ -445,6 +642,7 @@ impl Client {
                     version,
                     verified: false,
                     changed: true,
+                    devices: None,
                 };
                 Ok(IdentityObservation::Changed)
             }
@@ -486,9 +684,380 @@ impl Client {
             .ok_or_else(|| CoreError::UnknownIdentity(peer_user_id.to_owned()))?;
         let key = key32(&decode_b64(&pin.key, "pin")?, "pin")?;
         Ok(safety::safety_number(
-            (&self.user_id, &self.ask.public_key()),
+            (&self.user_id, &self.ask_public),
             (&peer, &key),
         ))
+    }
+
+    /// Records the active devices the directory lists for a user; returns devices not seen
+    /// before (for a "new device" notice). The first observation only sets the baseline.
+    pub fn observe_devices(&mut self, user_id: &str, device_ids: &[String]) -> Result<Vec<String>> {
+        let user = parse_id(user_id)?;
+        let pin = self
+            .pins
+            .get_mut(&user)
+            .ok_or_else(|| CoreError::UnknownIdentity(user_id.to_owned()))?;
+        let mut current: Vec<String> = device_ids.iter().map(|d| d.to_lowercase()).collect();
+        current.sort();
+        current.dedup();
+        let added = match &pin.devices {
+            None => Vec::new(),
+            Some(known) => current
+                .iter()
+                .filter(|d| !known.contains(d))
+                .cloned()
+                .collect(),
+        };
+        pin.devices = Some(current);
+        Ok(added)
+    }
+
+    // ---------------------------------------------------------------- device linking
+
+    /// Keys a pending device publishes (via the server) for linking.
+    pub fn link_request(&self) -> Result<(Vec<u8>, Vec<u8>)> {
+        let link = self
+            .link
+            .as_ref()
+            .ok_or(CoreError::State("not waiting to be linked"))?;
+        Ok((link.public.clone(), self.signer.public().to_vec()))
+    }
+
+    /// The code the pending device shows, once the server assigned the short link id.
+    pub fn link_code(&self, short_id: &[u8]) -> Result<String> {
+        let short_id: [u8; link::SHORT_ID_BYTES] = short_id
+            .try_into()
+            .map_err(|_| CoreError::Malformed("link id"))?;
+        let (hpke_public, signature_public) = self.link_request()?;
+        Ok(link::code(
+            &short_id,
+            &link::fingerprint(&short_id, &hpke_public, &signature_public),
+        ))
+    }
+
+    /// On an existing trusted device: checks the new device's keys against the code the user
+    /// entered, certifies it with the account identity key and seals the link payload to it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn approve_link(
+        &self,
+        code: &str,
+        short_id: &[u8],
+        device_id: &str,
+        hpke_public: &[u8],
+        signature_public: &[u8],
+        trusted: bool,
+        history: &[u8],
+        now: u64,
+    ) -> Result<Vec<u8>> {
+        let ask = self.require_ask()?;
+        let short_id: [u8; link::SHORT_ID_BYTES] = short_id
+            .try_into()
+            .map_err(|_| CoreError::Malformed("link id"))?;
+        link::verify(code, &short_id, hpke_public, signature_public)?;
+        let device = parse_id(device_id)?;
+        if device == self.device_id {
+            return Err(CoreError::Malformed("cannot link this device to itself"));
+        }
+        let certificate = ask.certify(CertificateBody {
+            user_id: self.user_id,
+            device_id: device,
+            mls_signature_key: key32(signature_public, "signature key")?,
+            ask_version: ask.version,
+            created_at: now,
+            ciphersuites: vec![CIPHERSUITE_ID],
+        });
+        let payload = LinkPayload {
+            version: 1,
+            user_id: format_id(&self.user_id),
+            ask_public: B64.encode(self.ask_public),
+            ask_version: self.ask_version,
+            ask_secret: trusted.then(|| B64.encode(*ask.secret_bytes())),
+            certificate: B64.encode(certificate.encode()),
+            pins: self
+                .pins
+                .iter()
+                .map(|(k, v)| (format_id(k), v.clone()))
+                .collect(),
+            backup_root: if trusted {
+                self.backup_root.as_ref().map(|k| B64.encode(k.as_ref()))
+            } else {
+                None
+            },
+            history: B64.encode(history),
+        };
+        let plaintext =
+            Zeroizing::new(serde_json::to_vec(&payload).map_err(|_| CoreError::State("encode"))?);
+        let sealed = self
+            .provider
+            .crypto()
+            .hpke_seal(
+                CIPHERSUITE.hpke_config(),
+                hpke_public,
+                link::HPKE_INFO,
+                &link::aad(&short_id, &device),
+                &plaintext,
+            )
+            .map_err(mls("hpke seal"))?;
+        Ok(link::encode_sealed(
+            sealed.kem_output.as_slice(),
+            sealed.ciphertext.as_slice(),
+        ))
+    }
+
+    /// On the pending device: opens the payload, checks it belongs to this account's current
+    /// identity (as reported by the server) and to this device, and installs it. Returns the
+    /// transferred history (opaque).
+    pub fn complete_link(
+        &mut self,
+        sealed: &[u8],
+        short_id: &[u8],
+        expected_ask_public: &[u8],
+        expected_version: u32,
+    ) -> Result<Vec<u8>> {
+        let link = self
+            .link
+            .as_ref()
+            .ok_or(CoreError::State("not waiting to be linked"))?;
+        let short_id: [u8; link::SHORT_ID_BYTES] = short_id
+            .try_into()
+            .map_err(|_| CoreError::Malformed("link id"))?;
+        let (kem_output, ciphertext) = link::decode_sealed(sealed)?;
+        let input = openmls_traits::types::HpkeCiphertext {
+            kem_output: kem_output.to_vec().into(),
+            ciphertext: ciphertext.to_vec().into(),
+        };
+        let plaintext = Zeroizing::new(
+            self.provider
+                .crypto()
+                .hpke_open(
+                    CIPHERSUITE.hpke_config(),
+                    &input,
+                    &link.private,
+                    link::HPKE_INFO,
+                    &link::aad(&short_id, &self.device_id),
+                )
+                .map_err(|_| CoreError::Untrusted("link payload"))?,
+        );
+        let payload: LinkPayload =
+            serde_json::from_slice(&plaintext).map_err(|_| CoreError::Malformed("link payload"))?;
+        let ask_public = key32(&decode_b64(&payload.ask_public, "ask")?, "ask")?;
+        if parse_id(&payload.user_id)? != self.user_id
+            || ask_public.as_slice() != expected_ask_public
+            || payload.ask_version != expected_version
+        {
+            return Err(CoreError::Untrusted("link payload is for another identity"));
+        }
+        let certificate =
+            DeviceCertificate::decode(&decode_b64(&payload.certificate, "certificate")?)?;
+        if certificate.body.user_id != self.user_id
+            || certificate.body.device_id != self.device_id
+            || certificate.body.mls_signature_key.as_slice() != self.signer.public()
+            || certificate.body.ask_version != expected_version
+        {
+            return Err(CoreError::Untrusted("certificate is not for this device"));
+        }
+        certificate.verify(&ask_public)?;
+        let ask = match &payload.ask_secret {
+            Some(secret) => {
+                let ask = AccountKey::from_seed(
+                    Zeroizing::new(key32(&decode_b64(secret, "ask")?, "ask")?),
+                    expected_version,
+                );
+                if ask.public_key() != ask_public {
+                    return Err(CoreError::Untrusted("account key does not match"));
+                }
+                Some(ask)
+            }
+            None => None,
+        };
+        for (user, pin) in &payload.pins {
+            self.pins.insert(parse_id(user)?, pin.clone());
+        }
+        self.backup_root = match &payload.backup_root {
+            Some(root) => Some(Zeroizing::new(key32(&decode_b64(root, "brk")?, "brk")?)),
+            None => None,
+        };
+        self.ask_public = ask_public;
+        self.ask_version = expected_version;
+        self.ask = ask;
+        self.certificate = Some(certificate);
+        self.link = None;
+        self.pin_own();
+        decode_b64(&payload.history, "history").map_err(|_| CoreError::Malformed("history"))
+    }
+
+    // ---------------------------------------------------------------- backups
+
+    pub fn has_backup_key(&self) -> bool {
+        self.backup_root.is_some()
+    }
+
+    /// Whether a stored backup manifest was made with this device's Backup Root Key. A device
+    /// holding an older BRK (backups were turned off and on again elsewhere) must not upload.
+    pub fn backup_owns(&self, manifest: &[u8], mac: &[u8]) -> bool {
+        self.backup_root
+            .as_ref()
+            .is_some_and(|brk| backup::verify_manifest(brk, manifest, mac).is_ok())
+    }
+
+    /// Creates the Backup Root Key and a recovery key; returns the recovery key (shown once,
+    /// never stored) and the BRK wrapped under it (stored by the server).
+    pub fn backup_enable(&mut self) -> Result<(String, Vec<u8>)> {
+        self.require_ask()?;
+        let brk: [u8; 32] = self.provider.rand().random_array().map_err(mls("random"))?;
+        let brk = Zeroizing::new(brk);
+        let (recovery, wrapped) = self.recovery_wrap(&brk)?;
+        self.backup_root = Some(brk);
+        Ok((recovery, wrapped))
+    }
+
+    /// A new recovery key for the existing BRK (the old one keeps working until its wrap is
+    /// deleted on the server).
+    pub fn backup_new_recovery_key(&self) -> Result<(String, Vec<u8>)> {
+        let brk = self
+            .backup_root
+            .as_ref()
+            .ok_or(CoreError::State("backups are not set up"))?;
+        self.recovery_wrap(brk)
+    }
+
+    fn recovery_wrap(&self, brk: &[u8; 32]) -> Result<(String, Vec<u8>)> {
+        let recovery: [u8; 32] = self.provider.rand().random_array().map_err(mls("random"))?;
+        let recovery = Zeroizing::new(recovery);
+        let nonce: [u8; 24] = self.provider.rand().random_array().map_err(mls("random"))?;
+        let wrapped = backup::wrap(recovery.as_ref(), backup::RECOVERY_WRAP_INFO, brk, nonce)?;
+        Ok((backup::format_recovery_key(&recovery), wrapped))
+    }
+
+    /// Wraps the BRK under a passkey's WebAuthn PRF output.
+    pub fn backup_passkey_wrap(&self, prf_output: &[u8]) -> Result<Vec<u8>> {
+        if prf_output.len() != 32 {
+            return Err(CoreError::Malformed("prf output"));
+        }
+        let brk = self
+            .backup_root
+            .as_ref()
+            .ok_or(CoreError::State("backups are not set up"))?;
+        let nonce: [u8; 24] = self.provider.rand().random_array().map_err(mls("random"))?;
+        backup::wrap(prf_output, backup::PASSKEY_WRAP_INFO, brk, nonce)
+    }
+
+    /// Encrypts a backup of this account (identity key, pins and the app's data).
+    pub fn backup_export(
+        &self,
+        app: &[u8],
+        version: u64,
+        prev_hash: Option<String>,
+        created_at: u64,
+    ) -> Result<BackupOutput> {
+        let ask = self.require_ask()?;
+        let brk = self
+            .backup_root
+            .as_ref()
+            .ok_or(CoreError::State("backups are not set up"))?;
+        let content = BackupContent {
+            format: 1,
+            user_id: format_id(&self.user_id),
+            ask_public: B64.encode(self.ask_public),
+            ask_version: self.ask_version,
+            ask_secret: B64.encode(*ask.secret_bytes()),
+            pins: self
+                .pins
+                .iter()
+                .map(|(k, v)| (format_id(k), v.clone()))
+                .collect(),
+            app: B64.encode(app),
+        };
+        let plaintext =
+            Zeroizing::new(serde_json::to_vec(&content).map_err(|_| CoreError::State("encode"))?);
+        let backup_id: [u8; 16] = self.provider.rand().random_array().map_err(mls("random"))?;
+        let nonce: [u8; backup::STREAM_NONCE_BYTES] =
+            self.provider.rand().random_array().map_err(mls("random"))?;
+        let blob = backup::encrypt(brk, &backup_id, nonce, &plaintext)?;
+        let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(&blob).into();
+        let manifest = BackupManifest {
+            format: 1,
+            backup_id: format_id(&backup_id),
+            version,
+            prev_hash,
+            ciphertext_sha256: B64.encode(hash),
+            size: blob.len() as u64,
+            created_at,
+            user_id: format_id(&self.user_id),
+        };
+        let manifest = serde_json::to_vec(&manifest).map_err(|_| CoreError::State("encode"))?;
+        let mac = backup::sign_manifest(brk, &manifest);
+        Ok(BackupOutput {
+            blob,
+            manifest,
+            mac,
+        })
+    }
+
+    /// Restores this (pending) device from a backup: unwraps the BRK with the recovery key or
+    /// passkey, verifies the manifest and ciphertext, decrypts, checks the identity is the
+    /// account's current one, and certifies this device. Returns the app's data.
+    #[allow(clippy::too_many_arguments)]
+    pub fn backup_restore(
+        &mut self,
+        secret: BackupSecret<'_>,
+        wrapped: &[u8],
+        blob: &[u8],
+        manifest: &[u8],
+        mac: &[u8],
+        expected_ask_public: &[u8],
+        expected_version: u32,
+        now: u64,
+    ) -> Result<(Vec<u8>, BackupManifest)> {
+        if !self.is_pending() {
+            return Err(CoreError::State("device already set up"));
+        }
+        let brk = match secret {
+            BackupSecret::RecoveryKey(text) => {
+                let key = backup::parse_recovery_key(text)?;
+                backup::unwrap(key.as_ref(), backup::RECOVERY_WRAP_INFO, wrapped)?
+            }
+            BackupSecret::PasskeyPrf(output) => {
+                backup::unwrap(output, backup::PASSKEY_WRAP_INFO, wrapped)?
+            }
+        };
+        backup::verify_manifest(&brk, manifest, mac)?;
+        let parsed: BackupManifest =
+            serde_json::from_slice(manifest).map_err(|_| CoreError::Malformed("manifest"))?;
+        let hash: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(blob).into();
+        if parsed.ciphertext_sha256 != B64.encode(hash) || parsed.size != blob.len() as u64 {
+            return Err(CoreError::Untrusted("backup does not match its manifest"));
+        }
+        let (plaintext, backup_id) = backup::decrypt(&brk, blob)?;
+        let plaintext = Zeroizing::new(plaintext);
+        if format_id(&backup_id) != parsed.backup_id {
+            return Err(CoreError::Untrusted("backup does not match its manifest"));
+        }
+        let content: BackupContent =
+            serde_json::from_slice(&plaintext).map_err(|_| CoreError::Malformed("backup"))?;
+        let ask_public = key32(&decode_b64(&content.ask_public, "ask")?, "ask")?;
+        if parse_id(&content.user_id)? != self.user_id {
+            return Err(CoreError::Untrusted("backup belongs to another account"));
+        }
+        if ask_public.as_slice() != expected_ask_public || content.ask_version != expected_version {
+            return Err(CoreError::Untrusted(
+                "backup was made with an older security key of this account",
+            ));
+        }
+        let ask = AccountKey::from_seed(
+            Zeroizing::new(key32(&decode_b64(&content.ask_secret, "ask")?, "ask")?),
+            expected_version,
+        );
+        if ask.public_key() != ask_public {
+            return Err(CoreError::Untrusted("account key does not match"));
+        }
+        for (user, pin) in &content.pins {
+            self.pins.insert(parse_id(user)?, pin.clone());
+        }
+        self.backup_root = Some(brk);
+        self.install_identity(ask, now)?;
+        let app = decode_b64(&content.app, "app").map_err(|_| CoreError::Malformed("backup"))?;
+        Ok((app, parsed))
     }
 
     // ---------------------------------------------------------------- key packages
@@ -503,7 +1072,7 @@ impl Client {
     fn leaf_extensions(&self) -> Result<Extensions<LeafNode>> {
         Extensions::single(Extension::Unknown(
             CERT_EXTENSION,
-            UnknownExtension(self.certificate.encode()),
+            UnknownExtension(self.require_certificate()?.encode()),
         ))
         .map_err(mls("leaf extensions"))
     }
@@ -1007,3 +1576,6 @@ impl Client {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod multidevice_tests;

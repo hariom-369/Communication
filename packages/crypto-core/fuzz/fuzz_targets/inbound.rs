@@ -32,4 +32,17 @@ fuzz_target!(|data: &[u8]| {
     let _ = bob.process(CONVERSATION, data, &allowed);
     let _ = bob.join("0192f0c1-7a3b-7c4d-8e5f-000000000009", data, &allowed, 1);
     let _ = bob.update_members(CONVERSATION, &[data.to_vec()], &[], &allowed);
+    // Link payloads and backups relayed or stored by the server.
+    let mut pending = Client::create_pending(BOB, 1).unwrap();
+    let _ = pending.complete_link(data, &[1, 2, 3, 4, 5], &[0; 32], 1);
+    let _ = pending.backup_restore(
+        tessera_crypto_core::client::BackupSecret::PasskeyPrf(&[7; 32]),
+        data.get(..72).unwrap_or(data),
+        data,
+        data,
+        data.get(..32).unwrap_or(data),
+        &[0; 32],
+        1,
+        1,
+    );
 });

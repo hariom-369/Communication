@@ -190,6 +190,42 @@ export interface DevicesTable {
   created_at: Timestamp;
   last_seen_at: Timestamp;
   revoked_at: NullableTimestamp;
+  label: ColumnType<string, string | undefined, string>;
+  trusted: ColumnType<boolean, boolean | undefined, boolean>;
+}
+
+export interface LinkSessionsTable {
+  id: string;
+  user_id: string;
+  session_id: string;
+  short_id: Buffer;
+  device_id: string;
+  hpke_public: Buffer;
+  signature_public: Buffer;
+  label: string;
+  sealed: Buffer | null;
+  approved_by: string | null;
+  created_at: Timestamp;
+  expires_at: Date;
+}
+
+export interface BackupsTable {
+  user_id: string;
+  version: ColumnType<string, number, number>;
+  blob: Buffer;
+  manifest: string;
+  mac: Buffer;
+  created_at: Timestamp;
+}
+
+export interface BackupWrapsTable {
+  id: string;
+  user_id: string;
+  kind: 'recovery' | 'passkey';
+  wrap: Buffer;
+  credential_id: string | null;
+  prf_salt: Buffer | null;
+  created_at: Timestamp;
 }
 
 export interface KeyPackagesTable {
@@ -234,6 +270,9 @@ export interface Database {
   account_keys: AccountKeysTable;
   devices: DevicesTable;
   key_packages: KeyPackagesTable;
+  link_sessions: LinkSessionsTable;
+  backups: BackupsTable;
+  backup_wraps: BackupWrapsTable;
 }
 
 /** Owning module of every table ('platform' = infrastructure code outside modules/). */
@@ -259,4 +298,7 @@ export const TABLE_OWNERS: Readonly<Record<keyof Database, string>> = {
   account_keys: 'keys',
   devices: 'keys',
   key_packages: 'keys',
+  link_sessions: 'keys',
+  backups: 'backups',
+  backup_wraps: 'backups',
 };

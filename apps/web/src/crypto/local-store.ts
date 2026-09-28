@@ -86,6 +86,11 @@ export class LocalStore {
         if (!db.objectStoreNames.contains(name)) db.createObjectStore(name);
     };
     const db = await request(openRequest);
+    // Another tab (or this one) is deleting or upgrading the database: let it, instead of
+    // blocking it forever. This connection is unusable afterwards; the app reloads its state.
+    db.onversionchange = () => {
+      db.close();
+    };
     const tx = db.transaction('meta', 'readonly');
     let key = (await request(tx.objectStore('meta').get('lsk'))) as CryptoKey | undefined;
     if (key === undefined) {
@@ -158,6 +163,25 @@ export class LocalStore {
       records.push(JSON.parse(decoder.decode(bytes)));
     }
     return records;
+  }
+
+  /** Every conversation's history (for device-to-device transfer and backups). */
+  async allHistory(): Promise<Map<string, unknown[]>> {
+    const tx = this.#db.transaction('history', 'readonly');
+    const store = tx.objectStore('history');
+    const [keys, values] = await Promise.all([
+      request(store.getAllKeys()),
+      request(store.getAll()),
+    ]);
+    const out = new Map<string, unknown[]>();
+    for (let i = 0; i < values.length; i += 1) {
+      const [conversationId, seq] = keys[i] as [string, number];
+      const bytes = await this.#open(values[i] as Sealed, `history|${conversationId}|${seq}`);
+      const list = out.get(conversationId) ?? [];
+      list.push(JSON.parse(decoder.decode(bytes)));
+      out.set(conversationId, list);
+    }
+    return out;
   }
 
   /** Atomically persists state, history records and cursors (all encrypted first). */

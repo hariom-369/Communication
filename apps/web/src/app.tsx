@@ -12,6 +12,7 @@ import { MfaPage } from './pages/MfaPage.js';
 import { NotFoundPage } from './pages/NotFoundPage.js';
 import { ResetPasswordPage } from './pages/ResetPasswordPage.js';
 import { AccountPage } from './pages/settings/AccountPage.js';
+import { DevicesPage } from './pages/settings/DevicesPage.js';
 import { PrivacyPage } from './pages/settings/PrivacyPage.js';
 import { SecurityPage } from './pages/settings/SecurityPage.js';
 import { SetupCredentialPage } from './pages/SetupCredentialPage.js';
@@ -128,6 +129,7 @@ const router = createBrowserRouter([
     children: [
       { path: '/settings', element: <Navigate to="/settings/security" replace /> },
       { path: '/settings/security', element: <SecurityPage /> },
+      { path: '/settings/devices', element: <DevicesPage /> },
       { path: '/settings/privacy', element: <PrivacyPage /> },
       { path: '/settings/account', element: <AccountPage /> },
       { path: '/chats', element: <ChatsPage /> },

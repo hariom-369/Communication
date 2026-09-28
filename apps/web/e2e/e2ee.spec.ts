@@ -147,6 +147,7 @@ test.describe('end-to-end encryption', () => {
     await expect(
       bobLaptop.getByRole('heading', { name: 'Set up encryption on this device' }),
     ).toBeVisible();
+    await bobLaptop.getByRole('button', { name: 'Start over' }).click();
     await bobLaptop.getByRole('button', { name: 'Create a new security key' }).click();
     await expect(bobLaptop.getByRole('status').filter({ hasText: 'Connected' })).toBeVisible();
 
@@ -174,7 +175,7 @@ test.describe('end-to-end encryption', () => {
     // The old device is signed out of encrypted chats.
     await bob.page.reload();
     await expect(
-      bob.page.getByRole('heading', { name: 'This device was signed out of encrypted chats' }),
+      bob.page.getByRole('heading', { name: 'This device was removed from your encrypted chats' }),
     ).toBeVisible();
     await alice.context.close();
     await bob.context.close();

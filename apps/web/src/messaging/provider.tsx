@@ -3,6 +3,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useReducer,
   useSyncExternalStore,
   type ReactNode,
 } from 'react';
@@ -15,6 +16,7 @@ import { E2eeSession } from './e2ee.js';
 import { MessagingStore, type MessagingSnapshot } from './store.js';
 
 const StoreContext = createContext<MessagingStore | null>(null);
+const E2eeContext = createContext<E2eeSession | null>(null);
 
 /**
  * Runs end-to-end encryption (a dedicated crypto worker) and the messaging store for the
@@ -23,13 +25,13 @@ const StoreContext = createContext<MessagingStore | null>(null);
 export function MessagingProvider({ children }: { children: ReactNode }): ReactNode {
   const { me } = useSession();
   const userId = me?.id;
-  const store = useMemo(() => {
-    if (userId === undefined) return null;
-    return new MessagingStore({
-      api: endpoints,
-      security: new E2eeSession(startCryptoWorker, endpoints, userId),
-      me: { id: userId },
-    });
+  const { store, e2ee } = useMemo(() => {
+    if (userId === undefined) return { store: null, e2ee: null };
+    const session = new E2eeSession(startCryptoWorker, endpoints, userId);
+    return {
+      e2ee: session,
+      store: new MessagingStore({ api: endpoints, security: session, me: { id: userId } }),
+    };
   }, [userId]);
 
   useEffect(() => {
@@ -61,7 +63,19 @@ export function MessagingProvider({ children }: { children: ReactNode }): ReactN
     };
   }, [store]);
 
-  return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
+  return (
+    <E2eeContext.Provider value={e2ee}>
+      <StoreContext.Provider value={store}>{children}</StoreContext.Provider>
+    </E2eeContext.Provider>
+  );
+}
+
+/** This device's end-to-end encryption session (devices, linking, backups); re-renders on change. */
+export function useE2ee(): E2eeSession | null {
+  const session = useContext(E2eeContext);
+  const [, rerender] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => session?.subscribe(rerender), [session]);
+  return session;
 }
 
 export function useMessagingStore(): MessagingStore | null {

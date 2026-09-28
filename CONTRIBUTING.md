@@ -29,7 +29,7 @@ cp services/realtime/.env.example services/realtime/.env   # local only
 | `pnpm --filter @tessera/web dev` | web app with hot reload on http://localhost:5173 (proxies `/api` to :8080 and `/rt` to :8081) |
 | `pnpm --filter @tessera/realtime start` | realtime WebSocket service on :8081 (after `pnpm build`) |
 | `pnpm --filter @tessera/crypto-core lint` | `rustfmt --check` and `clippy -D warnings` for native and wasm32 targets (`pnpm test` runs `cargo test`) |
-| `cargo +nightly fuzz run <target>` (in `packages/crypto-core`) | fuzz `certificate`, `padding`, `snapshot` or `inbound` (needs `cargo install cargo-fuzz`; CI fuzzes nightly) |
+| `cargo +nightly fuzz run <target>` (in `packages/crypto-core`) | fuzz `certificate`, `padding`, `snapshot`, `inbound` or `backup` (needs `cargo install cargo-fuzz`; CI fuzzes nightly) |
 | `pnpm --filter @tessera/web test:e2e` | end-to-end tests: starts API + realtime + SMTP capture and serves the production build (needs the `TEST_*` variables; run `pnpm build` first) |
 | `pnpm --filter @tessera/api migrate` | apply database migrations (after `pnpm build`) |
 

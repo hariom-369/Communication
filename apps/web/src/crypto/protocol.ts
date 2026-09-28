@@ -7,9 +7,28 @@
 export interface Identity {
   readonly userId: string;
   readonly deviceId: string;
-  readonly askPublicKey: string;
+  /** null while the device waits to be linked or restored. */
+  readonly askPublicKey: string | null;
   readonly askVersion: number;
-  readonly certificate: string;
+  readonly certificate: string | null;
+  /** Holds the account identity key (can link devices, back up). */
+  readonly trusted: boolean;
+  /** Waiting to be linked from another device or restored from a backup. */
+  readonly pending: boolean;
+  /** Has the Backup Root Key (backups are set up). */
+  readonly backups: boolean;
+}
+
+/** Decrypted history of every conversation, for device-to-device transfer and backups. */
+export interface HistoryBundle {
+  readonly v: 1;
+  readonly conversations: Record<string, HistoryRecord[]>;
+}
+
+export interface EncryptedBackup {
+  readonly blob: string;
+  readonly manifest: string;
+  readonly mac: string;
 }
 
 export interface Pin {
@@ -103,6 +122,43 @@ export interface CryptoApi {
   ): CommitOutput;
   needsUpdate(conversationId: string): boolean;
   selfUpdate(conversationId: string): CommitOutput;
+
+  // ---- multi-device (docs/multi-device.md) ----
+  /** Deletes all local encryption data for this account on this device and starts over. */
+  reset(userId: string): void;
+  createPending(userId: string): Identity;
+  linkRequest(): { hpkePublic: string; signaturePublic: string };
+  linkCode(shortId: string): string;
+  parseLinkCode(code: string): string;
+  /** Throws unless the keys match the code (fingerprint); see link.rs. */
+  verifyLinkCode(code: string, shortId: string, hpkePublic: string, signaturePublic: string): void;
+  approveLink(
+    code: string,
+    shortId: string,
+    deviceId: string,
+    hpkePublic: string,
+    signaturePublic: string,
+    trusted: boolean,
+    includeHistory: boolean,
+  ): string;
+  completeLink(sealed: string, shortId: string, expectedAsk: string, version: number): Identity;
+  observeDevices(userId: string, deviceIds: string[]): string[];
+
+  // ---- backups (docs/encrypted-backups.md) ----
+  backupEnable(): { recoveryKey: string; wrap: string };
+  backupNewRecoveryKey(): { recoveryKey: string; wrap: string };
+  backupPasskeyWrap(prfOutput: string): string;
+  /** Whether a stored backup was made with this device's backup key (see ADR-042). */
+  backupOwns(manifest: string, mac: string): boolean;
+  backupExport(version: number): EncryptedBackup;
+  backupRestore(
+    kind: 'recovery' | 'passkey',
+    secret: string,
+    wrap: string,
+    backup: EncryptedBackup,
+    expectedAsk: string,
+    version: number,
+  ): { identity: Identity; version: number; createdAt: number };
 }
 
 export type Method = keyof CryptoApi;

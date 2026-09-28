@@ -6,6 +6,7 @@ import type { ApiConfig } from './config.js';
 import type { Database } from './db/schema.js';
 import { AccountService, accountsRoutes } from './modules/accounts/index.js';
 import { AuditLog } from './modules/audit/index.js';
+import { BackupsService, backupsRoutes } from './modules/backups/index.js';
 import {
   AuthService,
   authRoutes,
@@ -123,6 +124,8 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
     infra.logger,
   );
   messaging.useDevices(keys);
+  keys.useNotifier(auth);
+  const backups = new BackupsService(infra.db, audit, auth);
   const realtime = new RealtimeService(infra.valkey, config.VALKEY_KEY_PREFIX, {
     privacySettings: (userId) => accounts.privacySettings(userId),
     areContacts: (a, b) => messaging.areContacts(a, b),
@@ -135,6 +138,7 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
       ...authRoutes({ auth, sessions, passkeys }),
       ...messagingRoutes({ messaging }),
       ...keysRoutes({ keys }),
+      ...backupsRoutes({ backups }),
       ...realtimeRoutes({ realtime, websocketPath: config.REALTIME_WS_PATH }),
     ],
     sessions,

@@ -12,6 +12,12 @@ handling), `services/api/src/modules/keys` and the commit/Welcome paths in
 `services/api/src/modules/messaging`. Deviations from the design are listed in
 [crypto-design.md §0](crypto-design.md) and ADR-039..041. Nothing ships to users before sign-off.
 
+**Ready for review (Phase 5).** S-04 (device linking, messages-only devices) and S-06 (backups):
+`packages/crypto-core/src/{link,backup,base32}.rs`, the linking/backup parts of `client.rs` and
+`client/multidevice_tests.rs`, fuzz target `backup`; `apps/web/src/messaging/e2ee.ts` (linking,
+backup orchestration), `apps/web/src/lib/webauthn.ts` (PRF); `services/api/src/modules/keys`
+(links, devices) and `services/api/src/modules/backups`. Deviations: ADR-042.
+
 | ID | Item | Blocks | Why it needs a specialist |
 |---|---|---|---|
 | **S-01** | Protocol choice (MLS/OpenMLS vs libsignal vs others), OpenMLS version & crypto provider (RustCrypto vs libcrux), use of PublicMessage for handshakes, DS rules | ADR-004, Phase 4 | Foundational; errors here compromise all private content |

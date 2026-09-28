@@ -3,7 +3,7 @@ import 'fake-indexeddb/auto';
 
 import { readFileSync } from 'node:fs';
 
-import init, { CryptoClient } from '@tessera/crypto-core';
+import init, { CryptoClient, parseLinkCode, verifyLinkCode } from '@tessera/crypto-core';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -27,7 +27,7 @@ beforeAll(async () => {
   await init({ module_or_path: wasm });
 });
 
-const core = { CryptoClient };
+const core = { CryptoClient, parseLinkCode, verifyLinkCode };
 
 async function device(userId: string, factory = new IDBFactory()) {
   const engine = new CryptoEngine(core, factory);
@@ -59,8 +59,8 @@ async function conversation() {
   seq = 0;
   const alice = await device(ALICE);
   const bob = await device(BOB);
-  await alice.engine.call('observeIdentity', [BOB, bob.identity.askPublicKey, 1]);
-  await bob.engine.call('observeIdentity', [ALICE, alice.identity.askPublicKey, 1]);
+  await alice.engine.call('observeIdentity', [BOB, bob.identity.askPublicKey!, 1]);
+  await bob.engine.call('observeIdentity', [ALICE, alice.identity.askPublicKey!, 1]);
   const [keyPackage] = await bob.engine.call('keyPackages', [1, false]);
   const created = await alice.engine.call('createGroup', [CONVERSATION, [keyPackage!], [BOB]]);
   await alice.engine.call('mergePending', [CONVERSATION]);
@@ -219,8 +219,8 @@ describe('simultaneous group creation', () => {
     seq = 0;
     const alice = await device(ALICE);
     const bob = await device(BOB);
-    await alice.engine.call('observeIdentity', [BOB, bob.identity.askPublicKey, 1]);
-    await bob.engine.call('observeIdentity', [ALICE, alice.identity.askPublicKey, 1]);
+    await alice.engine.call('observeIdentity', [BOB, bob.identity.askPublicKey!, 1]);
+    await bob.engine.call('observeIdentity', [ALICE, alice.identity.askPublicKey!, 1]);
     const [bobPackage] = await bob.engine.call('keyPackages', [1, false]);
     const [alicePackage] = await alice.engine.call('keyPackages', [1, false]);
     // Both create the group at once; the server accepts Alice's commit.
@@ -244,8 +244,8 @@ describe('losing the creation race', () => {
     seq = 0;
     const alice = await device(ALICE);
     const bob = await device(BOB);
-    await alice.engine.call('observeIdentity', [BOB, bob.identity.askPublicKey, 1]);
-    await bob.engine.call('observeIdentity', [ALICE, alice.identity.askPublicKey, 1]);
+    await alice.engine.call('observeIdentity', [BOB, bob.identity.askPublicKey!, 1]);
+    await bob.engine.call('observeIdentity', [ALICE, alice.identity.askPublicKey!, 1]);
     const [bobPackage] = await bob.engine.call('keyPackages', [1, false]);
     const [alicePackage] = await alice.engine.call('keyPackages', [1, false]);
     const fromAlice = await alice.engine.call('createGroup', [CONVERSATION, [bobPackage!], [BOB]]);
@@ -264,5 +264,133 @@ describe('losing the creation race', () => {
     expect(await bob.engine.call('ingest', [CONVERSATION, commit, [ALICE]])).toEqual({
       status: 'duplicate',
     });
+  });
+});
+
+describe('multi-device (docs/multi-device.md)', () => {
+  it('links a new device with its history; the result survives a restart', async () => {
+    const { alice, bob } = await conversation();
+    const content = JSON.stringify({ v: 1, text: 'before the laptop' });
+    const sent = await bob.engine.call('encrypt', [CONVERSATION, content]);
+    await alice.engine.call('ingest', [CONVERSATION, inbound(bob, sent.ciphertext), [BOB]]);
+
+    const factory = new IDBFactory();
+    const laptop = new CryptoEngine(core, factory);
+    expect(await laptop.call('init', [ALICE])).toEqual({ identity: null });
+    const pending = await laptop.call('createPending', [ALICE]);
+    expect(pending).toMatchObject({ pending: true, trusted: false, askPublicKey: null });
+    const keys = await laptop.call('linkRequest', []);
+    const shortId = btoa('\x01\x02\x03\x04\x05');
+    const code = await laptop.call('linkCode', [shortId]);
+    expect(await alice.engine.call('parseLinkCode', [code])).toBe(shortId);
+
+    // A mistyped code, or keys the server substituted, are refused before anything is sent.
+    await alice.engine.call('verifyLinkCode', [
+      code,
+      shortId,
+      keys.hpkePublic,
+      keys.signaturePublic,
+    ]);
+    await expect(
+      alice.engine.call('verifyLinkCode', [code, shortId, keys.signaturePublic, keys.hpkePublic]),
+    ).rejects.toMatchObject({ code: 'UNTRUSTED' });
+    const typo = code.replace(/^./, (c) => (c === 'A' ? 'B' : 'A'));
+    await expect(
+      alice.engine.call('approveLink', [
+        typo,
+        shortId,
+        pending.deviceId,
+        keys.hpkePublic,
+        keys.signaturePublic,
+        true,
+        true,
+      ]),
+    ).rejects.toBeInstanceOf(CryptoError);
+
+    const sealed = await alice.engine.call('approveLink', [
+      code,
+      shortId,
+      pending.deviceId,
+      keys.hpkePublic,
+      keys.signaturePublic,
+      true,
+      true,
+    ]);
+    const linked = await laptop.call('completeLink', [
+      sealed,
+      shortId,
+      alice.identity.askPublicKey!,
+      1,
+    ]);
+    expect(linked).toMatchObject({
+      pending: false,
+      trusted: true,
+      askPublicKey: alice.identity.askPublicKey,
+    });
+    expect((await laptop.call('history', [CONVERSATION])).map((r) => r.content)).toEqual([content]);
+    // Contacts pinned on the old device are pinned here too.
+    expect(await laptop.call('pin', [BOB])).toMatchObject({ key: bob.identity.askPublicKey });
+
+    const reopened = new CryptoEngine(core, factory);
+    expect((await reopened.call('init', [ALICE])).identity).toEqual(linked);
+    expect(await reopened.call('history', [CONVERSATION])).toHaveLength(1);
+
+    // Forgetting the device deletes everything local.
+    await reopened.call('reset', [ALICE]);
+    const again = new CryptoEngine(core, factory);
+    expect(await again.call('init', [ALICE])).toEqual({ identity: null });
+  });
+
+  it('backs up and restores identity, contacts and history; only the right key unlocks it', async () => {
+    const { alice, bob } = await conversation();
+    const content = JSON.stringify({ v: 1, text: 'keep me' });
+    const sent = await bob.engine.call('encrypt', [CONVERSATION, content]);
+    await alice.engine.call('ingest', [CONVERSATION, inbound(bob, sent.ciphertext), [BOB]]);
+    await alice.engine.call('setVerified', [BOB, true]);
+
+    const { recoveryKey, wrap } = await alice.engine.call('backupEnable', []);
+    expect(recoveryKey.replaceAll('-', '')).toHaveLength(52);
+    const backup = await alice.engine.call('backupExport', [1]);
+    expect(await alice.engine.call('backupOwns', [backup.manifest, backup.mac])).toBe(true);
+    // The server only ever sees ciphertext.
+    expect(atob(backup.blob)).not.toContain('keep me');
+
+    const fresh = async () => {
+      const engine = new CryptoEngine(core, new IDBFactory());
+      await engine.call('init', [ALICE]);
+      await engine.call('createPending', [ALICE]);
+      return engine;
+    };
+    const wrong = await fresh();
+    await expect(
+      wrong.call('backupRestore', [
+        'recovery',
+        'AAAA-'.repeat(12) + 'AAAA',
+        wrap,
+        backup,
+        alice.identity.askPublicKey!,
+        1,
+      ]),
+    ).rejects.toMatchObject({ code: 'UNTRUSTED' });
+
+    const restored = await fresh();
+    const result = await restored.call('backupRestore', [
+      'recovery',
+      recoveryKey.toLowerCase(),
+      wrap,
+      backup,
+      alice.identity.askPublicKey!,
+      1,
+    ]);
+    expect(result.version).toBe(1);
+    expect(result.identity).toMatchObject({ trusted: true, backups: true, pending: false });
+    expect(await restored.call('pin', [BOB])).toMatchObject({ verified: true });
+    expect((await restored.call('history', [CONVERSATION])).map((r) => r.content)).toEqual([
+      content,
+    ]);
+    // A device that turned backups on again separately does not own this backup.
+    const other = await device(ALICE);
+    await other.engine.call('backupEnable', []);
+    expect(await other.engine.call('backupOwns', [backup.manifest, backup.mac])).toBe(false);
   });
 });

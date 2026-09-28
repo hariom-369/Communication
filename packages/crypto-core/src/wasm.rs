@@ -10,7 +10,7 @@ use base64::engine::general_purpose::STANDARD as B64;
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 
-use crate::client::{Client, CommitOutput, Processed};
+use crate::client::{BackupSecret, Client, CommitOutput, Processed};
 use crate::error::CoreError;
 use crate::safety;
 
@@ -44,6 +44,34 @@ fn commit_json(output: CommitOutput) -> String {
     .to_string()
 }
 
+/// Short link id (base64) from a link code the user typed; the rest is checked by `approveLink`.
+#[wasm_bindgen(js_name = parseLinkCode)]
+pub fn parse_link_code(code: &str) -> Result<String, JsError> {
+    let (short_id, _) = crate::link::parse_code(code).map_err(js)?;
+    Ok(B64.encode(short_id))
+}
+
+/// Checks the keys the server returned for a link against the code the user typed (before the
+/// user is asked to approve). `approveLink` checks again.
+#[wasm_bindgen(js_name = verifyLinkCode)]
+pub fn verify_link_code(
+    code: &str,
+    short_id: &str,
+    hpke_public: &str,
+    signature_public: &str,
+) -> Result<(), JsError> {
+    let short_id: [u8; crate::link::SHORT_ID_BYTES] = bytes(short_id)?
+        .try_into()
+        .map_err(|_| js(CoreError::Malformed("short id")))?;
+    crate::link::verify(
+        code,
+        &short_id,
+        &bytes(hpke_public)?,
+        &bytes(signature_public)?,
+    )
+    .map_err(js)
+}
+
 #[wasm_bindgen]
 pub struct CryptoClient {
     inner: Client,
@@ -55,6 +83,14 @@ impl CryptoClient {
     pub fn create(user_id: &str, ask_version: u32, now: f64) -> Result<CryptoClient, JsError> {
         Ok(Self {
             inner: Client::create(user_id, ask_version, now as u64).map_err(js)?,
+        })
+    }
+
+    /// A device waiting to be linked from another device or restored from a backup.
+    #[wasm_bindgen(js_name = createPending)]
+    pub fn create_pending(user_id: &str, now: f64) -> Result<CryptoClient, JsError> {
+        Ok(Self {
+            inner: Client::create_pending(user_id, now as u64).map_err(js)?,
         })
     }
 
@@ -70,14 +106,172 @@ impl CryptoClient {
     }
 
     pub fn identity(&self) -> String {
+        let pending = self.inner.is_pending();
         json!({
             "userId": self.inner.user_id(),
             "deviceId": self.inner.device_id(),
-            "askPublicKey": B64.encode(self.inner.ask_public_key()),
+            "askPublicKey": if pending { Value::Null } else { B64.encode(self.inner.ask_public_key()).into() },
             "askVersion": self.inner.ask_version(),
-            "certificate": B64.encode(self.inner.certificate()),
+            "certificate": self.inner.certificate().ok().map(|c| B64.encode(c)),
+            "trusted": self.inner.is_trusted(),
+            "pending": pending,
+            "backups": self.inner.has_backup_key(),
         })
         .to_string()
+    }
+
+    #[wasm_bindgen(js_name = linkRequest)]
+    pub fn link_request(&self) -> Result<String, JsError> {
+        let (hpke, signature) = self.inner.link_request().map_err(js)?;
+        Ok(
+            json!({ "hpkePublic": B64.encode(hpke), "signaturePublic": B64.encode(signature) })
+                .to_string(),
+        )
+    }
+
+    #[wasm_bindgen(js_name = linkCode)]
+    pub fn link_code(&self, short_id: &str) -> Result<String, JsError> {
+        self.inner.link_code(&bytes(short_id)?).map_err(js)
+    }
+
+    /// Returns the sealed payload, base64.
+    #[wasm_bindgen(js_name = approveLink)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn approve_link(
+        &self,
+        code: &str,
+        short_id: &str,
+        device_id: &str,
+        hpke_public: &str,
+        signature_public: &str,
+        trusted: bool,
+        history: &[u8],
+        now: f64,
+    ) -> Result<String, JsError> {
+        let sealed = self
+            .inner
+            .approve_link(
+                code,
+                &bytes(short_id)?,
+                device_id,
+                &bytes(hpke_public)?,
+                &bytes(signature_public)?,
+                trusted,
+                history,
+                now as u64,
+            )
+            .map_err(js)?;
+        Ok(B64.encode(sealed))
+    }
+
+    /// Returns the transferred history (opaque bytes).
+    #[wasm_bindgen(js_name = completeLink)]
+    pub fn complete_link(
+        &mut self,
+        sealed: &str,
+        short_id: &str,
+        expected_ask_public: &str,
+        expected_version: u32,
+    ) -> Result<Vec<u8>, JsError> {
+        self.inner
+            .complete_link(
+                &bytes(sealed)?,
+                &bytes(short_id)?,
+                &bytes(expected_ask_public)?,
+                expected_version,
+            )
+            .map_err(js)
+    }
+
+    #[wasm_bindgen(js_name = observeDevices)]
+    pub fn observe_devices(&mut self, user_id: &str, device_ids: &str) -> Result<String, JsError> {
+        let added = self
+            .inner
+            .observe_devices(user_id, &strings(device_ids)?)
+            .map_err(js)?;
+        Ok(Value::from(added).to_string())
+    }
+
+    #[wasm_bindgen(js_name = backupEnable)]
+    pub fn backup_enable(&mut self) -> Result<String, JsError> {
+        let (recovery_key, wrap) = self.inner.backup_enable().map_err(js)?;
+        Ok(json!({ "recoveryKey": recovery_key, "wrap": B64.encode(wrap) }).to_string())
+    }
+
+    #[wasm_bindgen(js_name = backupNewRecoveryKey)]
+    pub fn backup_new_recovery_key(&self) -> Result<String, JsError> {
+        let (recovery_key, wrap) = self.inner.backup_new_recovery_key().map_err(js)?;
+        Ok(json!({ "recoveryKey": recovery_key, "wrap": B64.encode(wrap) }).to_string())
+    }
+
+    #[wasm_bindgen(js_name = backupPasskeyWrap)]
+    pub fn backup_passkey_wrap(&self, prf_output: &[u8]) -> Result<String, JsError> {
+        Ok(B64.encode(self.inner.backup_passkey_wrap(prf_output).map_err(js)?))
+    }
+
+    #[wasm_bindgen(js_name = backupOwns)]
+    pub fn backup_owns(&self, manifest: &str, mac: &str) -> Result<bool, JsError> {
+        Ok(self.inner.backup_owns(manifest.as_bytes(), &bytes(mac)?))
+    }
+
+    #[wasm_bindgen(js_name = backupExport)]
+    pub fn backup_export(
+        &self,
+        app: &[u8],
+        version: f64,
+        prev_hash: Option<String>,
+        now: f64,
+    ) -> Result<String, JsError> {
+        let output = self
+            .inner
+            .backup_export(app, version as u64, prev_hash, now as u64)
+            .map_err(js)?;
+        Ok(json!({
+            "blob": B64.encode(&output.blob),
+            "manifest": String::from_utf8_lossy(&output.manifest),
+            "mac": B64.encode(output.mac),
+        })
+        .to_string())
+    }
+
+    /// `kind` is `recovery` (secret = recovery key text) or `passkey` (secret = PRF output, base64).
+    #[wasm_bindgen(js_name = backupRestore)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn backup_restore(
+        &mut self,
+        kind: &str,
+        secret: &str,
+        wrap: &str,
+        blob: &str,
+        manifest: &str,
+        mac: &str,
+        expected_ask_public: &str,
+        expected_version: u32,
+        now: f64,
+    ) -> Result<String, JsError> {
+        let prf;
+        let secret = match kind {
+            "recovery" => BackupSecret::RecoveryKey(secret),
+            "passkey" => {
+                prf = bytes(secret)?;
+                BackupSecret::PasskeyPrf(&prf)
+            }
+            _ => return Err(js(CoreError::Malformed("backup secret kind"))),
+        };
+        let (app, manifest) = self
+            .inner
+            .backup_restore(
+                secret,
+                &bytes(wrap)?,
+                &bytes(blob)?,
+                manifest.as_bytes(),
+                &bytes(mac)?,
+                &bytes(expected_ask_public)?,
+                expected_version,
+                now as u64,
+            )
+            .map_err(js)?;
+        Ok(json!({ "app": B64.encode(app), "version": manifest.version, "createdAt": manifest.created_at }).to_string())
     }
 
     #[wasm_bindgen(js_name = generateKeyPackages)]

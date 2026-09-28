@@ -569,3 +569,71 @@ authenticated identity reset is honest and safe in the meantime.
   everything; the server-side check needs an MLS parser on the server and is tracked with S-01.
 
 **Status.** PROPOSED — implemented; NEEDS-SECURITY-REVIEW S-01 (delivery-service rules).
+
+## ADR-042 — Device linking, messages-only devices and encrypted backups (Phase 5)
+
+**Decision.**
+- **Linking by typed code.** The new device creates its device keys and an ephemeral HPKE key
+  pair, publishes the public keys through `POST /keys/links`, and shows a 24-character base32
+  code: the server-assigned 5-byte link id plus an 80-bit truncated SHA-256 fingerprint over
+  (`tessera-link-code-v1`, link id, HPKE public key, signature public key). The existing device
+  fetches the keys by link id and accepts them only if they match the fingerprint (checked when
+  the code is entered and again when approving). It then seals the payload to the new device's
+  key with HPKE (RFC 9180, the MLS provider's implementation, info `tessera-device-link-v1`,
+  AAD = link id ‖ device id). This is the standard "authenticate a key by a short fingerprint over
+  a trusted channel" pattern; the user is the channel. Codes are single use, expire after 3
+  minutes, at most 3 wait per account, approval needs step-up re-authentication from an active
+  device of the same account, and the payload is delivered once, only to the session that
+  created the request. QR scanning (camera) is deferred; the code is also what the QR will encode.
+- **Payload.** Device certificate signed by the account identity key (ASK), contact pins and
+  verification states, and — only for devices given *full access* — the ASK itself and the backup
+  root key. Optionally the approving device's decrypted history (JSON bundle), inside the same
+  HPKE ciphertext (≤ 8 MiB). The new device checks the certificate (user, device, signature key,
+  ASK version, signature) and that the ASK secret matches the account's current public key taken
+  from the key directory, never from the payload.
+- **Messages-only devices** hold a certificate but not the ASK: they can message but cannot link
+  devices, turn on backups or back up.
+- **Joining conversations.** The server publishes `keys_changed` to the account owner too; every
+  member device reconciles each group against the key directory (ADR-041) and adds the new device
+  (compare-and-set on the epoch settles races). Contacts see a non-blocking "added a new device"
+  notice; a changed *identity* key remains blocking.
+- **Removal.** `DELETE /keys/devices/:id` (step-up) revokes the device on the server; other member
+  devices remove it from every group on their next reconciliation. A removed device id can never
+  be registered again. A removed device that had full access still holds the ASK: the UI says so,
+  and "Start over" (identity reset, ADR-040) is the remedy until ASK rotation that keeps the other
+  devices exists.
+- **Backups.** A random 32-byte backup root key (BRK) is wrapped with XChaCha20-Poly1305 under
+  HKDF-SHA-256 of the recovery key (info `tessera-rk-wrap-v1`) or of a WebAuthn PRF output
+  (`tessera-pk-wrap-v1`); AAD `tessera-backup-wrap-v1`. The backup body (ASK, pins, history
+  bundle) is encrypted with the STREAM construction (Hoang–Reyhanitabar–Rogaway–Vizár; RustCrypto
+  `aead::stream::EncryptorBE32`) over XChaCha20-Poly1305 in 64 KiB chunks, under
+  HKDF(BRK, salt = backup id). This replaces libsodium `secretstream` from crypto-design §1 — same
+  properties (per-chunk authentication, reordering and truncation detection) without adding a C
+  library to the core. A JSON manifest (backup id, version, ciphertext SHA-256, size, time, user)
+  is authenticated with HMAC-SHA-256 under a key derived from the BRK. The recovery key is 32
+  random bytes shown once as 52 base32 characters.
+- **Storage.** Backups are stored in PostgreSQL (`bytea`, ≤ 32 MiB, last 3 versions, version
+  compare-and-set) until object storage arrives with media (Phase 6). The server stores only
+  ciphertext, manifests, MACs and wrapped keys; adding or removing an unlock method and turning
+  backups off need step-up, are audited and trigger a security email.
+- **One BRK per account.** Backups are made by the device that turned them on and by devices
+  linked from it with full access. A device refuses to upload when the latest backup's manifest
+  does not verify under its BRK (backups were turned off and on again elsewhere).
+- **Passkey unlock.** New passkeys are registered with the PRF extension. The PRF is evaluated
+  with a random local challenge; the assertion is not sent to the server and the output never
+  leaves the browser.
+- **Limit.** 8 active devices per account, enforced by the server.
+
+**Deferred (tracked).** Self-sync group for read state and settings (Phase 7, with groups);
+signed per-device revocation and ASK rotation that keeps the remaining devices; session↔device
+proof-of-possession signatures (multi-device §8); MLS external commits for restored devices;
+approximate location on the approval screen; backup rollback detection (`prev_hash` is in the
+manifest format but not yet filled or checked — the server could serve an older version, never
+a forged one); recovery-key confirmation by re-typing groups (a checkbox confirmation is used);
+media in backups (Phase 6).
+
+**Why.** Everything uses established constructions (HPKE, AEAD, STREAM, HKDF, HMAC, WebAuthn PRF)
+through audited libraries; the server can relay and store but not read or forge.
+
+**Status.** PROPOSED — implemented; NEEDS-SECURITY-REVIEW S-04 (linking, device trust) and S-06
+(backups).

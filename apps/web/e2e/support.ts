@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { connect } from 'node:net';
 
 import type { CDPSession, Page } from '@playwright/test';
 import { Secret, TOTP } from 'otpauth';
@@ -56,7 +57,10 @@ export function totp(secret: string, offsetSteps = 0): string {
 }
 
 /** Adds Chromium's virtual platform authenticator (user-verifying, resident keys). */
-export async function addVirtualAuthenticator(page: Page): Promise<CDPSession> {
+export async function addVirtualAuthenticator(
+  page: Page,
+  { prf = false }: { prf?: boolean } = {},
+): Promise<CDPSession> {
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('WebAuthn.enable');
   await cdp.send('WebAuthn.addVirtualAuthenticator', {
@@ -67,6 +71,8 @@ export async function addVirtualAuthenticator(page: Page): Promise<CDPSession> {
       hasUserVerification: true,
       isUserVerified: true,
       automaticPresenceSimulation: true,
+      // WebAuthn PRF (CTAP2 hmac-secret), used to unlock encrypted backups.
+      ...(prf ? { hasPrf: true } : {}),
     },
   });
   return cdp;
@@ -80,6 +86,34 @@ export function trackCspViolations(page: Page): string[] {
     if (/Content Security Policy|Trusted Type/i.test(text)) violations.push(text);
   });
   return violations;
+}
+
+/**
+ * Resets the per-IP sign-up and email-verification limits (30/hour each). Every browser in the
+ * suite signs up from 127.0.0.1, so spec files that create many accounts call this first; the
+ * limits themselves are tested in the API integration tests. Speaks RESP directly (no client
+ * dependency).
+ */
+export async function resetSignUpLimits(): Promise<void> {
+  const prefix = process.env['E2E_VALKEY_KEY_PREFIX'];
+  const url = new URL(process.env['TEST_VALKEY_URL'] ?? 'redis://localhost:6379');
+  if (prefix === undefined) throw new Error('E2E_VALKEY_KEY_PREFIX is not set (global setup)');
+  const args = [
+    'DEL',
+    ...['signup', 'verify'].map((p) => `${prefix}:rl:accounts.${p}.ip:ip:127.0.0.1`),
+  ];
+  const command = `*${args.length}\r\n${args.map((a) => `$${Buffer.byteLength(a)}\r\n${a}\r\n`).join('')}`;
+  await new Promise<void>((resolve, reject) => {
+    const socket = connect(Number(url.port || 6379), url.hostname, () => {
+      socket.write(command);
+    });
+    socket.once('data', (reply) => {
+      socket.end();
+      if (reply.toString().startsWith(':')) resolve();
+      else reject(new Error(`Valkey: ${reply.toString().trim()}`));
+    });
+    socket.once('error', reject);
+  });
 }
 
 /** Makes every session look older than the step-up window (forces re-authentication). */

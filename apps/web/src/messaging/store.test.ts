@@ -5,7 +5,12 @@ import { ApiError, NetworkError } from '../api/client.js';
 import type { HistoryRecord, IngestResult } from '../crypto/protocol.js';
 
 import type { MessageContent } from './content.js';
-import { DEFAULT_SECURITY, SecurityBlocked, type ConversationSecurity } from './e2ee.js';
+import {
+  DEFAULT_SECURITY,
+  SecurityBlocked,
+  type ConversationSecurity,
+  type DeviceStatus,
+} from './e2ee.js';
 import { MessagingStore, type SecurityPort } from './store.js';
 
 /**
@@ -66,7 +71,7 @@ function fakeSecurity() {
   let hasGroup = true;
   const listeners = new Set<() => void>();
   const port = {
-    status: 'ready' as const,
+    status: 'ready' as DeviceStatus,
     deviceId: `${ME}-device`,
     subscribe: (listener: () => void) => {
       listeners.add(listener);
@@ -129,6 +134,10 @@ function fakeSecurity() {
     },
     setHasGroup: (value: boolean) => {
       hasGroup = value;
+    },
+    setStatus: (status: DeviceStatus) => {
+      port.status = status;
+      for (const listener of listeners) listener();
     },
   };
 }
@@ -428,6 +437,45 @@ describe('MessagingStore', () => {
     await store.start();
     push({ type: 'receipt', conversationId: CONVERSATION, userId: PEER, seq: 4 });
     expect(view(store).meta.peersAckedSeq).toBe(4);
+    store.stop();
+  });
+
+  it('starts messaging by itself once the device is set up (linked or restored)', async () => {
+    const security = fakeSecurity();
+    security.mock.status = 'setup-required';
+    const api = fakeApi([mailbox(1, PEER, { kind: 'text', text: 'hi' })]);
+    const { store, realtime } = createStore(api, security);
+    await store.start();
+    expect(realtime.start).not.toHaveBeenCalled();
+    expect(api.conversations).not.toHaveBeenCalled();
+    security.setStatus('ready');
+    await vi.runOnlyPendingTimersAsync();
+    expect(realtime.start).toHaveBeenCalledTimes(1);
+    expect(texts(store)).toEqual(['hi']);
+    // Further changes do not start it twice.
+    security.setStatus('ready');
+    await store.resume();
+    expect(realtime.start).toHaveBeenCalledTimes(1);
+    store.stop();
+  });
+
+  it('searches decrypted messages on this device, ignoring case and accents', async () => {
+    const api = fakeApi([
+      mailbox(1, PEER, { kind: 'text', text: 'Meet at the Café at noon' }),
+      mailbox(2, PEER, { kind: 'text', text: 'unrelated' }),
+      mailbox(3, PEER, { kind: 'text', text: 'the cafe is closed' }),
+    ]);
+    const { store } = createStore(api);
+    await store.start();
+    await vi.runOnlyPendingTimersAsync();
+    expect(store.search('CAFÉ').map((r) => r.text)).toEqual([
+      'the cafe is closed',
+      'Meet at the Café at noon',
+    ]);
+    expect(store.search('c')).toEqual([]);
+    expect(store.search('nothing like this')).toEqual([]);
+    // Nothing is sent to the server to search.
+    expect(api.messages.mock.calls.length).toBeLessThanOrEqual(1);
     store.stop();
   });
 });

@@ -7,7 +7,7 @@ Tessera is a production-grade, public, commercial communication platform: privat
 messaging with end-to-end encryption (E2EE), communities, broadcast channels, voice/video
 calls, media, multi-device, encrypted backups, moderation, administration and billing.
 
-## Current status: Phase 4 complete (pending cryptography review)
+## Current status: Phase 5 complete (pending cryptography review)
 
 - **Phase 0** — architecture, threat model and research package: [`docs/`](docs/README.md).
 - **Phase 1** — repository, tooling, CI/CD and platform foundations:
@@ -23,7 +23,11 @@ calls, media, multi-device, encrypted backups, moderation, administration and bi
   key-change warnings, encrypted on-device history:
   [`docs/phase-reports/phase-4.md`](docs/phase-reports/phase-4.md). **Not for real users until
   the external cryptography review (S-01..S-04) signs off.**
-- **Next: Phase 5** — multi-device (device linking, history transfer, encrypted backups).
+- **Phase 5** — multi-device: link devices with a code (full access or messages only), history
+  transfer, device removal, encrypted backups unlocked by a recovery key or a passkey, restore,
+  on-device search: [`docs/phase-reports/phase-5.md`](docs/phase-reports/phase-5.md). Also pending
+  review (S-04, S-06).
+- **Next: Phase 6** — media (client-side encrypted attachments).
 
 Start with:
 

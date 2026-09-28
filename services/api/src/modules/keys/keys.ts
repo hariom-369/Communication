@@ -1,7 +1,15 @@
+import { randomBytes } from 'node:crypto';
+
 import { AppError, type Logger } from '@tessera/platform';
 import { newId } from '@tessera/shared';
-import type { RegisterDevice, UserKeys } from '@tessera/validation';
+import {
+  MAX_DEVICES,
+  type RegisterDevice,
+  type UserKeys,
+  type linkRequestSchema,
+} from '@tessera/validation';
 import { sql, type Kysely, type Transaction } from 'kysely';
+import type { z } from 'zod';
 
 import type { Database } from '../../db/schema.js';
 import type { RealtimePublisher } from '../../platform/realtime-publisher.js';
@@ -26,8 +34,33 @@ export interface KeysContacts {
 export interface OwnKeys {
   askVersion: number | null;
   askPublicKey: string | null;
-  devices: { deviceId: string; certificate: string; createdAt: string }[];
+  devices: {
+    deviceId: string;
+    certificate: string;
+    createdAt: string;
+    label: string;
+    trusted: boolean;
+    lastSeenAt: string;
+  }[];
 }
+
+/** Security emails for key events (sent by the auth module). */
+export interface KeysNotifier {
+  securityNotice(userId: string, headline: string, lines?: readonly string[]): Promise<void>;
+}
+
+export interface AddDevice {
+  deviceId: string;
+  askVersion: number;
+  certificate: string;
+  keyPackages: readonly string[];
+  lastResortKeyPackage: string;
+  label: string;
+  trusted: boolean;
+}
+
+const LINK_TTL_MS = 3 * 60_000;
+const MAX_PENDING_LINKS = 3;
 
 const DAY_MS = 24 * 60 * 60_000;
 const KEY_PACKAGE_LIFETIME_MS = 30 * DAY_MS;
@@ -42,6 +75,7 @@ export class KeysService {
   readonly #publisher: RealtimePublisher;
   readonly #contacts: KeysContacts;
   readonly #logger: Logger;
+  #notifier: KeysNotifier | null = null;
 
   constructor(
     db: Kysely<Database>,
@@ -55,6 +89,14 @@ export class KeysService {
     this.#publisher = publisher;
     this.#contacts = contacts;
     this.#logger = logger;
+  }
+
+  useNotifier(notifier: KeysNotifier): void {
+    this.#notifier = notifier;
+  }
+
+  async #notify(userId: string, headline: string, lines: readonly string[] = []): Promise<void> {
+    await this.#notifier?.securityNotice(userId, headline, lines).catch(() => undefined);
   }
 
   /** Validates the certificate against the submitted identity; throws BAD_REQUEST otherwise. */
@@ -152,6 +194,8 @@ export class KeysService {
           certificate: Buffer.from(input.certificate, 'base64'),
           created_at: now,
           last_seen_at: now,
+          label: input.label ?? 'Unknown device',
+          trusted: true,
         })
         .execute();
       await this.#insertKeyPackages(trx, input.deviceId, input.keyPackages, now);
@@ -169,8 +213,240 @@ export class KeysService {
         trx,
       );
     });
-    if (options.reset) await this.#notifyContacts(userId);
+    if (options.reset) {
+      await this.#notifyContacts(userId);
+      await this.#notify(userId, 'Your security key was replaced', [
+        'All your other devices were signed out of encrypted chats.',
+        'Your contacts will see that your security key changed.',
+      ]);
+    }
     return this.ownKeys(userId);
+  }
+
+  /**
+   * Adds a device to the account's *current* identity (linked from another device, or restored
+   * from a backup). The certificate must verify under the current identity key: only a device
+   * holding that key can produce it, so this is the approval.
+   */
+  async addDevice(userId: string, input: AddDevice, requestId: string): Promise<OwnKeys> {
+    const certificate = parseCertificate(Buffer.from(input.certificate, 'base64'));
+    const now = new Date();
+    await this.#db.transaction().execute(async (trx) => {
+      const current = await trx
+        .selectFrom('account_keys')
+        .select(['version', 'public_key'])
+        .where('user_id', '=', userId)
+        .forUpdate()
+        .executeTakeFirst();
+      if (current === undefined)
+        throw new AppError('CONFLICT', { detail: 'Set up encryption first.' });
+      if (
+        certificate?.userId !== userId ||
+        certificate.deviceId !== input.deviceId.toLowerCase() ||
+        certificate.askVersion !== current.version ||
+        input.askVersion !== current.version ||
+        !verifyCertificate(certificate, current.public_key)
+      ) {
+        throw new AppError('BAD_REQUEST', { detail: 'Invalid device certificate.' });
+      }
+      const active = await trx
+        .selectFrom('devices')
+        .select((eb) => eb.fn.countAll<string>().as('n'))
+        .where('user_id', '=', userId)
+        .where('revoked_at', 'is', null)
+        .executeTakeFirstOrThrow();
+      if (Number(active.n) >= MAX_DEVICES)
+        throw new AppError('CONFLICT', {
+          detail: `You can use encryption on up to ${MAX_DEVICES} devices. Remove one first.`,
+        });
+      const existing = await trx
+        .selectFrom('devices')
+        .select('id')
+        .where('id', '=', input.deviceId)
+        .executeTakeFirst();
+      if (existing !== undefined)
+        throw new AppError('CONFLICT', { detail: 'Device already registered.' });
+      await trx
+        .insertInto('devices')
+        .values({
+          id: input.deviceId,
+          user_id: userId,
+          ask_version: current.version,
+          signature_key: certificate.mlsSignatureKey,
+          certificate: Buffer.from(input.certificate, 'base64'),
+          created_at: now,
+          last_seen_at: now,
+          label: input.label,
+          trusted: input.trusted,
+        })
+        .execute();
+      await this.#insertKeyPackages(trx, input.deviceId, input.keyPackages, now);
+      await this.#replaceLastResort(trx, input.deviceId, input.lastResortKeyPackage, now);
+      await this.#audit.record(
+        {
+          actorKind: 'user',
+          actorId: userId,
+          action: 'keys.device_added',
+          targetKind: 'device',
+          targetId: input.deviceId,
+          requestId,
+          details: { trusted: input.trusted },
+        },
+        trx,
+      );
+    });
+    await this.#notifyContacts(userId);
+    await this.#notify(userId, 'A new device can now read your messages', [
+      `Device: ${input.label}`,
+      'If this was not you, remove the device in Settings → Security and change your password.',
+    ]);
+    return this.ownKeys(userId);
+  }
+
+  /** Revokes one device: it can no longer receive new messages; contacts remove it from groups. */
+  async revokeDevice(userId: string, deviceId: string, requestId: string): Promise<OwnKeys> {
+    const now = new Date();
+    const label = await this.#db.transaction().execute(async (trx) => {
+      const device = await trx
+        .updateTable('devices')
+        .set({ revoked_at: now })
+        .where('id', '=', deviceId)
+        .where('user_id', '=', userId)
+        .where('revoked_at', 'is', null)
+        .returning('label')
+        .executeTakeFirst();
+      if (device === undefined) throw new AppError('NOT_FOUND');
+      await trx.deleteFrom('key_packages').where('device_id', '=', deviceId).execute();
+      await this.#audit.record(
+        {
+          actorKind: 'user',
+          actorId: userId,
+          action: 'keys.device_revoked',
+          targetKind: 'device',
+          targetId: deviceId,
+          requestId,
+        },
+        trx,
+      );
+      return device.label;
+    });
+    await this.#notifyContacts(userId);
+    await this.#notify(userId, 'A device was removed from your encrypted chats', [
+      `Device: ${label}`,
+    ]);
+    return this.ownKeys(userId);
+  }
+
+  // ---- device linking (docs/multi-device.md §3) --------------------------------------------
+
+  async createLink(
+    userId: string,
+    sessionId: string,
+    input: { deviceId: string; hpkePublic: string; signaturePublic: string; label: string },
+  ): Promise<{ linkId: string; shortId: string; expiresAt: string }> {
+    const now = new Date();
+    const pending = await this.#db
+      .selectFrom('link_sessions')
+      .select((eb) => eb.fn.countAll<string>().as('n'))
+      .where('user_id', '=', userId)
+      .where('expires_at', '>', now)
+      .executeTakeFirstOrThrow();
+    if (Number(pending.n) >= MAX_PENDING_LINKS)
+      throw new AppError('RATE_LIMITED', { detail: 'Too many devices waiting to be linked.' });
+    const expiresAt = new Date(now.getTime() + LINK_TTL_MS);
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const id = newId();
+      const shortId = randomBytes(5);
+      try {
+        await this.#db
+          .insertInto('link_sessions')
+          .values({
+            id,
+            user_id: userId,
+            session_id: sessionId,
+            short_id: shortId,
+            device_id: input.deviceId,
+            hpke_public: Buffer.from(input.hpkePublic, 'base64'),
+            signature_public: Buffer.from(input.signaturePublic, 'base64'),
+            label: input.label,
+            created_at: now,
+            expires_at: expiresAt,
+          })
+          .execute();
+        return {
+          linkId: id,
+          shortId: shortId.toString('base64'),
+          expiresAt: expiresAt.toISOString(),
+        };
+      } catch (error) {
+        if ((error as { code?: string }).code !== '23505') throw error;
+      }
+    }
+    throw new AppError('SERVICE_UNAVAILABLE');
+  }
+
+  /** An existing device looks up a link request by the short id from the code. */
+  async lookupLink(userId: string, shortId: string): Promise<z.infer<typeof linkRequestSchema>> {
+    const row = await this.#db
+      .selectFrom('link_sessions')
+      .selectAll()
+      .where('user_id', '=', userId)
+      .where('short_id', '=', Buffer.from(shortId, 'base64url'))
+      .where('expires_at', '>', new Date())
+      .where('sealed', 'is', null)
+      .executeTakeFirst();
+    if (row === undefined)
+      throw new AppError('NOT_FOUND', { detail: 'That code has expired or is not valid.' });
+    return {
+      linkId: row.id,
+      deviceId: row.device_id,
+      hpkePublic: row.hpke_public.toString('base64'),
+      signaturePublic: row.signature_public.toString('base64'),
+      label: row.label,
+      createdAt: row.created_at.toISOString(),
+    };
+  }
+
+  async approveLink(
+    userId: string,
+    linkId: string,
+    input: { approverDeviceId: string; sealed: string },
+  ): Promise<void> {
+    if (!(await this.isActiveDevice(userId, input.approverDeviceId)))
+      throw new AppError('FORBIDDEN', { detail: 'This device is not registered for encryption.' });
+    const updated = await this.#db
+      .updateTable('link_sessions')
+      .set({ sealed: Buffer.from(input.sealed, 'base64'), approved_by: input.approverDeviceId })
+      .where('id', '=', linkId)
+      .where('user_id', '=', userId)
+      .where('sealed', 'is', null)
+      .where('expires_at', '>', new Date())
+      .executeTakeFirst();
+    if (Number(updated.numUpdatedRows) === 0)
+      throw new AppError('NOT_FOUND', { detail: 'That link request has expired.' });
+    this.#publisher.publish([userId], { type: 'link_approved', linkId });
+  }
+
+  /** The waiting device polls its link; the sealed payload is handed out once. */
+  async linkStatus(
+    userId: string,
+    sessionId: string,
+    linkId: string,
+  ): Promise<{ status: 'pending' | 'approved'; sealed: string | null }> {
+    const row = await this.#db
+      .selectFrom('link_sessions')
+      .select(['sealed', 'expires_at'])
+      .where('id', '=', linkId)
+      .where('user_id', '=', userId)
+      .where('session_id', '=', sessionId)
+      .executeTakeFirst();
+    if (row === undefined) throw new AppError('NOT_FOUND');
+    if (row.sealed === null) {
+      if (row.expires_at <= new Date()) throw new AppError('NOT_FOUND', { detail: 'Expired.' });
+      return { status: 'pending', sealed: null };
+    }
+    await this.#db.deleteFrom('link_sessions').where('id', '=', linkId).execute();
+    return { status: 'approved', sealed: row.sealed.toString('base64') };
   }
 
   async #notifyContacts(userId: string): Promise<void> {
@@ -235,7 +511,7 @@ export class KeysService {
   async #activeDevices(executor: Executor, userId: string) {
     const rows = await executor
       .selectFrom('devices')
-      .select(['id', 'certificate', 'created_at'])
+      .select(['id', 'certificate', 'created_at', 'label', 'trusted', 'last_seen_at'])
       .where('user_id', '=', userId)
       .where('revoked_at', 'is', null)
       .orderBy('created_at', 'asc')
@@ -244,6 +520,9 @@ export class KeysService {
       deviceId: row.id,
       certificate: row.certificate.toString('base64'),
       createdAt: row.created_at.toISOString(),
+      label: row.label,
+      trusted: row.trusted,
+      lastSeenAt: row.last_seen_at.toISOString(),
     }));
   }
 
@@ -267,7 +546,12 @@ export class KeysService {
       userId: targetId,
       askPublicKey: key.public_key.toString('base64'),
       askVersion: key.version,
-      devices: await this.#activeDevices(this.#db, targetId),
+      // Contacts see certificates only, not labels or activity.
+      devices: (await this.#activeDevices(this.#db, targetId)).map((device) => ({
+        deviceId: device.deviceId,
+        certificate: device.certificate,
+        createdAt: device.createdAt,
+      })),
     };
   }
 
@@ -385,12 +669,17 @@ export class KeysService {
     return row !== undefined;
   }
 
-  /** Deletes expired KeyPackages. */
+  /** Deletes expired KeyPackages and link requests. */
   async sweep(): Promise<number> {
-    const result = await this.#db
+    const now = new Date();
+    const packages = await this.#db
       .deleteFrom('key_packages')
-      .where('expires_at', '<=', new Date())
+      .where('expires_at', '<=', now)
       .executeTakeFirst();
-    return Number(result.numDeletedRows);
+    const links = await this.#db
+      .deleteFrom('link_sessions')
+      .where('expires_at', '<=', new Date(now.getTime() - LINK_TTL_MS))
+      .executeTakeFirst();
+    return Number(packages.numDeletedRows) + Number(links.numDeletedRows);
   }
 }

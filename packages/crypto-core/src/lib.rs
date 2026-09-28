@@ -4,10 +4,13 @@
 //! protocol of its own. Runs natively for tests and as WebAssembly inside the web client's
 //! dedicated crypto worker (ADR-006).
 
+pub mod backup;
+pub mod base32;
 pub mod client;
 pub mod error;
 pub mod identity;
 pub mod ids;
+pub mod link;
 pub mod padding;
 pub mod safety;
 

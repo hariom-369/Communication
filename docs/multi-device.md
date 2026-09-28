@@ -1,6 +1,22 @@
 # Multi-device architecture
 
-Status: NEEDS-SECURITY-REVIEW (S-04) · Decisions: ADR-007, 008, 010
+Status: NEEDS-SECURITY-REVIEW (S-04) · Decisions: ADR-007, 008, 010, **042**
+
+> **Implemented in Phase 5 (ADR-042), with these differences from the design below:**
+> - Linking uses a **typed 24-character code** (link id + 80-bit key fingerprint) instead of
+>   scanning a QR code; the existing device checks the new device's keys against it. The approval
+>   screen shows the device name the new device chose, not its location.
+> - History transfer travels inside the HPKE link payload (≤ 8 MiB), not as a separate blob.
+> - A new device is added to conversations by any member device reconciling the key directory
+>   (the owner's devices receive `keys_changed` too); no external commits.
+> - Revocation is a server action (step-up) followed by removal from groups by member devices;
+>   signed `DeviceRevocation`, ASK rotation that keeps devices (§7.5) and session↔device signatures
+>   (§8) are deferred. A removed device can never be registered again.
+> - The self-sync conversation (§6) is deferred to Phase 7; contact pins travel in the link
+>   payload and backups.
+> - Tests (§9): linking, messages-only devices, ghost-device and substituted-key payloads, history
+>   transfer, revocation, the 8-device limit and backup restore are covered (Rust, API integration,
+>   E2E). ASK rotation and self-sync convergence are not, because they are deferred.
 
 ## 1. Model
 
