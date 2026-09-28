@@ -105,12 +105,18 @@ devices) with "This wasn't me" → revoke + reset flow.
 
 ## 7. Rate limits (initial)
 
+Implemented values (Phase 2; all fail closed if Valkey is unavailable):
+
 | Endpoint | Limits |
 |---|---|
-| Login | 5/min & 20/h per identifier; 30/min per IP; exponential lockout per identifier (soft lock, not permanent — avoid lockout DoS) |
-| OTP verify | 5 attempts per code; 10/h per account |
-| Sign-up | 5/h per IP; stricter for hosting ASNs |
-| Password reset request | 3/h per identifier; uniform response |
+| Any request | 1,200/min per IP (flood guard, CGNAT-tolerant) |
+| Login (password) | 5/min and 20/h per identifier; 30/min per IP. Soft, time-based lock — never permanent (avoids lockout-DoS) |
+| MFA step | 5 per 5 min per half-authenticated session; 10/h per user |
+| Email verification | 5 attempts per code; 10/h per email; 30/h per IP |
+| Sign-up / resend | 5/h per email; 30/h and 10/h per IP respectively (risk-based challenges: Phase 11) |
+| Password reset request | 3/h per email; 10/h per IP; uniform response |
+| Step-up re-authentication | 10 per 15 min per user |
+| Credential changes (authenticated) | 20/h per user |
 | WebAuthn options | 20/min per IP |
 
 ## 8. Admin authentication

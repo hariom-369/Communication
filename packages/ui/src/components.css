@@ -99,3 +99,91 @@
     animation: none;
   }
 }
+
+.t-field {
+  display: grid;
+  gap: var(--t-space-1);
+}
+.t-field__label {
+  font: 600 var(--t-text-sm) / var(--t-leading-sm) var(--t-font-sans);
+  color: var(--t-color-text);
+}
+.t-field__input {
+  min-height: 2.75rem;
+  padding: 0 var(--t-space-3);
+  border: 1px solid var(--t-color-border);
+  border-radius: var(--t-radius-md);
+  background: var(--t-color-surface);
+  color: var(--t-color-text);
+  font: var(--t-text-md) / var(--t-leading-md) var(--t-font-sans);
+}
+.t-field__input:focus-visible {
+  outline: 3px solid var(--t-color-focus-ring);
+  outline-offset: 1px;
+}
+.t-field__input[aria-invalid='true'] {
+  border-color: var(--t-color-danger);
+}
+.t-field__hint,
+.t-field__error {
+  margin: 0;
+  font-size: var(--t-text-sm);
+  line-height: var(--t-leading-sm);
+}
+.t-field__hint {
+  color: var(--t-color-text-muted);
+}
+.t-field__error {
+  color: var(--t-color-danger);
+}
+
+.t-alert {
+  padding: var(--t-space-3) var(--t-space-4);
+  border-radius: var(--t-radius-md);
+  border: 1px solid var(--t-color-border);
+  border-left-width: 4px;
+  background: var(--t-color-surface);
+  color: var(--t-color-text);
+}
+.t-alert--info {
+  border-left-color: var(--t-color-secondary);
+}
+.t-alert--success {
+  border-left-color: var(--t-color-success);
+}
+.t-alert--warning {
+  border-left-color: var(--t-color-warning);
+}
+.t-alert--danger {
+  border-left-color: var(--t-color-danger);
+}
+.t-alert__title {
+  margin: 0 0 var(--t-space-1);
+  font-weight: 700;
+}
+.t-alert__body > :first-child {
+  margin-top: 0;
+}
+.t-alert__body > :last-child {
+  margin-bottom: 0;
+}
+
+.t-dialog {
+  width: min(28rem, calc(100vw - 2rem));
+  padding: var(--t-space-5);
+  border: 1px solid var(--t-color-border);
+  border-radius: var(--t-radius-lg);
+  background: var(--t-color-surface);
+  color: var(--t-color-text);
+}
+.t-dialog::backdrop {
+  background: rgb(10 9 14 / 60%);
+}
+.t-dialog__title {
+  margin: 0 0 var(--t-space-2);
+  font-size: var(--t-text-lg);
+}
+.t-dialog__description {
+  margin: 0 0 var(--t-space-4);
+  color: var(--t-color-text-muted);
+}

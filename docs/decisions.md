@@ -393,3 +393,47 @@ truncated-hash queries. Private contact discovery (SGX/ORAM-style) is a post-GA 
   (`onlyBuiltDependencies: []`); CI actions are pinned by commit SHA.
 
 **Status.** ACCEPTED (tooling only; no open review items).
+
+## ADR-033 — Web app and API share one origin (Phase 2)
+
+**Decision.** The web app and the API are served from the same origin; the CDN routes `/api/*`
+to the API load balancer and everything else to the static bundle. (Previously sketched as
+`api.<domain>`.) The realtime WebSocket host stays separate (ticket-authenticated, ADR in
+[realtime.md](realtime.md)).
+
+**Why.** The `__Host-` session cookie is then strictly first-party and host-only; no CORS is
+needed on the browser path (CORS stays configured, deny-by-default, for future origins); CSP
+`connect-src 'self'` is sufficient; one fewer origin to harden.
+
+**Trade-offs.** API and static assets share a hostname, so CDN rules must route precisely and
+the API must never serve HTML. The API keeps its own restrictive CSP on every response.
+
+**Status.** ACCEPTED.
+
+## ADR-034 — Device records move to Phase 4
+
+**Decision.** Phase 2 manages *sessions* (list, revoke, sign out everywhere). Device records,
+which in this architecture are cryptographic identities (ASK-signed certificates, MLS keys —
+ADR-007), are created in Phase 4 together with the keys that give them meaning.
+
+**Why.** A device record without keys would imply a security property ("verified device") that
+does not exist yet. Session management already provides "log out all devices".
+
+**Status.** ACCEPTED.
+
+## ADR-035 — Password, second factor and reset interplay (Phase 2)
+
+**Decision.**
+- Accounts are email-first: verify email → add first credential (passkey recommended, or
+  password) → active. Passkey-only accounts are allowed.
+- A user-verified passkey sign-in satisfies MFA on its own. Password sign-in requires TOTP when
+  enabled. SMS is never a second factor.
+- Step-up (10-minute window) guards credential and security changes; with TOTP enabled, step-up
+  by password also requires a code.
+- Password reset by email **still requires the second factor** when TOTP is on, so an email
+  compromise alone cannot take over a 2FA-protected account. Accounts without 2FA can be reset by
+  email alone (standard trade-off; documented for users).
+- Lost second factor *and* recovery codes → support-assisted recovery with identity proofing and
+  a waiting period (docs/authentication.md §3), **not yet implemented** (Phase 12 support tools).
+
+**Status.** ACCEPTED (security review S-13 will re-check).

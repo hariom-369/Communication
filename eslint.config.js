@@ -75,15 +75,23 @@ export default tseslint.config(
     },
   },
   {
-    files: ['packages/ui/**/*.{ts,tsx}'],
+    files: ['packages/ui/**/*.{ts,tsx}', 'apps/web/**/*.{ts,tsx}'],
     languageOptions: { globals: { ...globals.browser } },
     plugins: { 'react-hooks': reactHooks },
     rules: {
       ...reactHooks.configs.recommended.rules,
+      // `onChange={(e) => setValue(e.target.value)}` is idiomatic React.
+      '@typescript-eslint/no-confusing-void-expression': ['error', { ignoreArrowShorthand: true }],
     },
   },
   {
-    files: ['**/*.test.ts', '**/*.test.tsx', '**/test/**/*.ts'],
+    // Return types are inferred from the shared Zod response schemas, which is more precise
+    // than restating them by hand.
+    files: ['apps/web/src/api/endpoints.ts'],
+    rules: { '@typescript-eslint/explicit-module-boundary-types': 'off' },
+  },
+  {
+    files: ['**/*.test.ts', '**/*.test.tsx', '**/test/**/*.ts', '**/e2e/**/*.ts'],
     rules: {
       '@typescript-eslint/no-non-null-assertion': 'off',
       '@typescript-eslint/explicit-module-boundary-types': 'off',
@@ -92,7 +100,13 @@ export default tseslint.config(
     },
   },
   {
-    files: ['eslint.config.js', '**/vitest.config.ts', '**/vitest.integration.config.ts'],
+    files: [
+      'eslint.config.js',
+      '**/vitest.config.ts',
+      '**/vitest.integration.config.ts',
+      '**/vite.config.ts',
+      '**/playwright.config.ts',
+    ],
     ...tseslint.configs.disableTypeChecked,
   },
 );

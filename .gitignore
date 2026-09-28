@@ -17,3 +17,5 @@ coverage/
 !.vscode/extensions.json
 *.tsbuildinfo
 .tmp/
+test-results/
+playwright-report/

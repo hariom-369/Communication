@@ -21,6 +21,8 @@ cp services/api/.env.example services/api/.env   # local only; never commit .env
 | `pnpm test` | unit tests (no external services) |
 | `pnpm test:integration` | integration tests against real PostgreSQL + Valkey (see below) |
 | `pnpm openapi` | regenerate `services/api/openapi.json` (CI fails if it is stale) |
+| `pnpm --filter @tessera/web dev` | web app with hot reload on http://localhost:5173 (proxies `/api` to :8080) |
+| `pnpm --filter @tessera/web test:e2e` | end-to-end tests: starts API + production web build + SMTP capture itself (needs the `TEST_*` variables; run `pnpm build` first) |
 | `pnpm --filter @tessera/api migrate` | apply database migrations (after `pnpm build`) |
 
 Integration tests need these variables and **fail rather than skip** without them:
@@ -29,6 +31,8 @@ Integration tests need these variables and **fail rather than skip** without the
 export TEST_DATABASE_URL=postgres://tessera:tessera-local-only@localhost:5432/tessera
 export TEST_VALKEY_URL=redis://localhost:6379
 ```
+
+Locally, Mailpit (in the compose file) shows every email at http://127.0.0.1:8025.
 
 ## Adding an API endpoint
 

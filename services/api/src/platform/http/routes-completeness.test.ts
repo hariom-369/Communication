@@ -2,9 +2,9 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 
-import { allRoutes } from '../../app.js';
+import { routeCatalog } from '../../route-catalog.js';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -21,7 +21,9 @@ async function testSources(directory: string): Promise<string[]> {
  * contract and is referenced by at least one test (by route id).
  */
 describe('route completeness', () => {
-  const routes = allRoutes({ build: { version: 'x', commit: 'x' } });
+  const catalog = routeCatalog();
+  const routes = catalog.routes;
+  afterAll(() => catalog.close());
 
   it('has unique ids and method+url pairs', () => {
     expect(new Set(routes.map((route) => route.id)).size).toBe(routes.length);
@@ -36,8 +38,11 @@ describe('route completeness', () => {
       expect(route.authorize.name.length).toBeGreaterThan(0);
       expect(route.rateLimit.limit).toBeGreaterThan(0);
       expect(route.rateLimit.burst).toBeGreaterThan(0);
-      expect(route.audit.reason.length).toBeGreaterThan(0);
-      if (route.method !== 'GET') expect(route.schema.body).toBeDefined();
+      if (route.audit.kind === 'none') expect(route.audit.reason.length).toBeGreaterThan(0);
+      else expect(route.audit.actions.length).toBeGreaterThan(0);
+      if (route.method === 'POST' || route.method === 'PUT' || route.method === 'PATCH') {
+        expect(route.schema.body).toBeDefined();
+      }
     },
   );
 

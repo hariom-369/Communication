@@ -1,0 +1,167 @@
+import type { ColumnType, Generated } from 'kysely';
+
+/**
+ * Typed view of the database schema defined by migrations/. Each table belongs to exactly one
+ * module (TABLE_OWNERS); `src/architecture.test.ts` fails if a module queries another module's
+ * tables — cross-module access goes through module interfaces (ADR-001).
+ */
+
+type Timestamp = ColumnType<Date, Date | undefined, Date>;
+type NullableTimestamp = ColumnType<Date | null, Date | null | undefined, Date | null>;
+
+export interface SchemaMigrationsTable {
+  version: string;
+  checksum: string;
+  applied_at: Timestamp;
+}
+
+export interface UsersTable {
+  id: string;
+  username: string;
+  status: 'pending_verification' | 'pending_credential' | 'active';
+  accepted_terms_version: string;
+  confirmed_adult_at: Date;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface UserEmailsTable {
+  user_id: string;
+  email: string;
+  verified_at: NullableTimestamp;
+}
+
+export interface EmailVerificationsTable {
+  id: string;
+  user_id: string;
+  code_digest: Buffer;
+  attempts: ColumnType<number, number | undefined, number>;
+  expires_at: Date;
+  consumed_at: NullableTimestamp;
+  created_at: Timestamp;
+}
+
+export interface PrivacySettingsTable {
+  user_id: string;
+  settings: ColumnType<unknown, string, string>;
+  updated_at: Timestamp;
+}
+
+export interface PasswordCredentialsTable {
+  user_id: string;
+  hash: string;
+  pepper_id: string;
+  updated_at: Timestamp;
+}
+
+export interface PasskeysTable {
+  id: string;
+  user_id: string;
+  credential_id: Buffer;
+  public_key: Buffer;
+  sign_count: ColumnType<string, number, number>;
+  transports: string[];
+  backup_eligible: boolean;
+  backup_state: boolean;
+  name: string;
+  created_at: Timestamp;
+  last_used_at: NullableTimestamp;
+}
+
+export interface TotpCredentialsTable {
+  user_id: string;
+  secret_encrypted: string;
+  confirmed_at: NullableTimestamp;
+  last_used_step: ColumnType<string | null, number | null | undefined, number | null>;
+  created_at: Timestamp;
+}
+
+export interface RecoveryCodesTable {
+  id: string;
+  user_id: string;
+  code_digest: Buffer;
+  used_at: NullableTimestamp;
+}
+
+export interface SessionsTable {
+  id: string;
+  user_id: string;
+  token_digest: Buffer;
+  stage: 'credential_setup' | 'mfa_pending' | 'active';
+  created_at: Timestamp;
+  last_seen_at: Timestamp;
+  idle_expires_at: Date;
+  expires_at: Date;
+  reauthenticated_at: NullableTimestamp;
+  user_agent_summary: string;
+  ip_prefix: string;
+  revoked_at: NullableTimestamp;
+  revoke_reason: string | null;
+}
+
+export interface PasswordResetsTable {
+  id: string;
+  user_id: string;
+  token_digest: Buffer;
+  expires_at: Date;
+  consumed_at: NullableTimestamp;
+  created_at: Timestamp;
+}
+
+export interface LoginEventsTable {
+  id: string;
+  user_id: string | null;
+  kind: 'success' | 'failure' | 'mfa_failure';
+  method: 'password' | 'passkey' | 'mfa' | 'recovery_code';
+  ip_prefix: string;
+  user_agent_summary: string;
+  created_at: Timestamp;
+}
+
+export interface AuditLogTable {
+  seq: Generated<string>;
+  id: string;
+  at: Date;
+  actor_kind: 'user' | 'system' | 'admin';
+  actor_id: string | null;
+  action: string;
+  target_kind: string | null;
+  target_id: string | null;
+  request_id: string | null;
+  details: ColumnType<unknown, string, never>;
+  prev_hash: Buffer;
+  hash: Buffer;
+}
+
+export interface Database {
+  schema_migrations: SchemaMigrationsTable;
+  users: UsersTable;
+  user_emails: UserEmailsTable;
+  email_verifications: EmailVerificationsTable;
+  privacy_settings: PrivacySettingsTable;
+  password_credentials: PasswordCredentialsTable;
+  passkeys: PasskeysTable;
+  totp_credentials: TotpCredentialsTable;
+  recovery_codes: RecoveryCodesTable;
+  sessions: SessionsTable;
+  password_resets: PasswordResetsTable;
+  login_events: LoginEventsTable;
+  audit_log: AuditLogTable;
+}
+
+/** Owning module of every table ('platform' = infrastructure code outside modules/). */
+export const TABLE_OWNERS: Readonly<Record<keyof Database, string>> = {
+  schema_migrations: 'platform',
+  users: 'accounts',
+  user_emails: 'accounts',
+  email_verifications: 'accounts',
+  privacy_settings: 'accounts',
+  password_credentials: 'auth',
+  passkeys: 'auth',
+  totp_credentials: 'auth',
+  recovery_codes: 'auth',
+  sessions: 'auth',
+  password_resets: 'auth',
+  login_events: 'auth',
+  audit_log: 'audit',
+};

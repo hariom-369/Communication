@@ -13,20 +13,32 @@
     "start": "node dist/server.js"
   },
   "dependencies": {
+    "@fastify/cookie": "11.1.2",
     "@fastify/cors": "11.3.0",
     "@fastify/swagger": "9.9.0",
+    "@node-rs/argon2": "2.2.1",
+    "@simplewebauthn/server": "14.0.3",
     "@tessera/platform": "workspace:*",
     "@tessera/shared": "workspace:*",
     "@tessera/validation": "workspace:*",
+    "@zxcvbn-ts/core": "4.2.0",
+    "@zxcvbn-ts/language-common": "4.1.3",
+    "@zxcvbn-ts/language-en": "4.1.1",
     "fastify": "5.12.5",
     "fastify-type-provider-zod": "7.0.0",
     "ioredis": "6.0.0",
     "kysely": "0.29.6",
+    "nodemailer": "10.0.11",
     "openapi-types": "12.1.3",
+    "otpauth": "9.5.2",
     "pg": "8.23.0",
     "zod": "4.6.5"
   },
   "devDependencies": {
-    "@types/pg": "8.23.1"
+    "@simplewebauthn/browser": "14.0.0",
+    "@types/nodemailer": "8.0.2",
+    "@types/pg": "8.23.1",
+    "@types/smtp-server": "3.5.13",
+    "smtp-server": "3.19.14"
   }
 }

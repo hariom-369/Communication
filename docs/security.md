@@ -85,6 +85,15 @@ GCRA token buckets in Valkey keyed by combinations of IP (/64 for IPv6), account
 route, and target (e.g. per-recipient message limits). Edge WAF rate rules as an outer
 layer. Limits fail closed for auth; details in [moderation.md §4](moderation.md).
 
+**Shared addresses (implemented in Phase 2).** Carrier-grade NAT is common on Indian mobile
+networks, so thousands of legitimate users can share one IPv4 address. Therefore:
+- every request first passes a generous per-IP flood guard (1,200/min, burst 300);
+- route limits on **authenticated** routes are keyed per user, not per IP;
+- public routes (sign-up, login, reset) combine a CGNAT-tolerant per-IP limit with strict
+  per-identifier limits (per email / username), which are the real brute-force control;
+- risk-based challenges (CAPTCHA-style) for abusive sources are a Phase 11 item.
+A regression test ("many people behind one shared IP") guards this behaviour.
+
 ## 8. Error handling
 
 RFC 9457 `application/problem+json` with stable `type` codes and user-safe `detail`. No stack

@@ -6,10 +6,13 @@ Status: PROPOSED · Decisions: ADR-001, 027
 .
 ├── apps/
 │   ├── web/                  # React 19 + Vite SPA/PWA (user client)
-│   │   ├── src/app/          # routes, layouts (desktop 4-pane / mobile stack)
-│   │   ├── src/features/     # auth, chats, groups, communities, channels, calls, settings, privacy
-│   │   ├── src/workers/      # crypto.worker.ts (loads crypto-core WASM), sw.ts (service worker)
-│   │   └── src/lib/          # api client (generated), realtime client, local db (via worker)
+│   │   ├── src/app.tsx       # routes + session guards
+│   │   ├── src/pages/        # sign-up, sign-in, MFA, reset, settings/… (chats etc. from Phase 3)
+│   │   ├── src/components/   # layouts (auth card, app shell), step-up dialog, offline banner
+│   │   ├── src/api/          # typed client over shared Zod schemas (same-origin, CSRF header)
+│   │   ├── src/state/        # session + step-up providers
+│   │   ├── src/lib/          # WebAuthn wrapper, resource hook; (Phase 4) crypto worker
+│   │   └── e2e/              # Playwright: full stack, virtual authenticator, CSP + axe checks
 │   └── admin/                # separate admin SPA (separate origin, ZTNA)
 ├── services/
 │   ├── api/                  # modular monolith (Fastify)
@@ -29,7 +32,6 @@ Status: PROPOSED · Decisions: ADR-001, 027
 │   ├── platform/             # server runtime: validated config, allow-list logger, AppError, health server, lifecycle
 │   ├── shared/               # pure utilities (ids, assertNever) — no I/O
 │   ├── validation/           # Zod schemas and inferred types shared by api/web (DTOs, problem details)
-│   ├── api-client/           # (Phase 2) generated from OpenAPI
 │   └── ui/                   # design system: tokens, themes, primitives (tokens.css, components.css)
 ├── infra/
 │   ├── terraform/            # modules + envs (dev, staging, prod, dr)
@@ -60,4 +62,5 @@ Rules:
 - `apps/*` may not import `services/*`; `services/*` may not import `apps/*`.
 - Module code in `services/api/src/modules/X` may import only `modules/Y/index.ts`.
 - Only `packages/crypto-core` contains cryptographic operations; `packages/crypto` is a typed RPC facade.
-- Generated code is committed only where required for reproducible builds (protocol TS, API client) and verified in CI (`git diff --exit-code` after regeneration).
+- Generated code is committed only where required for reproducible builds (protocol TS, OpenAPI document) and verified in CI (`git diff --exit-code` after regeneration).
+- The web client does not use a generated API client: request/response schemas are shared from `packages/validation`, which is the single source of truth for both sides (the OpenAPI document is generated from the same schemas for other consumers).

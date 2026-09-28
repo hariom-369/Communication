@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
 import { buildApp, type AppOptions } from '../app.js';
+import { metaRoutes } from '../modules/meta/index.js';
 import { defineRoute, publicAccess, type RouteDefinition } from '../platform/http/routes.js';
 import { InProcessRateLimiter, type RateLimitPolicy } from '../platform/rate-limit.js';
 
@@ -111,8 +112,8 @@ export async function buildTestApp(overrides: Partial<AppOptions> = {}): Promise
     trustProxyHops: 0,
     bodyLimitBytes: 1024,
     hsts: true,
-    build: { version: '1.2.3', commit: 'abc123' },
-    extraRoutes: testRoutes,
+    routes: [...metaRoutes({ build: { version: '1.2.3', commit: 'abc123' } }), ...testRoutes],
+    sessions: { authenticate: () => Promise.resolve(null) },
     ...overrides,
   });
   return { app, logs, logger };

@@ -5,3 +5,5 @@ coverage
 docs
 *.md
 services/api/openapi.json
+test-results
+playwright-report

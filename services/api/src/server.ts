@@ -1,9 +1,11 @@
 import { createHealthServer, createLifecycle, createLogger } from '@tessera/platform';
 
 import { buildApp } from './app.js';
+import { composeModules } from './compose.js';
 import { loadApiConfig } from './config.js';
 import { MIGRATIONS_DIR } from './paths.js';
 import { createDatabase, databaseHealthCheck } from './platform/db.js';
+import { SmtpMailer } from './platform/email.js';
 import { loadMigrations, migrationsHealthCheck } from './platform/migrations.js';
 import {
   InProcessRateLimiter,
@@ -49,7 +51,7 @@ async function main(): Promise<void> {
   });
 
   const rateLimiter = new ResilientRateLimiter(
-    new ValkeyRateLimiter(valkey),
+    new ValkeyRateLimiter(valkey, `${config.VALKEY_KEY_PREFIX}:rl`),
     new InProcessRateLimiter(),
     (error) => {
       logger.warn('rate_limit.store_unavailable', logger.errorFields(error));
@@ -69,6 +71,16 @@ async function main(): Promise<void> {
   });
   lifecycle.onShutdown({ name: 'health', run: () => health.close() });
 
+  const mailer = new SmtpMailer(config.SMTP_URL, config.EMAIL_FROM);
+  lifecycle.onShutdown({
+    name: 'smtp',
+    run: () => {
+      mailer.close();
+      return Promise.resolve();
+    },
+  });
+  const modules = composeModules(config, { db: database.db, valkey, mailer, logger });
+
   const app = await buildApp({
     logger,
     rateLimiter,
@@ -76,7 +88,8 @@ async function main(): Promise<void> {
     trustProxyHops: config.TRUST_PROXY_HOPS,
     bodyLimitBytes: config.BODY_LIMIT_BYTES,
     hsts: config.NODE_ENV === 'production',
-    build: { version: config.BUILD_VERSION, commit: config.BUILD_COMMIT },
+    routes: modules.routes,
+    sessions: modules.sessions,
   });
   lifecycle.onShutdown({ name: 'http', run: () => app.close() });
 

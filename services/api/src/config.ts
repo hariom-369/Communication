@@ -14,10 +14,29 @@ const schema = z
     DATABASE_POOL_MAX: env.positiveInt(10),
     DATABASE_STATEMENT_TIMEOUT_MS: env.positiveInt(5000),
     VALKEY_URL: env.url(['redis:', 'rediss:']),
+    /** Namespace for all Valkey keys, so environments can share a cluster safely. */
+    VALKEY_KEY_PREFIX: z
+      .string()
+      .regex(/^[a-z0-9_-]{1,32}$/)
+      .default('tessera'),
 
     ALLOWED_ORIGINS: env.originList(),
     TRUST_PROXY_HOPS: env.nonNegativeInt(0),
     BODY_LIMIT_BYTES: env.positiveInt(64 * 1024),
+
+    /** Public URL of the web app, used in email links (password reset). */
+    PUBLIC_WEB_URL: env.url(['https:', 'http:']),
+    SMTP_URL: env.url(['smtp:', 'smtps:']),
+    EMAIL_FROM: z.string().min(3),
+    /** `<id>:<base64 32 bytes>`; HMAC key applied before Argon2id (docs/authentication.md §2.1). */
+    PASSWORD_PEPPER: z.string().min(10),
+    /** `<id>:<base64 32 bytes>[,<id>:<key>…]`; first key encrypts, all keys decrypt. */
+    SECRET_BOX_KEYS: z.string().min(10),
+    /** WebAuthn relying-party ID: the registrable domain of the web app (e.g. tessera.example). */
+    WEBAUTHN_RP_ID: z.string().min(1),
+    WEBAUTHN_RP_NAME: z.string().min(1).default('Tessera'),
+    SESSION_IDLE_DAYS: env.positiveInt(30),
+    SESSION_ABSOLUTE_DAYS: env.positiveInt(90),
 
     BUILD_VERSION: z.string().min(1).default('0.0.0-dev'),
     BUILD_COMMIT: z.string().min(1).default('unknown'),
@@ -45,6 +64,20 @@ const schema = z
         code: 'custom',
         path: ['DATABASE_URL'],
         message: 'Must set sslmode=verify-full in production',
+      });
+    }
+    if (!config.PUBLIC_WEB_URL.startsWith('https://')) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['PUBLIC_WEB_URL'],
+        message: 'Must be https in production',
+      });
+    }
+    if (!config.SMTP_URL.startsWith('smtps://') && !config.SMTP_URL.includes('requireTLS=true')) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['SMTP_URL'],
+        message: 'Must use smtps:// or requireTLS=true in production',
       });
     }
     if (!config.VALKEY_URL.startsWith('rediss://')) {

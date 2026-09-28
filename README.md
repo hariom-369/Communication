@@ -7,12 +7,14 @@ Tessera is a production-grade, public, commercial communication platform: privat
 messaging with end-to-end encryption (E2EE), communities, broadcast channels, voice/video
 calls, media, multi-device, encrypted backups, moderation, administration and billing.
 
-## Current status: Phase 1 complete
+## Current status: Phase 2 complete
 
 - **Phase 0** — architecture, threat model and research package: [`docs/`](docs/README.md).
 - **Phase 1** — repository, tooling, CI/CD and platform foundations:
   [`docs/phase-reports/phase-1.md`](docs/phase-reports/phase-1.md).
-- **Next: Phase 2** — authentication, accounts, devices.
+- **Phase 2** — accounts, passkeys/passwords/2FA, sessions, audit log, web app:
+  [`docs/phase-reports/phase-2.md`](docs/phase-reports/phase-2.md).
+- **Next: Phase 3** — core messaging and the realtime (WebSocket) service.
 
 Start with:
 

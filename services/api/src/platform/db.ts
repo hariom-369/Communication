@@ -3,17 +3,9 @@ import pg from 'pg';
 
 import type { HealthCheck } from '@tessera/platform';
 
-/**
- * Kysely database interface. Tables are added by the modules that own them, starting in Phase 2.
- * Modules may only query their own tables (ADR-001).
- */
-export interface Database {
-  schema_migrations: {
-    version: string;
-    checksum: string;
-    applied_at: Date;
-  };
-}
+import type { Database } from '../db/schema.js';
+
+export type { Database } from '../db/schema.js';
 
 export interface DatabaseOptions {
   readonly connectionString: string;

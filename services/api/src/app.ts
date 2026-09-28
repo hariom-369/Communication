@@ -1,3 +1,4 @@
+import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import swagger from '@fastify/swagger';
 import type { Logger } from '@tessera/platform';
@@ -9,11 +10,14 @@ import {
   validatorCompiler,
 } from 'fastify-type-provider-zod';
 
-import { metaRoutes } from './modules/meta/index.js';
 import { CSRF_HEADER, installCsrfProtection } from './platform/http/csrf.js';
 import { installErrorHandling } from './platform/http/errors.js';
 import { installRequestLogging } from './platform/http/request-logging.js';
-import { registerRoutes, type RouteDefinition } from './platform/http/routes.js';
+import {
+  registerRoutes,
+  type RouteDefinition,
+  type SessionAuthenticator,
+} from './platform/http/routes.js';
 import { installSecurityHeaders } from './platform/http/security-headers.js';
 import type { RateLimiter } from './platform/rate-limit.js';
 
@@ -24,13 +28,8 @@ export interface AppOptions {
   readonly trustProxyHops: number;
   readonly bodyLimitBytes: number;
   readonly hsts: boolean;
-  readonly build: { readonly version: string; readonly commit: string };
-  /** Extra routes, used by tests to exercise the pipeline with state-changing endpoints. */
-  readonly extraRoutes?: readonly RouteDefinition[];
-}
-
-export function allRoutes(options: Pick<AppOptions, 'build'>): RouteDefinition[] {
-  return [...metaRoutes({ build: options.build })];
+  readonly routes: readonly RouteDefinition[];
+  readonly sessions: SessionAuthenticator;
 }
 
 /** Builds the HTTP application. No I/O happens here; dependencies are injected. */
@@ -66,6 +65,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     strictPreflight: true,
   });
   installCsrfProtection(app, { allowedOrigins: options.allowedOrigins });
+  // Parses cookies only; the session cookie is set with explicit attributes in routes.ts.
+  await app.register(cookie, { hook: 'onRequest' });
 
   await app.register(swagger, {
     openapi: {
@@ -75,9 +76,10 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     transform: jsonSchemaTransform,
   });
 
-  registerRoutes(app, [...allRoutes(options), ...(options.extraRoutes ?? [])], {
+  registerRoutes(app, options.routes, {
     rateLimiter: options.rateLimiter,
     logger: options.logger,
+    sessions: options.sessions,
   });
 
   await app.ready();
