@@ -39,7 +39,14 @@ const restrictedProperties = [
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', '**/coverage/**', '**/.turbo/**', '**/node_modules/**', 'docs/**'],
+    ignores: [
+      '**/dist/**',
+      '**/dist-*/**',
+      '**/coverage/**',
+      '**/.turbo/**',
+      '**/node_modules/**',
+      'docs/**',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
@@ -106,6 +113,7 @@ export default tseslint.config(
       '**/vitest.integration.config.ts',
       '**/vite.config.ts',
       '**/playwright.config.ts',
+      '**/scripts/*.mjs',
     ],
     ...tseslint.configs.disableTypeChecked,
   },

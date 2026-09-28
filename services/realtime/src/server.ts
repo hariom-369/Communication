@@ -26,6 +26,10 @@ async function main(): Promise<void> {
     application_name: 'tessera-realtime',
     statement_timeout: 2000,
   });
+  // Idle pooled connections can fail (restart, failover); unhandled, pg would crash the process.
+  db.on('error', (error) => {
+    logger.warn('postgres.idle_client_error', logger.errorFields(error));
+  });
   lifecycle.onShutdown({ name: 'postgres', run: () => db.end() });
   const valkeyOptions = {
     connectionName: 'tessera-realtime',

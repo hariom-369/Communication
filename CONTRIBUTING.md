@@ -10,7 +10,8 @@
 ```sh
 pnpm install
 docker compose -f infra/docker/compose.yaml up -d
-cp services/api/.env.example services/api/.env   # local only; never commit .env
+cp services/api/.env.example services/api/.env             # local only; never commit .env
+cp services/realtime/.env.example services/realtime/.env   # local only
 ```
 
 ## Everyday commands
@@ -21,8 +22,11 @@ cp services/api/.env.example services/api/.env   # local only; never commit .env
 | `pnpm test` | unit tests (no external services) |
 | `pnpm test:integration` | integration tests against real PostgreSQL + Valkey (see below) |
 | `pnpm openapi` | regenerate `services/api/openapi.json` (CI fails if it is stale) |
-| `pnpm --filter @tessera/web dev` | web app with hot reload on http://localhost:5173 (proxies `/api` to :8080) |
-| `pnpm --filter @tessera/web test:e2e` | end-to-end tests: starts API + production web build + SMTP capture itself (needs the `TEST_*` variables; run `pnpm build` first) |
+| `pnpm --filter @tessera/web dev` | web app with hot reload on http://localhost:5173 (proxies `/api` to :8080 and `/rt` to :8081) |
+| `pnpm --filter @tessera/realtime start` | realtime WebSocket service on :8081 (after `pnpm build`) |
+| `pnpm --filter @tessera/web build:dev-messaging` | web build **with** the development (unencrypted) chat, into `dist-dev-messaging/` — never deploy it (ADR-038) |
+| `pnpm --filter @tessera/web verify:bundle` | fails if the production bundle contains development-only messaging code (run after `pnpm build`) |
+| `pnpm --filter @tessera/web test:e2e` | end-to-end tests: starts API + realtime + SMTP capture and serves the `dist-dev-messaging` build (needs the `TEST_*` variables; run `pnpm build` and `build:dev-messaging` first) |
 | `pnpm --filter @tessera/api migrate` | apply database migrations (after `pnpm build`) |
 
 Integration tests need these variables and **fail rather than skip** without them:
@@ -33,6 +37,10 @@ export TEST_VALKEY_URL=redis://localhost:6379
 ```
 
 Locally, Mailpit (in the compose file) shows every email at http://127.0.0.1:8025.
+
+To try chat locally, set `MESSAGING_DEV_PLAINTEXT=true` in `services/api/.env` (rejected in
+production) and run the web app with `VITE_DEV_PLAINTEXT_MESSAGING=true`. Every screen then shows
+a "not end-to-end encrypted" banner.
 
 ## Adding an API endpoint
 

@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router';
 
 import { ApiError, errorMessage } from '../api/client.js';
 import { endpoints } from '../api/endpoints.js';
+import { HOME_PATH } from '../home.js';
 import { AuthLayout } from '../components/AuthLayout.js';
 import { PageHeading } from '../components/PageHeading.js';
 import { getPasskeyAssertion, isPasskeyCancellation, passkeysSupported } from '../lib/webauthn.js';
@@ -19,7 +20,7 @@ export function LoginPage(): ReactNode {
 
   async function signedIn() {
     await refresh();
-    await navigate('/settings/security', { replace: true });
+    await navigate(HOME_PATH, { replace: true });
   }
 
   async function withPassword(event: SubmitEvent) {

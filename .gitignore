@@ -19,3 +19,4 @@ coverage/
 .tmp/
 test-results/
 playwright-report/
+dist-dev-messaging/

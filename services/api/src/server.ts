@@ -33,6 +33,9 @@ async function main(): Promise<void> {
     poolMax: config.DATABASE_POOL_MAX,
     statementTimeoutMs: config.DATABASE_STATEMENT_TIMEOUT_MS,
     applicationName: 'tessera-api',
+    onIdleClientError: (error) => {
+      logger.warn('postgres.idle_client_error', logger.errorFields(error));
+    },
   });
   lifecycle.onShutdown({ name: 'postgres', run: () => database.close() });
 

@@ -1,19 +1,21 @@
 import { Button } from '@tessera/ui';
 import { useState, type ReactNode } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 
 import { errorMessage } from '../api/client.js';
 import { endpoints } from '../api/endpoints.js';
+import { activeCodec } from '../messaging/codec.js';
 import { useSession } from '../state/session.js';
 
 import { Brand } from './Brand.js';
 import { OfflineBanner } from './OfflineBanner.js';
 
-const NAV = [
+const NAV: readonly { to: string; label: string }[] = [
+  ...(activeCodec === null ? [] : [{ to: '/chats', label: 'Chats' }]),
   { to: '/settings/security', label: 'Security' },
   { to: '/settings/privacy', label: 'Privacy' },
   { to: '/settings/account', label: 'Account' },
-] as const;
+];
 
 /**
  * Signed-in layout. Desktop: navigation rail + content. Mobile: top bar + content.
@@ -22,6 +24,7 @@ const NAV = [
 export function AppShell(): ReactNode {
   const { me, clear } = useSession();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [signingOut, setSigningOut] = useState(false);
   const [error, setError] = useState<string>();
 
@@ -77,7 +80,14 @@ export function AppShell(): ReactNode {
           )}
         </div>
       </nav>
-      <main className="app-shell__main" id="main">
+      <main
+        className={
+          pathname.startsWith('/chats')
+            ? 'app-shell__main app-shell__main--wide'
+            : 'app-shell__main'
+        }
+        id="main"
+      >
         <Outlet />
       </main>
     </div>

@@ -12,6 +12,11 @@ export interface DatabaseOptions {
   readonly poolMax: number;
   readonly statementTimeoutMs: number;
   readonly applicationName: string;
+  /**
+   * Called when an idle pooled connection fails (database restart, failover, admin termination).
+   * pg emits these on the pool; without a listener they would crash the process.
+   */
+  readonly onIdleClientError: (error: Error) => void;
 }
 
 export interface DatabaseHandle {
@@ -29,6 +34,7 @@ export function createDatabase(options: DatabaseOptions): DatabaseHandle {
     idle_in_transaction_session_timeout: 10_000,
     connectionTimeoutMillis: 5_000,
   });
+  pool.on('error', options.onIdleClientError);
   const db = new Kysely<Database>({ dialect: new PostgresDialect({ pool }) });
   return {
     db,

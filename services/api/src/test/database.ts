@@ -14,6 +14,7 @@ export async function withTemporaryDatabase<T>(run: (pool: pg.Pool) => Promise<T
   const url = new URL(adminUrl);
   url.pathname = `/${name}`;
   const pool = new pg.Pool({ connectionString: url.toString(), max: 4 });
+  pool.on('error', () => undefined);
   try {
     return await run(pool);
   } finally {

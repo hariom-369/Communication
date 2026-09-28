@@ -1,8 +1,12 @@
 import { Alert, Button, Skeleton } from '@tessera/ui';
 import type { ReactNode } from 'react';
-import { createBrowserRouter, Navigate, Outlet, RouterProvider, useLocation } from 'react-router';
+import { createBrowserRouter, Navigate, RouterProvider, useLocation } from 'react-router';
 
 import { AppShell } from './components/AppShell.js';
+import { HOME_PATH } from './home.js';
+import { activeCodec } from './messaging/codec.js';
+import { MessagingProvider } from './messaging/provider.js';
+import { ChatsPage } from './pages/chats/ChatsPage.js';
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage.js';
 import { LoginPage } from './pages/LoginPage.js';
 import { MfaPage } from './pages/MfaPage.js';
@@ -55,11 +59,25 @@ function Guard({
   if (allow.includes(status)) return children;
   // Finishing credential setup lands on Security with a welcome message.
   if (status === 'active') {
-    return <Navigate to="/settings/security" replace state={{ welcome: pathname === '/setup' }} />;
+    return pathname === '/setup' ? (
+      <Navigate to="/settings/security" replace state={{ welcome: true }} />
+    ) : (
+      <Navigate to={HOME_PATH} replace />
+    );
   }
   if (status === 'setup') return <Navigate to="/setup" replace />;
   return <Navigate to="/login" replace />;
 }
+
+const signedInArea = (
+  <Guard allow={['active']}>
+    <StepUpProvider>
+      <MessagingProvider>
+        <AppShell />
+      </MessagingProvider>
+    </StepUpProvider>
+  </Guard>
+);
 
 const router = createBrowserRouter([
   { path: '/', element: <Guard allow={[]}>{null}</Guard> },
@@ -107,24 +125,18 @@ const router = createBrowserRouter([
     ),
   },
   {
-    path: '/settings',
-    element: (
-      <Guard allow={['active']}>
-        <StepUpProvider>
-          <Outlet />
-        </StepUpProvider>
-      </Guard>
-    ),
+    element: signedInArea,
     children: [
-      {
-        element: <AppShell />,
-        children: [
-          { index: true, element: <Navigate to="/settings/security" replace /> },
-          { path: 'security', element: <SecurityPage /> },
-          { path: 'privacy', element: <PrivacyPage /> },
-          { path: 'account', element: <AccountPage /> },
-        ],
-      },
+      { path: '/settings', element: <Navigate to="/settings/security" replace /> },
+      { path: '/settings/security', element: <SecurityPage /> },
+      { path: '/settings/privacy', element: <PrivacyPage /> },
+      { path: '/settings/account', element: <AccountPage /> },
+      ...(activeCodec === null
+        ? []
+        : [
+            { path: '/chats', element: <ChatsPage /> },
+            { path: '/chats/:conversationId', element: <ChatsPage /> },
+          ]),
     ],
   },
   { path: '*', element: <NotFoundPage /> },

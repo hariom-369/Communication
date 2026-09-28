@@ -7,3 +7,4 @@ docs
 services/api/openapi.json
 test-results
 playwright-report
+dist-dev-messaging

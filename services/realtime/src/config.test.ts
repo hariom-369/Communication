@@ -22,11 +22,20 @@ function issues(source: Record<string, string>): string[] {
 describe('realtime config', () => {
   it('applies defaults', () => {
     const config = loadRealtimeConfig(base);
-    expect(config).toMatchObject({ PORT: 8081, WS_PATH: '/rt/v1/ws', MAX_CONNECTIONS_PER_USER: 10, HEARTBEAT_SECONDS: 25 });
+    expect(config).toMatchObject({
+      PORT: 8081,
+      WS_PATH: '/rt/v1/ws',
+      MAX_CONNECTIONS_PER_USER: 10,
+      HEARTBEAT_SECONDS: 25,
+    });
   });
 
   it('enforces TLS and https origins in production', () => {
-    expect(issues({ ...base, NODE_ENV: 'production' })).toEqual(['ALLOWED_ORIGINS', 'DATABASE_URL', 'VALKEY_URL']);
+    expect(issues({ ...base, NODE_ENV: 'production' })).toEqual([
+      'ALLOWED_ORIGINS',
+      'DATABASE_URL',
+      'VALKEY_URL',
+    ]);
     expect(
       issues({
         NODE_ENV: 'production',

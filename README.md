@@ -7,14 +7,20 @@ Tessera is a production-grade, public, commercial communication platform: privat
 messaging with end-to-end encryption (E2EE), communities, broadcast channels, voice/video
 calls, media, multi-device, encrypted backups, moderation, administration and billing.
 
-## Current status: Phase 2 complete
+## Current status: Phase 3 complete
 
 - **Phase 0** — architecture, threat model and research package: [`docs/`](docs/README.md).
 - **Phase 1** — repository, tooling, CI/CD and platform foundations:
   [`docs/phase-reports/phase-1.md`](docs/phase-reports/phase-1.md).
 - **Phase 2** — accounts, passkeys/passwords/2FA, sessions, audit log, web app:
   [`docs/phase-reports/phase-2.md`](docs/phase-reports/phase-2.md).
-- **Next: Phase 3** — core messaging and the realtime (WebSocket) service.
+- **Phase 3** — messaging transport (conversations, ordered mailbox, delivery states, sync),
+  realtime WebSocket service, chat UI:
+  [`docs/phase-reports/phase-3.md`](docs/phase-reports/phase-3.md). Chat is available only in
+  development builds and is **not yet end-to-end encrypted** (ADR-038); production builds do not
+  contain it.
+- **Next: Phase 4** — E2EE foundation (MLS via OpenMLS). It needs the external cryptographic
+  review (S-01..S-04) before anything ships to users.
 
 Start with:
 

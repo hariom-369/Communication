@@ -1,4 +1,11 @@
 import {
+  conversationListSchema,
+  conversationSchema,
+  messageListSchema,
+  presenceSchema,
+  realtimeTicketSchema,
+  sendMessageResponseSchema,
+  syncResponseSchema,
   meResponseSchema,
   okResponseSchema,
   passkeyListSchema,
@@ -76,4 +83,43 @@ export const endpoints = {
     api('DELETE', `/auth/sessions/${encodeURIComponent(id)}`, okResponseSchema),
   revokeOtherSessions: () =>
     api('POST', '/auth/sessions/revoke-others', z.object({ revoked: z.number() }), {}),
+
+  openDirect: (username: string, ciphersuite: number) =>
+    api('POST', '/conversations/direct', conversationSchema, { username, ciphersuite }),
+  conversations: (cursor?: string) =>
+    api(
+      'GET',
+      `/conversations?limit=50${cursor === undefined ? '' : `&cursor=${encodeURIComponent(cursor)}`}`,
+      conversationListSchema,
+    ),
+  conversation: (id: string) =>
+    api('GET', `/conversations/${encodeURIComponent(id)}`, conversationSchema),
+  sendMessage: (id: string, body: { clientMessageId: string; epoch: number; ciphertext: string }) =>
+    api(
+      'POST',
+      `/conversations/${encodeURIComponent(id)}/messages`,
+      sendMessageResponseSchema,
+      body,
+    ),
+  messages: (id: string, query: { after?: number; before?: number; limit?: number }) => {
+    const params = new URLSearchParams();
+    if (query.after !== undefined) params.set('after', String(query.after));
+    if (query.before !== undefined) params.set('before', String(query.before));
+    params.set('limit', String(query.limit ?? 50));
+    return api(
+      'GET',
+      `/conversations/${encodeURIComponent(id)}/messages?${params.toString()}`,
+      messageListSchema,
+    );
+  },
+  ack: (id: string, seq: number) =>
+    api('POST', `/conversations/${encodeURIComponent(id)}/ack`, okResponseSchema, { seq }),
+  sync: () => api('GET', '/sync', syncResponseSchema),
+  setDisappearing: (id: string, seconds: 0 | 86400 | 604800 | 7776000) =>
+    api('PUT', `/conversations/${encodeURIComponent(id)}/disappearing`, conversationSchema, {
+      seconds,
+    }),
+  realtimeTicket: () => api('POST', '/realtime/ticket', realtimeTicketSchema, {}),
+  presence: (userId: string) =>
+    api('GET', `/presence/${encodeURIComponent(userId)}`, presenceSchema),
 };

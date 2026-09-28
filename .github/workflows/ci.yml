@@ -31,6 +31,8 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm build
+      - name: Production web bundle contains no development messaging code
+        run: pnpm --filter @tessera/web verify:bundle
       - run: pnpm test
       - name: OpenAPI contract is up to date
         run: |
@@ -108,6 +110,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      - run: pnpm --filter @tessera/web build:dev-messaging
       - run: pnpm --filter @tessera/web exec playwright install --with-deps chromium
       - run: pnpm --filter @tessera/web test:e2e
 

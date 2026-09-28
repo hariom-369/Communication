@@ -9,10 +9,13 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p e2e/tsconfig.json",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "verify:bundle": "node scripts/verify-bundle.mjs dist",
+    "build:dev-messaging": "VITE_DEV_PLAINTEXT_MESSAGING=true vite build --outDir dist-dev-messaging"
   },
   "dependencies": {
     "@simplewebauthn/browser": "14.0.0",
+    "@tessera/shared": "workspace:*",
     "@tessera/ui": "workspace:*",
     "@tessera/validation": "workspace:*",
     "qrcode": "1.5.4",

@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router';
 
 import { errorMessage } from '../api/client.js';
 import { endpoints } from '../api/endpoints.js';
+import { HOME_PATH } from '../home.js';
 import { AuthLayout } from '../components/AuthLayout.js';
 import { PageHeading } from '../components/PageHeading.js';
 import { useSession } from '../state/session.js';
@@ -25,7 +26,7 @@ export function MfaPage(): ReactNode {
         mode === 'totp' ? { totpCode: code.trim() } : { recoveryCode: code.trim() },
       );
       await refresh();
-      await navigate('/settings/security', { replace: true });
+      await navigate(HOME_PATH, { replace: true });
     } catch (caught) {
       setError(errorMessage(caught));
       setBusy(false);

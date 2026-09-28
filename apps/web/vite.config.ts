@@ -10,6 +10,7 @@ import { defineConfig } from 'vite';
  * the dev server because Vite's hot-reload runtime needs inline scripts.
  */
 const API_TARGET = process.env['TESSERA_API_URL'] ?? 'http://127.0.0.1:8080';
+const REALTIME_TARGET = process.env['TESSERA_REALTIME_URL'] ?? 'ws://127.0.0.1:8081';
 
 export const CONTENT_SECURITY_POLICY = [
   "default-src 'none'",
@@ -35,7 +36,11 @@ const productionHeaders = {
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
 };
 
-const proxy = { '/api': { target: API_TARGET, changeOrigin: false, xfwd: true } };
+// Mirrors production routing: one origin, `/api` → API service, `/rt` → realtime service.
+const proxy = {
+  '/api': { target: API_TARGET, changeOrigin: false, xfwd: true },
+  '/rt': { target: REALTIME_TARGET, ws: true, changeOrigin: false },
+};
 
 export default defineConfig({
   plugins: [react()],

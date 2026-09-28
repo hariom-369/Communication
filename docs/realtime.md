@@ -1,6 +1,28 @@
 # Realtime (WebSocket) architecture
 
-Status: PROPOSED · Decisions: ADR-001, 015, 020, 029
+Status: Phase 3 IMPLEMENTED (subset, see §0) · Decisions: ADR-001, 015, 020, 029, 033, 036, 037
+
+## 0. Phase 3 implementation status
+
+What `services/realtime` does today, and where it differs from the target design below:
+
+| Area | Phase 3 | Target (sections below) |
+|---|---|---|
+| Endpoint | `wss://<web origin>/rt/v1/ws` (ADR-033 amendment) | same |
+| Auth | `POST /api/v1/realtime/ticket` → 256-bit ticket, 30 s, single use (`GETDEL`), bound to the session; `auth` frame within 5 s (else 4401); session re-checked every 60 s and on `sessions_changed` | + bound to device (Phase 4) |
+| Origin | allow-list checked before the upgrade (403 otherwise) | same |
+| Frames | JSON, Zod-validated both ways, client frames ≤ 4 KiB (ADR-036): client `auth`, `typing`, `ping`; server `ready`, `ack`, `error`, `message`, `receipt`, `typing`, `conversation`, `reconnect` | Protobuf (ADR-020) |
+| Sends | REST (ADR-036); the socket only pushes | socket submit + REST fallback |
+| Fan-out | per-user Valkey channel (ADR-037) | per-device routes (§3) |
+| Limits | 10 sockets/user (4429), 50k/pod (1013), 20 frames/s burst 40 (4408), typing 1 per 3 s per conversation, backpressure close at 1 MiB buffered (1013) | + per-device eviction, per-IP unauthenticated cap |
+| Heartbeat | ping every 25 s, terminate on missed pong | same |
+| Deploys | SIGTERM → `reconnect{afterMs: random 0..30 s}` → drain | same |
+| Presence | online flag (TTL 90 s) + last seen, visibility enforced at read time with reciprocity (hidden users see no one's) | same |
+| Typing | server-visible `typing` frames, membership-checked, not persisted (metadata, documented) | MLS-encrypted typing |
+
+Not yet implemented: per-IP cap on unauthenticated sockets (the auth timeout bounds their
+lifetime; an edge limit is required before public launch — Phase 15/17), metrics listed in §9
+(Phase 14/15 observability work; structured logs exist now).
 
 ## 1. Responsibilities
 

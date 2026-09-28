@@ -71,6 +71,8 @@ export async function startIntegrationApp(): Promise<IntegrationApp> {
   const url = new URL(adminUrl);
   url.pathname = `/${name}`;
   const pool = new pg.Pool({ connectionString: url.toString(), max: 10 });
+  // Teardown force-drops the database, which terminates any connection still closing.
+  pool.on('error', () => undefined);
 
   const logs = new MemoryDestination();
   const logger = createLogger({

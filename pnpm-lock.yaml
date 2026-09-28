@@ -50,6 +50,9 @@ importers:
       '@simplewebauthn/browser':
         specifier: 14.0.0
         version: 14.0.0
+      '@tessera/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@tessera/ui':
         specifier: workspace:*
         version: link:../../packages/ui

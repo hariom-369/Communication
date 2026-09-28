@@ -1,6 +1,44 @@
 # Messaging and delivery semantics
 
-Status: PROPOSED · Decisions: ADR-008, 009, 010, 020, 028 · Transport: [realtime.md](realtime.md)
+Status: Phase 3 IMPLEMENTED (transport; E2EE in Phase 4) · Decisions: ADR-008, 009, 010, 020, 028, 036, 038 · Transport: [realtime.md](realtime.md)
+
+## 0. Phase 3 implementation status
+
+Implemented in `services/api` (`messaging` module, migration `0003_messaging.sql`) and
+`apps/web/src/messaging`:
+
+- **Direct conversations** between two different users; opening one is idempotent
+  (`direct_pairs`). Groups arrive in Phase 7.
+- **Send**: `POST /api/v1/conversations/{id}/messages` `{clientMessageId, epoch, ciphersuite,
+  ciphertext}` → `{seq, serverTime, duplicate}`. One transaction: membership check, idempotency
+  on `(conversation, sender, clientMessageId)` (returns the original `seq`), epoch check,
+  `seq = last_seq + 1` under `FOR UPDATE`, mailbox insert. Realtime events are published after
+  commit. Ciphertext ≤ 64 KiB; body limit 96 KiB.
+- **Payloads are opaque bytes** (`ciphertext bytea`); the server never parses them. The only
+  Phase 3 codec is the development plaintext codec, triple-gated so it cannot reach staging or
+  production (ADR-038).
+- **Cursors are per user** in Phase 3 (`conversation_members.acked_seq`); per-device cursors
+  replace them with device records (Phase 4/5). DELIVERED = every other member has acked the
+  `seq`; READ = encrypted `read` control message, shown only when the viewer also shares read
+  receipts (reciprocity).
+- **Sync**: `GET /api/v1/sync` returns `{id, ackedSeq, lastSeq}` for every
+  conversation; the client pages `GET …/messages?after=` in `seq` order and fills gaps when a
+  pushed message skips ahead.
+- **Operations** (reply, react, edit ≤ 15 min, delete for everyone ≤ 48 h, read markers) are
+  control messages inside the payload; the rules are enforced by every client
+  (`timeline.ts`), because the server cannot read them.
+- **Disappearing messages**: the per-conversation timer is server-known and mirrored into each
+  row's `expires_at`, so the sweeper deletes ciphertext on time even if clients are offline.
+- **Retention**: rows are deleted when every member has acked them, or after 30 days
+  (`MAILBOX_RETENTION_DAYS`), by a singleton sweeper (advisory lock) every 5 minutes.
+- **Client outbox**: in memory in Phase 3; retries with full-jitter backoff (1 s → 60 s) using
+  the same `clientMessageId`, marks FAILED on permanent errors or after 24 h, flushes on
+  `online`. A persisted, encrypted outbox arrives with the encrypted local store (Phase 4).
+- **Pagination**: conversation-list cursors are opaque base64url positions, not signed —
+  tampering only moves the position inside the caller's own membership-filtered list. Message
+  history uses `after`/`before` sequence numbers.
+- Limits implemented: sends 300/min burst 20 per user; new direct conversations 60/h burst 20
+  (fails closed); reads 600/min.
 
 ## 1. Delivery states
 

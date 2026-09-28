@@ -11,6 +11,7 @@ describe('database (real PostgreSQL)', () => {
       poolMax: 2,
       statementTimeoutMs: 100,
       applicationName: 'tessera-it',
+      onIdleClientError: () => undefined,
     });
     try {
       await expect(

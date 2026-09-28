@@ -90,6 +90,7 @@ beforeAll(async () => {
   const url = new URL(adminUrl);
   url.pathname = `/${dbName}`;
   db = new pg.Pool({ connectionString: url.toString(), max: 5 });
+  db.on('error', () => undefined);
   await migrate(db, await loadMigrations(API_MIGRATIONS), logger);
   valkey = new Redis(requireEnv('TEST_VALKEY_URL'));
 });

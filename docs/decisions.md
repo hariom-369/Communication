@@ -410,6 +410,12 @@ the API must never serve HTML. The API keeps its own restrictive CSP on every re
 
 **Status.** ACCEPTED.
 
+**Amended (Phase 3).** The realtime service is also served from the web origin, at `/rt/*`
+(path routing at the load balancer), instead of a separate host. Authentication is unchanged:
+the socket is authenticated **only** by the single-use ticket in its first frame, never by the
+cookie the browser now also sends; the Origin allow-list still applies. This keeps CSP at
+`connect-src 'self'`.
+
 ## ADR-034 — Device records move to Phase 4
 
 **Decision.** Phase 2 manages *sessions* (list, revoke, sign out everywhere). Device records,
@@ -437,3 +443,61 @@ does not exist yet. Session management already provides "log out all devices".
   a waiting period (docs/authentication.md §3), **not yet implemented** (Phase 12 support tools).
 
 **Status.** ACCEPTED (security review S-13 will re-check).
+
+## ADR-036 — Phase 3 wire format: JSON frames, sends over REST
+
+**Decision.** Until the MLS client exists (Phase 4), WebSocket frames are JSON validated by Zod
+schemas shared between server and client (`packages/validation/src/realtime.ts`, subprotocol
+`tessera.v1`). The socket is **push-only** apart from `auth`, `typing` and `ping`; message sends,
+acks and sync go over the same-origin REST API (`POST /api/v1/conversations/{id}/messages` with
+a client-chosen `clientMessageId` as the idempotency key). Client frames are capped at 4 KiB.
+
+**Why.** One authorization, validation, rate-limiting and audit path for writes (the REST
+pipeline already has CSRF, per-user limits and route-completeness tests); the socket carries no
+state that must survive a reconnect, so it can be dropped at any time (deploys, backpressure,
+network changes) without losing messages. JSON keeps Phase 3 debuggable while payloads are
+still opaque bytes.
+
+**Trade-offs.** Slightly higher send latency than a socket submit, and JSON frames are larger
+than Protobuf. Revisit with ADR-020 when MLS application messages need a stable binary
+plaintext format (Phase 4) and under load testing (Phase 15); the REST send path remains the
+fallback either way.
+
+**Status.** ACCEPTED (supersedes ADR-020 for WebSocket frames in Phase 3 only).
+
+## ADR-037 — Fan-out by user channel until devices exist
+
+**Decision.** The API publishes realtime events to one Valkey pub/sub channel per recipient user
+(`<prefix>:rt:user:<userId>`); each realtime pod subscribes to the channels of the users it has
+sockets for, and unsubscribes when their last socket closes. The per-device routing table of
+[realtime.md §3](realtime.md) replaces this in Phase 4/5, when device records exist (ADR-034).
+
+**Why.** Without device identities there is nothing to route to below the user; per-user
+channels avoid the conversation-subscription churn rejected in realtime.md §3 while staying
+O(members) per message.
+
+**Trade-offs.** Pub/sub is fire-and-forget: a pod that misses an event leaves the client to
+catch up through `sync` on its next reconnect or gap detection (sequence numbers make gaps
+visible). Acceptable because the mailbox, not the socket, is the source of truth.
+
+**Status.** ACCEPTED.
+
+## ADR-038 — Development plaintext codec is triple-gated
+
+**Decision.** Phase 3 needs a working chat before E2EE exists. Messages are encoded by a
+`MessageCodec`; the only Phase 3 codec (`tessera-dev-plaintext-codec-v1`, ciphersuite `0`) puts
+the UTF-8 JSON content into the opaque `ciphertext` field. It is enabled only when **all three**
+gates are open:
+1. the API sets `MESSAGING_DEV_PLAINTEXT=true` — production config validation **rejects** it, and
+   the server refuses ciphersuite `0` otherwise;
+2. the web app is built with `VITE_DEV_PLAINTEXT_MESSAGING=true` (`build:dev-messaging`) — the
+   default build contains no codec, no chat routes and no chat navigation;
+3. CI verifies the default production bundle contains none of the codec's markers
+   (`verify:bundle`).
+Every screen of a development build shows a permanent "not end-to-end encrypted" banner.
+
+**Why.** Lets transport, ordering, delivery and UI be built and tested end to end now, while
+guaranteeing no plaintext message path can reach staging or production (implementation plan,
+Phase 3 row).
+
+**Status.** ACCEPTED. Removed when the MLS codec lands (Phase 4).

@@ -19,6 +19,9 @@ async function main(): Promise<number> {
     // DDL can legitimately take longer than API queries; lock waits are still bounded.
     statementTimeoutMs: 15 * 60_000,
     applicationName: 'tessera-migrate',
+    onIdleClientError: (error) => {
+      logger.warn('postgres.idle_client_error', logger.errorFields(error));
+    },
   });
   try {
     const applied = await migrate(database.pool, await loadMigrations(MIGRATIONS_DIR), logger);

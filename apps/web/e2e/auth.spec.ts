@@ -53,7 +53,8 @@ test.describe('sign-up, sign-in and account security', () => {
 
     await page.getByLabel('Password').fill(identity.password);
     await page.getByRole('button', { name: 'Sign in with password' }).click();
-    await expect(page.getByRole('heading', { name: 'Security' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Chats', level: 1 })).toBeVisible();
+    await page.getByRole('link', { name: 'Security' }).click();
     await expect(page.getByText('This device')).toBeVisible();
 
     expect(violations).toEqual([]);
@@ -82,7 +83,7 @@ test.describe('sign-up, sign-in and account security', () => {
 
     await page.getByRole('button', { name: 'Sign out' }).click();
     await page.getByRole('button', { name: 'Sign in with a passkey' }).click();
-    await expect(page.getByRole('heading', { name: 'Security' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Chats', level: 1 })).toBeVisible();
   });
 
   test('two-step verification: enrol, confirm identity, sign in with a code and a recovery code', async ({
@@ -120,7 +121,7 @@ test.describe('sign-up, sign-in and account security', () => {
     await expect(page.getByRole('heading', { name: 'Two-step verification' })).toBeVisible();
     await page.getByLabel('Authentication code').fill(totp(secret, 1));
     await page.getByRole('button', { name: 'Verify' }).click();
-    await expect(page.getByRole('heading', { name: 'Security' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Chats', level: 1 })).toBeVisible();
 
     // Recovery code, single use
     await page.getByRole('button', { name: 'Sign out' }).click();
@@ -130,6 +131,7 @@ test.describe('sign-up, sign-in and account security', () => {
     await page.getByRole('button', { name: 'Use a recovery code instead' }).click();
     await page.getByLabel('Recovery code').fill(recoveryCode);
     await page.getByRole('button', { name: 'Verify' }).click();
+    await page.getByRole('link', { name: 'Security' }).click();
     await expect(page.getByText('9 recovery codes left')).toBeVisible();
   });
 
@@ -144,7 +146,7 @@ test.describe('sign-up, sign-in and account security', () => {
     await otherPage.getByLabel('Email or username').fill(identity.email);
     await otherPage.getByLabel('Password').fill(identity.password);
     await otherPage.getByRole('button', { name: 'Sign in with password' }).click();
-    await expect(otherPage.getByRole('heading', { name: 'Security' })).toBeVisible();
+    await expect(otherPage.getByRole('heading', { name: 'Chats', level: 1 })).toBeVisible();
 
     const before = (await inbox(identity.email)).length;
     await page.getByRole('button', { name: 'Sign out' }).click();
@@ -173,7 +175,7 @@ test.describe('sign-up, sign-in and account security', () => {
     await page.getByLabel('Email or username').fill(identity.email);
     await page.getByLabel('Password').fill(newPassword);
     await page.getByRole('button', { name: 'Sign in with password' }).click();
-    await expect(page.getByRole('heading', { name: 'Security' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Chats', level: 1 })).toBeVisible();
   });
 
   test('sessions can be signed out remotely', async ({ page, browser }) => {
@@ -186,7 +188,7 @@ test.describe('sign-up, sign-in and account security', () => {
     await otherPage.getByLabel('Email or username').fill(identity.email);
     await otherPage.getByLabel('Password').fill(identity.password);
     await otherPage.getByRole('button', { name: 'Sign in with password' }).click();
-    await expect(otherPage.getByRole('heading', { name: 'Security' })).toBeVisible();
+    await expect(otherPage.getByRole('heading', { name: 'Chats', level: 1 })).toBeVisible();
 
     await page.reload();
     await page.getByRole('button', { name: 'Sign out Safari on iOS' }).click();
@@ -242,6 +244,32 @@ test.describe('accessibility', () => {
     await page.getByRole('link', { name: 'Privacy' }).click();
     await page.getByLabel('Last seen', { exact: true }).waitFor();
     await audit();
+    // Chat list and an open conversation (development messaging build).
+    const other = await browser.newContext();
+    const peer = await signUpWithPassword(await other.newPage());
+    await page.getByRole('link', { name: 'Chats' }).click();
+    await page.getByRole('status').filter({ hasText: 'Connected' }).waitFor();
+    await audit();
+    await page.getByLabel('Start a chat').fill(peer.username);
+    await page.getByRole('button', { name: 'Start' }).click();
+    await page.getByLabel('Message', { exact: true }).fill('Accessible?');
+    await page.keyboard.press('Enter');
+    await page.getByText('Sent', { exact: false }).first().waitFor();
+    await audit();
+    const screenshots = process.env['E2E_SCREENSHOTS'];
+    if (screenshots !== undefined)
+      await page.screenshot({ path: `${screenshots}/chat-desktop.png` });
+    // Phone width: no horizontal page scroll, and the composer stays inside the viewport.
+    await page.setViewportSize({ width: 360, height: 740 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      360,
+    );
+    const composer = await page.getByLabel('Message', { exact: true }).boundingBox();
+    expect((composer?.y ?? Infinity) + (composer?.height ?? 0)).toBeLessThanOrEqual(740);
+    await audit();
+    if (screenshots !== undefined)
+      await page.screenshot({ path: `${screenshots}/chat-mobile.png` });
+    await other.close();
     await context.close();
   });
 

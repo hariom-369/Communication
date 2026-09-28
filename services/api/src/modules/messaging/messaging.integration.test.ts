@@ -9,6 +9,7 @@ import {
   userChannel,
   type Conversation,
 } from '@tessera/validation';
+import { sql } from 'kysely';
 import { Redis } from 'ioredis';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -418,5 +419,20 @@ describe("'realtime.ticket' and 'realtime.presence'", () => {
     const alice = await user();
     await alice.client.post('/api/v1/auth/logout');
     expect(await eventsFor(alice.id, 'sessions_changed')).not.toHaveLength(0);
+  });
+  it('has no column that could hold message plaintext: payloads are opaque bytes', async () => {
+    const columns = await sql<{ table_name: string; column_name: string; data_type: string }>`
+      SELECT table_name, column_name, data_type FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name IN ('conversations', 'conversation_members', 'direct_pairs', 'mailbox_messages')
+        AND data_type IN ('text', 'character varying', 'json', 'jsonb', 'bytea')
+      ORDER BY table_name, column_name`.execute(env.db);
+    // Only two CHECK-constrained enums are text; the single payload column is bytea, never
+    // parsed by the server. A new text/json column here must be justified in review.
+    expect(columns.rows).toEqual([
+      { table_name: 'conversation_members', column_name: 'role', data_type: 'text' },
+      { table_name: 'conversations', column_name: 'kind', data_type: 'text' },
+      { table_name: 'mailbox_messages', column_name: 'ciphertext', data_type: 'bytea' },
+    ]);
   });
 });

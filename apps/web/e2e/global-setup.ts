@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -120,6 +121,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     WEBAUTHN_RP_ID: 'localhost',
     TRUST_PROXY_HOPS: '1',
     SHUTDOWN_DRAIN_MS: '0',
+    MESSAGING_DEV_PLAINTEXT: 'true',
   };
   const apiDir = path.join(ROOT, 'services/api');
   const migrate = start('node', ['dist/cli/migrate.js'], apiEnv, apiDir);
@@ -129,16 +131,45 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const api = start('node', ['dist/server.js'], apiEnv, apiDir);
   await waitFor('http://127.0.0.1:59090/readyz');
 
+  const realtime = start(
+    'node',
+    ['dist/server.js'],
+    {
+      NODE_ENV: 'development',
+      HOST: '127.0.0.1',
+      PORT: '58081',
+      HEALTH_PORT: '59091',
+      LOG_LEVEL: 'warn',
+      DATABASE_URL: databaseUrl.toString(),
+      VALKEY_URL: valkeyUrl,
+      VALKEY_KEY_PREFIX: apiEnv.VALKEY_KEY_PREFIX,
+      ALLOWED_ORIGINS: 'http://localhost:4173',
+      SHUTDOWN_DRAIN_MS: '0',
+    },
+    path.join(ROOT, 'services/realtime'),
+  );
+  await waitFor('http://127.0.0.1:59091/readyz');
+
+  // The E2E suite exercises the development messaging build (the only build with chats until
+  // E2EE lands); `verify:bundle` separately guarantees the normal build contains none of it.
+  const webDir = path.join(ROOT, 'apps/web');
+  if (!existsSync(path.join(webDir, 'dist-dev-messaging', 'index.html'))) {
+    throw new Error('Run `pnpm --filter @tessera/web build:dev-messaging` before the E2E tests.');
+  }
   const web = start(
     'pnpm',
-    ['exec', 'vite', 'preview', '--host', 'localhost'],
-    { TESSERA_API_URL: `http://127.0.0.1:${API_PORT}` },
-    path.join(ROOT, 'apps/web'),
+    ['exec', 'vite', 'preview', '--host', 'localhost', '--outDir', 'dist-dev-messaging'],
+    {
+      TESSERA_API_URL: `http://127.0.0.1:${API_PORT}`,
+      TESSERA_REALTIME_URL: 'ws://127.0.0.1:58081',
+    },
+    webDir,
   );
   await waitFor('http://localhost:4173/');
 
   return async () => {
     web.kill('SIGTERM');
+    realtime.kill('SIGTERM');
     api.kill('SIGTERM');
     await new Promise<void>((resolve) => inboxServer.close(() => resolve()));
     await new Promise<void>((resolve) => smtp.close(() => resolve()));
