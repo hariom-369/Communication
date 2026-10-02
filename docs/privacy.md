@@ -69,6 +69,7 @@ no advertising profiling at launch.
 | Call media | No | — | |
 | Attachment existence, ciphertext size, uploader, blob↔conversation link, upload/download times | Yes | Until the referencing message expires (≤ 30 days); unsent uploads 1 day | [media.md](media.md), ADR-043. File names, types, dimensions, durations, previews and keys are **inside** the encrypted message only |
 | Group membership, roles (owner/admin/member), who added whom, the two settings "members can add" and "announcements only", invitations, join requests, bans | Yes | while the group exists (rows deleted with it) | needed to route and enforce the API; the authoritative roles are also end-to-end in the group (ADR-044) |
+| Communities: name, description, rules (and which version each member accepted), visibility, roles and their permissions, members and their roles, bans, invite-link usage, space names and who is in each space | Yes | while the community exists (deleted with it; ban rows kept until lifted or the community is deleted) | needed to list, search and enforce communities (ADR-045); public communities are searchable by any signed-in user |
 | Group name, description, pins, polls, votes, mentions | **No** | — | E2EE content |
 | Invite links: token digest, expiry, use count, optional preview title | Yes | until revoked/expired and the group is deleted | the preview title is the only group text the server can read, and only if an admin sets one |
 | Push notification content | No (content-free push) | — | [notifications.md](notifications.md) |

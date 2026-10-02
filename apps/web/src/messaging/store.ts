@@ -65,7 +65,17 @@ type Api = Pick<
   | 'deleteGroup'
   | 'approveJoinRequest'
   | 'acceptInvitation'
+  | 'joinRequests'
+  | 'mySpaces'
 >;
+
+/** A community space this user is in (labels its conversation; ADR-045). */
+export interface SpaceLabel {
+  readonly communityId: string;
+  readonly communityName: string;
+  readonly name: string;
+  readonly autoApprove: boolean;
+}
 
 type WithStepUp = <T>(action: () => Promise<T>) => Promise<T | undefined>;
 
@@ -77,6 +87,8 @@ export interface GroupSettingsChange {
 }
 
 const POLICY_ATTEMPTS = 3;
+/** How long adding someone waits for the encryption group to include them. */
+const INTENT_WAIT_MS = 15_000;
 
 /** What the store needs from the end-to-end encryption session (see E2eeSession). */
 export interface SecurityPort {
@@ -171,6 +183,10 @@ export interface MessagingSnapshot {
   readonly error: string | null;
   /** Attachments being encrypted and uploaded, by message id. */
   readonly uploads: Readonly<Record<string, UploadProgress>>;
+  /** Community spaces by conversation id. */
+  readonly spaces: Readonly<Record<string, SpaceLabel>>;
+  /** Bumped when a community this user belongs to changed (pages re-fetch). */
+  readonly communityVersion: number;
 }
 
 interface OutboxEntry {
@@ -263,6 +279,13 @@ export class MessagingStore {
   readonly #uploads = new Map<string, UploadProgress>();
   /** Realtime connected and conversations loaded (the device is set up). */
   #live = false;
+  readonly #spaces = new Map<string, SpaceLabel>();
+  #spacesLoading: Promise<void> | null = null;
+  #spacesAgain = false;
+  #communityVersion = 0;
+  readonly #approving = new Set<string>();
+  /** Membership intents being awaited until they are sent and applied. */
+  readonly #applied = new Map<string, () => void>();
 
   constructor(options: StoreOptions) {
     this.#options = options;
@@ -339,6 +362,8 @@ export class MessagingStore {
       loaded: this.#loaded,
       error: this.#error,
       uploads: Object.fromEntries(this.#uploads),
+      spaces: Object.fromEntries(this.#spaces),
+      communityVersion: this.#communityVersion,
     };
   }
 
@@ -417,6 +442,7 @@ export class MessagingStore {
       this.#error = 'Could not load your conversations.';
     }
     this.#emit();
+    await this.#loadSpaces();
     await this.#options.security.processWelcomes().catch(() => []);
     await this.catchUp();
     // Re-check every conversation's identities and group now, so key changes (including ones
@@ -636,6 +662,8 @@ export class MessagingStore {
           this.#emit();
           // New conversation or membership change: bring the encryption group in line.
           void this.#options.security.prepare(meta).catch(() => undefined);
+          // Possibly a community space we were just added to: refresh the labels.
+          if (meta.kind === 'group' && !this.#spaces.has(meta.id)) void this.#loadSpaces();
         } catch (error) {
           // No longer visible: we were removed from the group (or it was deleted).
           const conversation = this.#conversations.get(frame.conversationId);
@@ -647,6 +675,7 @@ export class MessagingStore {
             conversation.removed = true;
             await this.#options.security.forgetGroup(frame.conversationId);
             this.#emit();
+            if (this.#spaces.has(frame.conversationId)) void this.#loadSpaces();
           }
         }
         return;
@@ -656,6 +685,12 @@ export class MessagingStore {
         if (conversation === undefined) return;
         conversation.requestHint += 1;
         this.#emit();
+        this.#maybeAutoApprove(frame.conversationId);
+        return;
+      }
+      case 'community': {
+        this.#communityVersion += 1;
+        await this.#loadSpaces();
         return;
       }
       case 'welcome': {
@@ -958,6 +993,70 @@ export class MessagingStore {
     this.#enqueue(conversationId, { v: 1, id: newId(), sentAt: Date.now(), body });
   }
 
+  // ---- community spaces (ADR-045) -----------------------------------------------------------------
+
+  /** Reloads space labels; concurrent requests share one run (plus one more afterwards). */
+  #loadSpaces(): Promise<void> {
+    if (this.#spacesLoading !== null) {
+      this.#spacesAgain = true;
+      return this.#spacesLoading;
+    }
+    this.#spacesLoading = this.#fetchSpaces().finally(() => {
+      this.#spacesLoading = null;
+      if (this.#spacesAgain) {
+        this.#spacesAgain = false;
+        void this.#loadSpaces();
+      }
+    });
+    return this.#spacesLoading;
+  }
+
+  async #fetchSpaces(): Promise<void> {
+    try {
+      const { spaces } = await this.#options.api.mySpaces();
+      this.#spaces.clear();
+      for (const space of spaces) this.#spaces.set(space.conversationId, space);
+    } catch {
+      return; // labels are cosmetic; the next community event retries
+    }
+    this.#emit();
+    for (const id of this.#spaces.keys()) this.#maybeAutoApprove(id);
+  }
+
+  /**
+   * Open spaces ("auto-approve"): this device, if its user is an admin of the space, adds members
+   * the server reports as eligible. That trusts the server's view of community membership, which
+   * the space settings say plainly (docs/groups.md §5).
+   */
+  #maybeAutoApprove(conversationId: string): void {
+    const space = this.#spaces.get(conversationId);
+    if (space?.autoApprove !== true || this.#approving.has(conversationId)) return;
+    const policy = this.#options.security.security(conversationId).policy;
+    const role = roleIn(policy, this.#options.me.id);
+    if (role !== 'owner' && role !== 'admin') return;
+    this.#approving.add(conversationId);
+    void (async () => {
+      try {
+        const { requests } = await this.#options.api.joinRequests(conversationId);
+        for (const request of requests)
+          await this.approveJoinRequest(conversationId, request.userId).catch(() => undefined);
+      } catch {
+        // Not an admin on the server (yet), or offline: the next hint retries.
+      } finally {
+        this.#approving.delete(conversationId);
+      }
+    })();
+  }
+
+  /** Starts tracking a conversation this user just got into (e.g. a space they created). */
+  async adoptConversation(conversationId: string): Promise<void> {
+    const conversation = this.#upsert(await this.#options.api.conversation(conversationId));
+    await this.#hydrate(conversation);
+    this.#emit();
+    await this.#loadSpaces();
+    await this.#options.security.prepare(conversation.meta).catch(() => undefined);
+  }
+
   // ---- groups (docs/groups.md) -------------------------------------------------------------------
 
   #group(conversationId: string): MutableConversation {
@@ -973,10 +1072,36 @@ export class MessagingStore {
     return meta;
   }
 
-  /** Confirms, end to end, who should (or should no longer) be in the group. */
-  #intent(conversationId: string, add: readonly string[], remove: readonly string[]): void {
+  /**
+   * Confirms, end to end, who should (or should no longer) be in the group, and waits (bounded)
+   * until this device has sent it and applied it — so a message written right after adding
+   * someone is encrypted for them too.
+   */
+  async #intent(
+    conversationId: string,
+    add: readonly string[],
+    remove: readonly string[],
+  ): Promise<void> {
     if (add.length === 0 && remove.length === 0) return;
-    this.#control(conversationId, { kind: 'group_members', add: [...add], remove: [...remove] });
+    const conversation = this.#conversations.get(conversationId);
+    if (conversation === undefined || !this.#maySend(conversation)) return;
+    const id = newId();
+    const applied = new Promise<void>((resolve) => {
+      this.#applied.set(id, resolve);
+    });
+    this.#enqueue(conversationId, {
+      v: 1,
+      id,
+      sentAt: Date.now(),
+      body: { kind: 'group_members', add: [...add], remove: [...remove] },
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const waited = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, INTENT_WAIT_MS);
+    });
+    await Promise.race([applied, waited]);
+    clearTimeout(timer);
+    this.#applied.delete(id);
   }
 
   /**
@@ -993,7 +1118,7 @@ export class MessagingStore {
     await this.#hydrate(conversation);
     this.#emit();
     this.#control(meta.id, { kind: 'group_info', name: name.trim(), description: '' });
-    this.#intent(
+    await this.#intent(
       meta.id,
       [...created.added, ...created.invited].map((user) => user.userId),
       [],
@@ -1011,12 +1136,12 @@ export class MessagingStore {
   ): Promise<{ added: string[]; invited: string[]; skipped: string[] }> {
     this.#group(conversationId);
     const result = await this.#options.api.addMembers(conversationId, usernames);
-    this.#intent(
+    await this.#refresh(conversationId);
+    await this.#intent(
       conversationId,
       [...result.added, ...result.invited].map((user) => user.userId),
       [],
     );
-    await this.#refresh(conversationId);
     return {
       added: result.added.map((user) => user.username),
       invited: result.invited.map((user) => user.username),
@@ -1025,23 +1150,22 @@ export class MessagingStore {
   }
 
   /** Confirms people the server lists but no admin confirmed yet (after checking who they are). */
-  confirmMembers(conversationId: string, userIds: readonly string[]): void {
-    this.#intent(conversationId, userIds, []);
+  confirmMembers(conversationId: string, userIds: readonly string[]): Promise<void> {
+    return this.#intent(conversationId, userIds, []);
   }
 
   async approveJoinRequest(conversationId: string, userId: string): Promise<void> {
     await this.#options.api.approveJoinRequest(conversationId, userId);
-    this.#intent(conversationId, [userId], []);
     await this.#refresh(conversationId);
+    await this.#intent(conversationId, [userId], []);
   }
 
   async removeMember(conversationId: string, userId: string, ban: boolean): Promise<void> {
     this.#group(conversationId);
     if (ban) await this.#options.api.banMember(conversationId, userId);
     else await this.#options.api.removeMember(conversationId, userId);
-    this.#intent(conversationId, [], [userId]);
-    const meta = await this.#refresh(conversationId);
-    await this.#options.security.prepare(meta).catch(() => undefined);
+    await this.#refresh(conversationId);
+    await this.#intent(conversationId, [], [userId]);
   }
 
   async leaveGroup(conversationId: string): Promise<void> {
@@ -1298,8 +1422,10 @@ export class MessagingStore {
       };
       this.#emit();
       // A membership intent is out: add (or remove) the people it names now.
-      if (body.kind === 'group_members')
-        void this.#options.security.prepare(conversation.meta).catch(() => undefined);
+      if (body.kind === 'group_members') {
+        await this.#options.security.prepare(conversation.meta).catch(() => undefined);
+        this.#applied.get(entry.id)?.();
+      }
     } catch (error) {
       if (error instanceof SecurityBlocked) {
         // Waits for the user (key change) or for the other side (setup / Welcome).

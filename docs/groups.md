@@ -1,7 +1,7 @@
 # Groups and communities
 
-Status: Phase 7a IMPLEMENTED (E2EE groups) · communities §5 pending (7b) · Decisions: ADR-008,
-009, 011, 012, **044** · Crypto: [crypto-design.md](crypto-design.md) · Review: S-12
+Status: Phase 7 IMPLEMENTED (E2EE groups 7a, communities 7b) · Decisions: ADR-008, 009, 011,
+012, **044**, **045** · Crypto: [crypto-design.md](crypto-design.md) · Review: S-12
 
 ## 0. What is implemented (Phase 7a)
 
@@ -82,6 +82,15 @@ Pinned messages, announcements-only mode, polls, reactions, mentions, replies, t
 timer, group moderation (admins delete-for-everyone; report to Tessera per ADR-021).
 
 ## 5. Communities
+
+**Implemented in Phase 7b (ADR-045):** public/private communities, the public directory, rules
+with versioned acceptance, minimum account age, roles (bitset + position hierarchy), kick/ban,
+invite links, ownership transfer, and spaces as E2EE groups (open to all members or restricted to
+roles; admin-approved or auto-approved by an admin's device). Code:
+`services/api/src/modules/communities/`, `apps/web/src/pages/communities/`. **Not implemented:**
+non-E2EE large rooms (Phase 8 storage), community announcements as broadcast rooms, moderation
+group automation, "verified phone" gates (phone numbers are not collected).
+
 
 ```
 Community (server-known container, public or private)

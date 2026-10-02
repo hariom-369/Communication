@@ -101,7 +101,7 @@ layer. Limits fail closed for auth; details in [moderation.md §4](moderation.md
 
 **Shared addresses (implemented in Phase 2).** Carrier-grade NAT is common on Indian mobile
 networks, so thousands of legitimate users can share one IPv4 address. Therefore:
-- every request first passes a generous per-IP flood guard (1,200/min, burst 300);
+- every request first passes a generous per-IP flood guard (default 1,200/min, burst a quarter of that; `IP_FLOOD_LIMIT_PER_MINUTE`);
 - route limits on **authenticated** routes are keyed per user, not per IP;
 - public routes (sign-up, login, reset) combine a CGNAT-tolerant per-IP limit with strict
   per-identifier limits (per email / username), which are the real brute-force control;

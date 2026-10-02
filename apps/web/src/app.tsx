@@ -7,6 +7,9 @@ import { HOME_PATH } from './home.js';
 import { MessagingProvider } from './messaging/provider.js';
 import { ChatsPage } from './pages/chats/ChatsPage.js';
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage.js';
+import { CommunitiesPage } from './pages/communities/CommunitiesPage.js';
+import { CommunityInvitePage } from './pages/communities/CommunityInvitePage.js';
+import { CommunityPage } from './pages/communities/CommunityPage.js';
 import { InvitePage } from './pages/InvitePage.js';
 import { LoginPage } from './pages/LoginPage.js';
 import { MfaPage } from './pages/MfaPage.js';
@@ -136,6 +139,9 @@ const router = createBrowserRouter([
       { path: '/chats', element: <ChatsPage /> },
       { path: '/chats/:conversationId', element: <ChatsPage /> },
       { path: '/invite/:token', element: <InvitePage /> },
+      { path: '/communities', element: <CommunitiesPage /> },
+      { path: '/communities/:communityId', element: <CommunityPage /> },
+      { path: '/join/:token', element: <CommunityInvitePage /> },
     ],
   },
   { path: '*', element: <NotFoundPage /> },

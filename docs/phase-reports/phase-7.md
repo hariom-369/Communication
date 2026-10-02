@@ -2,9 +2,8 @@
 
 ## Phase 7a — End-to-end encrypted groups
 
-**Status: GREEN locally — NOT releasable to users.** Verified 2026-10-02. CI has not run, because
-the branch still cannot be pushed (GitHub returns 403 for the Claude app). 7b (communities) has
-not started.
+**Status: GREEN locally — NOT releasable to users.** Verified 2026-10-02 (commit c21e881). CI
+has not run, because the branch still cannot be pushed (GitHub returns 403 for the Claude app).
 
 Like Phases 4–6, this needs the external cryptography review before real users rely on it:
 S-12 (group policy in the MLS group context, client-side commit authorisation, intent-gated
@@ -83,3 +82,88 @@ add a reader or change roles.
   - Key-directory access now extends to group co-members.
   - Within 30 days, a membership intent could be reused by the server to re-list someone who
     left on their own. A removal through the UI sends a `remove` intent, which closes this case.
+
+## Phase 7b — Communities
+
+**Status: GREEN locally — NOT releasable to users.** Verified 2026-10-02. Same CI caveat as 7a.
+
+Communities group people and several spaces. A community's name, description, rules, roles and
+member list are server-protected (readable by Tessera's servers, like a public profile). Each
+space is an end-to-end encrypted group from 7a. Design and trade-offs: ADR-045 and
+[groups.md](../groups.md) §5.
+
+### Results (whole repository, end of Phase 7)
+
+| Gate | Result |
+|---|---|
+| Format, lint, typecheck, build; `rustfmt`, `clippy -D warnings` | pass |
+| Unit tests | **380 TypeScript** (api 198, web 95, ui 59, platform 15, shared 7, realtime 3, validation 3) + **71 Rust** |
+| Integration (real PostgreSQL + Valkey + S3-compatible store) | **123**: api 108, realtime 15 |
+| End-to-end (Chromium, production build, strict CSP + Trusted Types, real services) | **29 passed in each of the last 3 consecutive full runs** (2 new community tests; axe audit extended) |
+| Accessibility (axe) | no violations on the new-group dialog, group details, communities directory and community page |
+| Mutation checks (community server controls) | 6/6 caught: account-age gate, role-assignment hierarchy, permission-subset rule, space eligibility, removal on role loss, private-community visibility |
+| OpenAPI | 103 paths (21 new) |
+| `pnpm audit --prod` / gitleaks (history) | no known vulnerabilities / no leaks |
+
+### Delivered
+
+- **API (`modules/communities`, migration `0008_communities.sql`):** 28 routes.
+  - Create, view, update, delete (step-up).
+  - Public directory search.
+  - Join a public community, gated by rules version, account age and bans.
+  - Join a private community only through an invite link (digest-stored token, expiry, max uses).
+  - Leave; member list (paged).
+  - Roles: create, update, delete; assign to members within the hierarchy.
+  - Kick, ban and unban; ownership transfer (step-up).
+  - Spaces: create, list, delete, join; the caller's own spaces.
+  - Moderation and role changes are written to the audit log.
+  - A configurable per-address flood guard (`IP_FLOOD_LIMIT_PER_MINUTE`, default unchanged at 1,200).
+- **Messaging integration:**
+  - `SpaceGate` checks eligibility on every path into a space.
+  - The server takes people out of spaces when they leave the community, are removed or lose a role.
+  - When a space owner leaves, server-side ownership passes to an admin, whose device then commits
+    the end-to-end takeover.
+- **Web:**
+  - Communities directory and creation.
+  - Community page: rules acceptance, spaces, members and roles, invite links, bans, settings,
+    leave and delete.
+  - `/join/:token` invite page.
+  - Conversation titles for spaces: "Community · Space".
+  - Admin devices auto-approve requests in open spaces.
+  - Adding or approving someone now waits until they are in the encryption group.
+  - Rate-limited reads are retried once.
+
+### Defects found and fixed during 7b
+
+1. **Messages written right after approving someone were unreadable to them.** The add was still
+   in flight, so the message was encrypted before they joined. Adding or approving now waits until
+   the add has been applied, and the button shows progress.
+2. **Intermittent E2E failures across unrelated tests** were caused by HTTP 429 from the per-address
+   flood guard. Every simulated user comes from 127.0.0.1. The guard is now configurable and the
+   E2E harness raises it. The client also makes fewer requests (space-label reloads are
+   coalesced) and retries rate-limited reads once.
+3. **Private communities leaked their existence** through 403 instead of 404 on delete and
+   transfer. Fixed and tested.
+4. **The space form lost input** while a previous space was still being set up, and **space lists
+   did not refresh** after an admin's device added the member. Both fixed.
+
+### Not met / deferred (tracked)
+
+- Non-E2EE large rooms above 256 members: they will reuse Phase 8 channel storage. Community
+  announcement broadcast rooms and moderator-group automation are also deferred.
+- Open spaces trust the server's list of eligible members (stated in the UI; off by default).
+  Removing that trust needs MLS external commits with client-checked eligibility (S-12).
+- Community change notifications go to every member, which needs Phase 8 fan-out at large scale.
+  There are no phone-verification gates, because phone numbers are not collected.
+
+### Security implications (threat-model delta)
+
+- **Mitigated:**
+  - Role escalation: the server enforces the rank hierarchy and the permission-subset rule.
+  - Discovery of private communities: non-members get 404 on every route.
+  - Joining spaces without the required role: eligibility is checked on every path into a space.
+  - Unaudited moderation: audit records are written inside the same transaction.
+- **Residual:**
+  - Community container data is server-readable by design.
+  - A malicious server can admit people to auto-approve spaces.
+  - Public community names and descriptions are searchable by every signed-in user.

@@ -272,6 +272,27 @@ test.describe('accessibility', () => {
     await audit();
     if (screenshots !== undefined)
       await page.screenshot({ path: `${screenshots}/chat-mobile.png` });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    // Group details, the communities directory and a community page (Phase 7).
+    await page.getByRole('link', { name: 'Chats' }).click();
+    await page.getByRole('button', { name: 'New group' }).click();
+    await audit();
+    const dialog = page.getByRole('dialog', { name: 'New group' });
+    await dialog.getByLabel('Group name').fill('Accessible group');
+    await dialog.getByRole('button', { name: 'Create group' }).click();
+    await page.getByRole('heading', { name: 'Accessible group', level: 2 }).waitFor();
+    await page.getByRole('button', { name: 'Details' }).click();
+    await page.getByRole('heading', { name: 'Group details' }).waitFor();
+    await audit();
+    await page.getByRole('link', { name: 'Communities' }).click();
+    await page.getByRole('heading', { name: 'Discover' }).waitFor();
+    await audit();
+    await page.getByRole('button', { name: 'Create a community' }).click();
+    const create = page.getByRole('dialog', { name: 'Create a community' });
+    await create.getByLabel('Name').fill(`Accessible ${Date.now()}`);
+    await create.getByRole('button', { name: 'Create' }).click();
+    await page.getByRole('heading', { name: 'Spaces' }).waitFor();
+    await audit();
     await other.close();
     await context.close();
   });

@@ -109,7 +109,7 @@ Implemented values (Phase 2; all fail closed if Valkey is unavailable):
 
 | Endpoint | Limits |
 |---|---|
-| Any request | 1,200/min per IP (flood guard, CGNAT-tolerant) |
+| Any request | 1,200/min per IP by default (`IP_FLOOD_LIMIT_PER_MINUTE`; flood guard, CGNAT-tolerant) |
 | Login (password) | 5/min and 20/h per identifier; 30/min per IP. Soft, time-based lock — never permanent (avoids lockout-DoS) |
 | MFA step | 5 per 5 min per half-authenticated session; 10/h per user |
 | Email verification | 5 attempts per code; 10/h per email; 30/h per IP |

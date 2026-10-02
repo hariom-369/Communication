@@ -76,7 +76,9 @@ export function ConversationList({ activeId }: { activeId: string | undefined })
   const searching = query.trim().length >= 2;
   const nameOf = (conversationId: string) => {
     const conversation = snapshot.conversations.find((c) => c.meta.id === conversationId);
-    return conversation === undefined ? '' : conversationTitle(conversation, me?.id ?? '');
+    return conversation === undefined
+      ? ''
+      : conversationTitle(conversation, me?.id ?? '', snapshot.spaces[conversation.meta.id]);
   };
 
   async function start(event: SubmitEvent) {
@@ -176,7 +178,11 @@ export function ConversationList({ activeId }: { activeId: string | undefined })
       ) : (
         <ul className="chat-list__items">
           {snapshot.conversations.map((conversation) => {
-            const title = conversationTitle(conversation, me?.id ?? '');
+            const title = conversationTitle(
+              conversation,
+              me?.id ?? '',
+              snapshot.spaces[conversation.meta.id],
+            );
             return (
               <li key={conversation.meta.id}>
                 <NavLink

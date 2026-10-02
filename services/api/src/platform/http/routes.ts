@@ -138,6 +138,8 @@ export interface RouteRegistrationDeps {
   readonly rateLimiter: RateLimiter;
   readonly logger: Logger;
   readonly sessions: SessionAuthenticator;
+  /** Requests per minute per address (default IP_FLOOD_GUARD). */
+  readonly ipFloodLimitPerMinute?: number;
 }
 
 /**
@@ -186,6 +188,14 @@ function registerRoute(
   route: RouteDefinition,
   deps: RouteRegistrationDeps,
 ): void {
+  const floodGuard: RateLimitPolicy =
+    deps.ipFloodLimitPerMinute === undefined
+      ? IP_FLOOD_GUARD
+      : {
+          ...IP_FLOOD_GUARD,
+          limit: deps.ipFloodLimitPerMinute,
+          burst: Math.max(1, Math.floor(deps.ipFloodLimitPerMinute / 4)),
+        };
   const contextOf = (request: FastifyRequest, reply: FastifyReply): RouteContext => ({
     requestId: request.id,
     clientIp: request.ip,
@@ -235,7 +245,7 @@ function registerRoute(
     // The route limit applies per user once authenticated, otherwise per client address.
     onRequest: async (request: FastifyRequest) => {
       const ipSubject = rateLimitSubject(request.ip);
-      await enforceLimit(deps.rateLimiter, IP_FLOOD_GUARD, ipSubject);
+      await enforceLimit(deps.rateLimiter, floodGuard, ipSubject);
       request.authSession = await authenticate(request, route.auth, deps.sessions);
       const subject =
         route.auth.kind === 'session' && request.authSession !== null

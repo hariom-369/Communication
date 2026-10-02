@@ -752,3 +752,47 @@ the 30-day window could be replayed by the server to re-list someone an admin re
 the server (the client sends a `remove` intent on every UI removal to close this).
 
 **Status.** PROPOSED — implemented; NEEDS-SECURITY-REVIEW S-12.
+
+## ADR-045 — Communities: server-known containers of end-to-end encrypted spaces (Phase 7b)
+
+**Context.** Communities group many people and several conversations, need discovery, rules,
+moderation and roles, and must work when no admin is online. Their *container* data (name,
+description, rules, roles, member list) has to be readable by the server to list, search and
+enforce it; their *conversations* must stay end-to-end encrypted.
+
+**Decision.**
+- **Container (server-protected).** `communities`, `community_roles`, `community_members`,
+  `community_member_roles`, `community_bans`, `community_links` (migration 0008). Visibility is
+  `public` (listed in the directory, joinable directly) or `private` (exists only for members;
+  joinable through an invite link — non-members get 404 everywhere).
+- **Roles.** A permission bitset (`manageCommunity`, `manageRoles`, `manageSpaces`,
+  `kickMembers`, `banMembers`, `createInvites`) and a position 1–1000. A member's rank is their
+  highest role (the owner outranks every role). Roles and members are managed only *below* one's
+  own rank, and nobody grants permissions they do not hold. Moderation and role changes are
+  written to the hash-chained audit log.
+- **Verification gate,** evaluated by the server before anyone becomes a member: not banned;
+  account at least *N* days old; the current rules version accepted (the join request carries
+  the version the client displayed; editing the rules bumps it). Email verification is already
+  required for every account.
+- **Spaces are E2EE groups** (ADR-044) linked by `community_spaces`, optionally restricted to
+  roles. The messaging module asks the community (via `SpaceGate`) whether someone is eligible on
+  *every* path into a space (direct add, invitation, link, join request, approval). Leaving or
+  being removed/banned from the community, or losing a required role, takes the person out of the
+  affected spaces on the server; members' devices then remove them from the encryption group.
+- **Joining a space** is a join request, approved by a space admin's device, which sends the
+  encrypted membership intent and adds the person (ADR-044). For spaces marked **auto-approve**
+  an admin's device does this automatically for every request the server reports, so an open
+  space trusts the server's view of community membership; the UI states this, and the default is
+  off. If a space owner leaves the community, server-side ownership passes to the longest-standing
+  admin, whose device commits the matching takeover end to end.
+- **Large rooms deferred.** Non-E2EE "large rooms" (above the 256-member E2EE cap) will reuse the
+  Phase 8 channel storage and moderation pipeline rather than a second storage path now; until
+  then every space is an E2EE group. MLS external commits for open spaces remain under S-12.
+
+**Consequences.** The server knows communities, their rules, roles and members, and which spaces
+exist and who is in them, but not what is said in spaces. A malicious server can admit people to
+the community container and to auto-approve spaces; approval spaces still require an admin's
+device to act on a request it sees. Notifications of community changes go to every member, which
+is acceptable at current scale and is revisited with Phase 8 fan-out.
+
+**Status.** PROPOSED — implemented; space membership rules under S-12.

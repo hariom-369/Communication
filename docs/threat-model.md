@@ -109,3 +109,12 @@ settings — the authoritative copy is in the MLS group context. Residual risks:
 membership, roles and invite-link usage; it can delay or withhold members and unlist someone
 (after which any member removes them); an optional invite-link preview title is readable by the
 server; key-directory access now extends to everyone sharing a group.
+
+**Phase 7b delta (communities).** New flows: community directory search, join with rules and
+account-age gate, roles and moderation, community invite links, and server-driven removal from
+spaces. Analysis in [phase-reports/phase-7.md](phase-reports/phase-7.md) and ADR-045. Mitigated:
+role escalation (hierarchy and permission subset enforced server-side, tested), private
+community enumeration (404 for non-members on every route), joining spaces outside one's roles
+(eligibility checked on every path into a space). Residual: community container data is
+server-readable by design; a malicious server can admit anyone to auto-approve spaces (documented
+in the UI; default off); directory search exposes public community names to all users.

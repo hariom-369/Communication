@@ -7,6 +7,7 @@ import type { Database } from './db/schema.js';
 import { AccountService, accountsRoutes } from './modules/accounts/index.js';
 import { AuditLog } from './modules/audit/index.js';
 import { BackupsService, backupsRoutes } from './modules/backups/index.js';
+import { CommunitiesService, communityRoutes } from './modules/communities/index.js';
 import {
   AuthService,
   authRoutes,
@@ -135,6 +136,15 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
   );
   messaging.useDevices(keys);
   const groups = new GroupsService(infra.db, accounts, messaging, publisher, infra.logger);
+  const communities = new CommunitiesService(
+    infra.db,
+    accounts,
+    groups,
+    publisher,
+    audit,
+    infra.logger,
+  );
+  groups.useSpaces(communities);
   keys.useNotifier(auth);
   const backups = new BackupsService(infra.db, audit, auth);
   const media = new MediaService(infra.db, infra.media, infra.logger);
@@ -152,6 +162,7 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
       ...authRoutes({ auth, sessions, passkeys }),
       ...messagingRoutes({ messaging }),
       ...groupRoutes({ groups }),
+      ...communityRoutes({ communities }),
       ...keysRoutes({ keys }),
       ...backupsRoutes({ backups }),
       ...mediaRoutes({ media }),

@@ -47,6 +47,43 @@ describe('api client', () => {
     expect(errorMessage(error)).toBe('Too many attempts. Try again in 30 seconds.');
   });
 
+  it('retries a rate-limited read once after a short wait, but never a write', async () => {
+    vi.useFakeTimers();
+    const limited = () =>
+      new Response(
+        JSON.stringify({
+          type: 't',
+          code: 'RATE_LIMITED',
+          title: 'Too many requests',
+          status: 429,
+          retryAfterSeconds: 2,
+        }),
+        { status: 429 },
+      );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(limited())
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'x' }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const read = api('GET', '/accounts/me', z.object({ id: z.string() }));
+    await vi.advanceTimersByTimeAsync(2000);
+    await expect(read).resolves.toEqual({ id: 'x' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const writes = vi.fn().mockImplementation(() => Promise.resolve(limited()));
+    vi.stubGlobal('fetch', writes);
+    await expect(api('POST', '/auth/logout', z.object({}), {})).rejects.toBeInstanceOf(ApiError);
+    expect(writes).toHaveBeenCalledTimes(1);
+    // A second limit on the retried read is reported, not retried again.
+    const reads = vi.fn().mockImplementation(() => Promise.resolve(limited()));
+    vi.stubGlobal('fetch', reads);
+    const failing = api('GET', '/accounts/me', z.object({})).catch((caught: unknown) => caught);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(await failing).toBeInstanceOf(ApiError);
+    expect(reads).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
   it('shows an error reference instead of internals for server errors', async () => {
     respond(500, {
       type: 't',

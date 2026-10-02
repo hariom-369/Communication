@@ -30,6 +30,8 @@ export interface AppOptions {
   readonly hsts: boolean;
   readonly routes: readonly RouteDefinition[];
   readonly sessions: SessionAuthenticator;
+  /** Per-address flood guard, requests per minute (default 1200). */
+  readonly ipFloodLimitPerMinute?: number;
 }
 
 /** Builds the HTTP application. No I/O happens here; dependencies are injected. */
@@ -80,6 +82,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     rateLimiter: options.rateLimiter,
     logger: options.logger,
     sessions: options.sessions,
+    ...(options.ipFloodLimitPerMinute === undefined
+      ? {}
+      : { ipFloodLimitPerMinute: options.ipFloodLimitPerMinute }),
   });
 
   await app.ready();

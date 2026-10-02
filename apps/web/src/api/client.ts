@@ -29,7 +29,7 @@ export class NetworkError extends Error {
   }
 }
 
-type Method = 'GET' | 'POST' | 'PUT' | 'DELETE';
+type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 function fallbackProblem(status: number): ProblemDetails {
   const code: ProblemCode = status >= 500 ? 'INTERNAL' : 'BAD_REQUEST';
@@ -51,6 +51,7 @@ export async function api<S extends z.ZodType>(
   path: `/${string}`,
   schema: S,
   body?: unknown,
+  retry = true,
 ): Promise<z.infer<S>> {
   let response: Response;
   try {
@@ -77,10 +78,20 @@ export async function api<S extends z.ZodType>(
   }
   if (!response.ok) {
     const problem = problemDetailsSchema.safeParse(data);
-    throw new ApiError(problem.success ? problem.data : fallbackProblem(response.status));
+    const error = new ApiError(problem.success ? problem.data : fallbackProblem(response.status));
+    // A read that hit a rate limit with a short wait is retried once, so a page does not fail
+    // (or stay empty) because of a burst; writes are never repeated automatically.
+    const wait = error.problem.retryAfterSeconds ?? 1;
+    if (method === 'GET' && response.status === 429 && retry && wait <= MAX_READ_RETRY_SECONDS) {
+      await new Promise((resolve) => setTimeout(resolve, wait * 1000));
+      return api(method, path, schema, body, false);
+    }
+    throw error;
   }
   return schema.parse(data);
 }
+
+const MAX_READ_RETRY_SECONDS = 5;
 
 /** User-facing message for any error thrown by `api`. */
 export function errorMessage(error: unknown): string {

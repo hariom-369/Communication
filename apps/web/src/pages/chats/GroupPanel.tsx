@@ -117,10 +117,14 @@ export function GroupPanel({
             </p>
             <Button
               size="sm"
+              loading={busy === 'confirm'}
+              loadingLabel="Adding"
               onClick={() =>
-                store.confirmMembers(
-                  meta.id,
-                  unconfirmed.map((m) => m.userId),
+                void run('confirm', () =>
+                  store.confirmMembers(
+                    meta.id,
+                    unconfirmed.map((m) => m.userId),
+                  ),
                 )
               }
             >
@@ -492,6 +496,7 @@ function JoinRequests({
   const load = useCallback(() => endpoints.joinRequests(conversationId), [conversationId]);
   const requests = useResource(load);
   const [error, setError] = useState<string>();
+  const [pending, setPending] = useState<string | null>(null);
   const { reload } = requests;
   useEffect(() => {
     if (hint > 0) reload();
@@ -499,6 +504,7 @@ function JoinRequests({
 
   async function resolve(userId: string, approve: boolean) {
     setError(undefined);
+    setPending(userId);
     try {
       if (approve) await store?.approveJoinRequest(conversationId, userId);
       else await endpoints.rejectJoinRequest(conversationId, userId);
@@ -506,6 +512,7 @@ function JoinRequests({
     } catch (caught) {
       setError(errorMessage(caught));
     }
+    setPending(null);
   }
 
   const list = requests.data?.requests ?? [];
@@ -524,7 +531,13 @@ function JoinRequests({
             <li key={request.userId} className="member">
               <span>@{request.username}</span>
               <div className="button-row">
-                <Button size="sm" onClick={() => void resolve(request.userId, true)}>
+                <Button
+                  size="sm"
+                  loading={pending === request.userId}
+                  loadingLabel="Adding"
+                  disabled={pending !== null}
+                  onClick={() => void resolve(request.userId, true)}
+                >
                   Approve
                 </Button>
                 <Button

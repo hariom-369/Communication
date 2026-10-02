@@ -105,6 +105,8 @@ const EMPTY: MessagingSnapshot = {
   loaded: false,
   error: null,
   uploads: {},
+  spaces: {},
+  communityVersion: 0,
 };
 const noop = () => () => undefined;
 

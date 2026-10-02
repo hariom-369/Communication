@@ -30,7 +30,10 @@ export const addMembersResultSchema = z.object({
   added: z.array(z.object({ userId: z.string(), username: z.string() })),
   invited: z.array(z.object({ userId: z.string(), username: z.string() })),
   skipped: z.array(
-    z.object({ username: z.string(), reason: z.enum(['not_found', 'banned', 'member', 'full']) }),
+    z.object({
+      username: z.string(),
+      reason: z.enum(['not_found', 'banned', 'member', 'full', 'not_allowed']),
+    }),
   ),
 });
 

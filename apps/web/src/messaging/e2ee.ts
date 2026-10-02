@@ -895,11 +895,30 @@ export class E2eeSession {
       if (!group.exists) return;
     }
     this.#update(meta.id, { waitingForWelcome: false });
-    await this.#refreshPolicy(meta.id);
+    const policy = await this.#refreshPolicy(meta.id);
+    await this.#takeOverIfOwnerLeft(meta, policy);
     await this.#syncMembership(meta, peers, group.members);
     if (await this.#crypto.needsUpdate(meta.id)) {
       await this.#publish(meta.id, await this.#crypto.selfUpdate(meta.id));
     }
+  }
+
+  /**
+   * The owner left (e.g. removed from a community) and the server made this user — an admin —
+   * the owner: commit the same change end to end. Every member's device accepts it only because
+   * the owner is no longer listed and this user is an admin (group_policy.rs).
+   */
+  async #takeOverIfOwnerLeft(meta: Conversation, policy: GroupPolicy | null): Promise<void> {
+    if (meta.kind !== 'group' || policy === null) return;
+    const serverOwner = meta.members.find((member) => member.role === 'owner')?.userId;
+    const ownerListed = meta.members.some((member) => member.userId === policy.owner);
+    if (serverOwner !== this.#me || ownerListed || !policy.admins.includes(this.#me)) return;
+    const output = await this.#crypto.updatePolicy(
+      meta.id,
+      { ...policy, owner: this.#me, admins: policy.admins.filter((admin) => admin !== this.#me) },
+      this.#peers(meta),
+    );
+    if (await this.#publish(meta.id, output)) await this.#refreshPolicy(meta.id);
   }
 
   async #refreshPolicy(conversationId: string): Promise<GroupPolicy | null> {

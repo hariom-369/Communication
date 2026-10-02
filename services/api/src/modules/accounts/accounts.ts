@@ -303,6 +303,17 @@ export class AccountService {
     return this.#byEmail(this.#db, email);
   }
 
+  /** When the account was created (community verification gates), or null if it does not exist. */
+  async accountCreatedAt(userId: string): Promise<Date | null> {
+    const row = await this.#db
+      .selectFrom('users')
+      .select('created_at')
+      .where('id', '=', userId)
+      .where('status', '=', 'active')
+      .executeTakeFirst();
+    return row?.created_at ?? null;
+  }
+
   async privacySettings(userId: string): Promise<PrivacySettings> {
     const row = await this.#db
       .selectFrom('privacy_settings')

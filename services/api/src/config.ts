@@ -36,6 +36,11 @@ const schema = z
     WEBAUTHN_RP_ID: z.string().min(1),
     WEBAUTHN_RP_NAME: z.string().min(1).default('Tessera'),
     MAILBOX_RETENTION_DAYS: env.positiveInt(30),
+    /**
+     * Per-address flood guard (requests per minute, every route). Generous because many users
+     * share addresses (CGNAT, offices); signed-in users are limited per user by each route.
+     */
+    IP_FLOOD_LIMIT_PER_MINUTE: env.positiveInt(1200),
     /** Path (on the web origin) that the edge routes to services/realtime. */
     REALTIME_WS_PATH: z
       .string()

@@ -1,8 +1,16 @@
-import type { ConversationView } from '../../messaging/store.js';
+import type { ConversationView, SpaceLabel } from '../../messaging/store.js';
 
-/** Display name: a group's end-to-end encrypted name, or the other person's username. */
-export function conversationTitle(conversation: ConversationView, myId: string): string {
+/**
+ * Display name: a community space's listed name, a group's end-to-end encrypted name, or the
+ * other person's username.
+ */
+export function conversationTitle(
+  conversation: ConversationView,
+  myId: string,
+  space?: SpaceLabel,
+): string {
   const { meta, timeline } = conversation;
+  if (space !== undefined) return `${space.communityName} · ${space.name}`;
   if (meta.kind === 'group') {
     if (timeline.group.name !== null) return timeline.group.name;
     const others = meta.members.filter((member) => member.userId !== myId);

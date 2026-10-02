@@ -124,6 +124,7 @@ async function main(): Promise<void> {
     hsts: config.NODE_ENV === 'production',
     routes: modules.routes,
     sessions: modules.sessions,
+    ipFloodLimitPerMinute: config.IP_FLOOD_LIMIT_PER_MINUTE,
   });
   lifecycle.onShutdown({ name: 'http', run: () => app.close() });
 

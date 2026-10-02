@@ -64,3 +64,4 @@ export * from './keys.js';
 export * from './backups.js';
 export * from './media.js';
 export * from './groups.js';
+export * from './communities.js';

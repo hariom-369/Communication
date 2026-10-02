@@ -349,6 +349,51 @@ describe('lost races', () => {
   });
 });
 
+describe('owner takeover', () => {
+  it('an admin the server made owner takes over once the old owner is gone', async () => {
+    const { crypto, session } = setup({
+      exists: true,
+      inGroup: [ME, BOB],
+      policy: policy({ owner: CAROL, admins: [ME] }),
+    });
+    await session.start();
+    await session.prepare(
+      meta([
+        [ME, 'owner'],
+        [BOB, 'member'],
+      ]),
+    );
+    expect(crypto.updatePolicy).toHaveBeenCalledWith(
+      GROUP,
+      expect.objectContaining({ owner: ME, admins: [] }),
+      [BOB],
+    );
+    session.stop();
+  });
+
+  it('never while the owner is still listed, or for a non-admin', async () => {
+    const listed = setup({
+      exists: true,
+      inGroup: [ME, CAROL],
+      policy: policy({ owner: CAROL, admins: [ME] }),
+    });
+    await listed.session.start();
+    await listed.session.prepare(
+      meta([
+        [ME, 'owner'],
+        [CAROL, 'member'],
+      ]),
+    );
+    expect(listed.crypto.updatePolicy).not.toHaveBeenCalled();
+    listed.session.stop();
+    const member = setup({ exists: true, inGroup: [ME], policy: policy({ owner: CAROL }) });
+    await member.session.start();
+    await member.session.prepare(meta([[ME, 'owner']]));
+    expect(member.crypto.updatePolicy).not.toHaveBeenCalled();
+    member.session.stop();
+  });
+});
+
 describe('policy changes', () => {
   it('commits the new policy and reports a lost race', async () => {
     const { crypto, api, session } = setup({ exists: true, inGroup: [ME, BOB], policy: policy() });

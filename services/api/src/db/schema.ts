@@ -200,6 +200,73 @@ export interface GroupBansTable {
   created_at: Timestamp;
 }
 
+export interface CommunitiesTable {
+  id: string;
+  name: string;
+  description: Generated<string>;
+  visibility: 'public' | 'private';
+  rules: Generated<string>;
+  rules_version: Generated<number>;
+  min_account_age_days: Generated<number>;
+  owner_id: string;
+  created_at: Timestamp;
+  deleted_at: NullableTimestamp;
+}
+
+export interface CommunityRolesTable {
+  id: string;
+  community_id: string;
+  name: string;
+  position: number;
+  permissions: number;
+  created_at: Timestamp;
+}
+
+export interface CommunityMembersTable {
+  community_id: string;
+  user_id: string;
+  joined_at: Timestamp;
+  rules_version: number;
+}
+
+export interface CommunityMemberRolesTable {
+  community_id: string;
+  user_id: string;
+  role_id: string;
+}
+
+export interface CommunityBansTable {
+  community_id: string;
+  user_id: string;
+  banned_by: string;
+  created_at: Timestamp;
+}
+
+export interface CommunityLinksTable {
+  id: string;
+  community_id: string;
+  token_digest: Buffer;
+  created_by: string;
+  created_at: Timestamp;
+  expires_at: Date;
+  max_uses: number | null;
+  uses: Generated<number>;
+  revoked_at: NullableTimestamp;
+}
+
+export interface CommunitySpacesTable {
+  conversation_id: string;
+  community_id: string;
+  name: string;
+  auto_approve: Generated<boolean>;
+  created_at: Timestamp;
+}
+
+export interface CommunitySpaceRolesTable {
+  conversation_id: string;
+  role_id: string;
+}
+
 export interface DirectPairsTable {
   user_low: string;
   user_high: string;
@@ -347,6 +414,14 @@ export interface Database {
   group_links: GroupLinksTable;
   group_join_requests: GroupJoinRequestsTable;
   group_bans: GroupBansTable;
+  communities: CommunitiesTable;
+  community_roles: CommunityRolesTable;
+  community_members: CommunityMembersTable;
+  community_member_roles: CommunityMemberRolesTable;
+  community_bans: CommunityBansTable;
+  community_links: CommunityLinksTable;
+  community_spaces: CommunitySpacesTable;
+  community_space_roles: CommunitySpaceRolesTable;
 }
 
 /** Owning module of every table ('platform' = infrastructure code outside modules/). */
@@ -382,4 +457,12 @@ export const TABLE_OWNERS: Readonly<Record<keyof Database, string>> = {
   group_links: 'messaging',
   group_join_requests: 'messaging',
   group_bans: 'messaging',
+  communities: 'communities',
+  community_roles: 'communities',
+  community_members: 'communities',
+  community_member_roles: 'communities',
+  community_bans: 'communities',
+  community_links: 'communities',
+  community_spaces: 'communities',
+  community_space_roles: 'communities',
 };

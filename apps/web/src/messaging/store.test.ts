@@ -200,6 +200,8 @@ function fakeApi(server: MailboxMessage[] = []) {
     deleteGroup: vi.fn().mockResolvedValue({ ok: true }),
     approveJoinRequest: vi.fn().mockResolvedValue({ ok: true }),
     acceptInvitation: vi.fn().mockResolvedValue({ ok: true }),
+    joinRequests: vi.fn().mockResolvedValue({ requests: [] }),
+    mySpaces: vi.fn().mockResolvedValue({ spaces: [] }),
   };
 }
 
@@ -744,6 +746,38 @@ describe('groups', () => {
     store.stop();
   });
 
+  it('approving someone resolves only once the intent is out and applied', async () => {
+    const api = fakeApi();
+    const group = groupMeta([
+      [ME, 'owner'],
+      [PEER, 'member'],
+    ]);
+    api.conversations.mockResolvedValue({ conversations: [group], nextCursor: null });
+    api.conversation.mockResolvedValue(group);
+    const security = fakeSecurity();
+    security.setSecurity({ policy: policy() });
+    const { store } = createStore(api, security);
+    await store.start();
+    await vi.advanceTimersByTimeAsync(0);
+    const order: string[] = [];
+    api.sendMessage.mockImplementation(() => {
+      order.push('intent sent');
+      return Promise.resolve({
+        seq: 9,
+        serverTime: new Date(9000).toISOString(),
+        duplicate: false,
+      });
+    });
+    security.mock.prepare.mockImplementation(() => {
+      order.push('membership applied');
+      return Promise.resolve();
+    });
+    await store.approveJoinRequest(CONVERSATION, PEER);
+    order.push('approved');
+    expect(order).toEqual(['intent sent', 'membership applied', 'approved']);
+    store.stop();
+  });
+
   it('marks a group as left when it is no longer visible', async () => {
     const api = fakeApi();
     const group = groupMeta([
@@ -763,6 +797,78 @@ describe('groups', () => {
     store.sendText(CONVERSATION, 'still here?', null);
     await vi.advanceTimersByTimeAsync(0);
     expect(api.sendMessage).not.toHaveBeenCalled();
+    store.stop();
+  });
+});
+
+describe('community spaces', () => {
+  const spaceMeta = meta({
+    kind: 'group',
+    members: [
+      { userId: ME, username: 'me', role: 'owner' },
+      { userId: PEER, username: 'peer', role: 'member' },
+    ],
+    settings: { membersCanAdd: false, announcementsOnly: false },
+  });
+  const ownerPolicy = {
+    v: 1 as const,
+    owner: ME,
+    admins: [],
+    membersCanAdd: false,
+    membersCanEditInfo: true,
+    announcementsOnly: false,
+  };
+  const label = (autoApprove: boolean) => ({
+    spaces: [
+      {
+        conversationId: CONVERSATION,
+        communityId: 'c',
+        communityName: 'Club',
+        name: 'General',
+        autoApprove,
+      },
+    ],
+  });
+
+  it('labels spaces and auto-approves requests only in open spaces this user administers', async () => {
+    const api = fakeApi();
+    api.conversations.mockResolvedValue({ conversations: [spaceMeta], nextCursor: null });
+    api.mySpaces.mockResolvedValue(label(true));
+    api.joinRequests.mockResolvedValue({
+      requests: [{ userId: 'newcomer', username: 'n', createdAt: new Date(0).toISOString() }],
+    });
+    const security = fakeSecurity();
+    security.setSecurity({ policy: ownerPolicy });
+    const { store, push } = createStore(api, security);
+    await store.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getSnapshot().spaces[CONVERSATION]).toMatchObject({ communityName: 'Club' });
+    expect(api.approveJoinRequest).toHaveBeenCalledWith(CONVERSATION, 'newcomer');
+    // The approval goes out as an encrypted membership intent.
+    const bodies = api.sendMessage.mock.calls.map(
+      (call) =>
+        JSON.parse(decode((call[1] as { ciphertext: string }).ciphertext)) as { body: object },
+    );
+    expect(bodies.map((b) => b.body)).toContainEqual({
+      kind: 'group_members',
+      add: ['newcomer'],
+      remove: [],
+    });
+
+    // Members do not auto-approve; neither do admins of spaces that need approval.
+    api.approveJoinRequest.mockClear();
+    security.setSecurity({ policy: { ...ownerPolicy, owner: PEER } });
+    push({ type: 'group_requests', conversationId: CONVERSATION });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.approveJoinRequest).not.toHaveBeenCalled();
+    security.setSecurity({ policy: ownerPolicy });
+    api.mySpaces.mockResolvedValue(label(false));
+    push({ type: 'community', communityId: 'c' });
+    await vi.advanceTimersByTimeAsync(0);
+    push({ type: 'group_requests', conversationId: CONVERSATION });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.approveJoinRequest).not.toHaveBeenCalled();
+    expect(store.getSnapshot().communityVersion).toBe(1);
     store.stop();
   });
 });

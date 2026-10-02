@@ -37,6 +37,14 @@ export interface GroupContacts {
   areContacts(a: string, b: string): Promise<boolean>;
 }
 
+/**
+ * Communities (ADR-045) restrict who may be in their spaces. `mayJoin` returns null for groups
+ * that are not community spaces.
+ */
+export interface SpaceGate {
+  mayJoin(groupId: string, userId: string): Promise<boolean | null>;
+}
+
 type Role = 'owner' | 'admin' | 'member';
 type Executor = Kysely<Database> | Transaction<Database>;
 type AddResult = z.infer<typeof addMembersResultSchema>;
@@ -54,6 +62,7 @@ export class GroupsService {
   readonly #contacts: GroupContacts;
   readonly #publisher: RealtimePublisher;
   readonly #logger: Logger;
+  #spaces: SpaceGate | null = null;
 
   constructor(
     db: Kysely<Database>,
@@ -69,7 +78,23 @@ export class GroupsService {
     this.#logger = logger;
   }
 
+  useSpaces(gate: SpaceGate): void {
+    this.#spaces = gate;
+  }
+
   // ---- helpers ---------------------------------------------------------------------------------
+
+  /** Whether a user may be in this group (false only for community spaces they are not eligible for). */
+  async #eligible(groupId: string, userId: string): Promise<boolean> {
+    return (await this.#spaces?.mayJoin(groupId, userId)) !== false;
+  }
+
+  async #requireEligible(groupId: string, userId: string): Promise<void> {
+    if (!(await this.#eligible(groupId, userId)))
+      throw new AppError('FORBIDDEN', {
+        detail: 'Only eligible members of this community can join this space.',
+      });
+  }
 
   /** The caller's membership of a (live) group; 404 for non-members, as for missing groups. */
   async #membership(executor: Executor, userId: string, groupId: string, lock = false) {
@@ -218,6 +243,10 @@ export class GroupsService {
       }
       if (await this.#isBanned(trx, groupId, user.id)) {
         result.skipped.push({ username, reason: 'banned' });
+        continue;
+      }
+      if (!(await this.#eligible(groupId, user.id))) {
+        result.skipped.push({ username, reason: 'not_allowed' });
         continue;
       }
       if (current.size + result.added.length >= MAX_GROUP_MEMBERS) {
@@ -506,6 +535,7 @@ export class GroupsService {
         .executeTakeFirst();
       if (live === undefined || (await this.#isBanned(trx, groupId, userId)))
         throw new AppError('NOT_FOUND');
+      await this.#requireEligible(groupId, userId);
       await this.#ensureRoom(trx, groupId, 1);
       await this.#insertMember(trx, groupId, userId, 'member', invitation.invited_by);
       return this.#memberIds(trx, groupId);
@@ -644,6 +674,7 @@ export class GroupsService {
         return { groupId, notify: [] as string[], requestGroup: groupId };
       if (await this.#isBanned(trx, groupId, userId))
         throw new AppError('FORBIDDEN', { detail: 'You cannot join this group.' });
+      await this.#requireEligible(groupId, userId);
       const inserted = await trx
         .insertInto('group_join_requests')
         .values({ conversation_id: groupId, user_id: userId, link_id: link.id })
@@ -712,6 +743,7 @@ export class GroupsService {
         .executeTakeFirst();
       if (Number(request.numDeletedRows) === 0) throw new AppError('NOT_FOUND');
       if (!approve) return [];
+      await this.#requireEligible(groupId, target);
       await this.#ensureRoom(trx, groupId, 1);
       await this.#insertMember(trx, groupId, target, 'member', actor);
       return this.#memberIds(trx, groupId);
@@ -750,5 +782,164 @@ export class GroupsService {
       .executeTakeFirst();
     if (Number(deleted.numDeletedRows) === 0) throw new AppError('NOT_FOUND');
     this.#logger.info('groups.unban', { ok: true });
+  }
+
+  // ---- community spaces (used by the communities module; ADR-045) -------------------------------
+
+  /** A new group for a community space, owned by its creator (who then names it end to end). */
+  async createSpace(actor: string, ciphersuite: number): Promise<string> {
+    const groupId = newId();
+    await this.#db.transaction().execute(async (trx) => {
+      await trx
+        .insertInto('conversations')
+        .values({ id: groupId, kind: 'group', ciphersuite, created_by: actor })
+        .execute();
+      await this.#insertMember(trx, groupId, actor, 'owner', actor);
+    });
+    this.#notify([actor], groupId);
+    return groupId;
+  }
+
+  /**
+   * An eligible community member asks to join a space; the space's admins (in practice an admin
+   * device, automatically for auto-approve spaces) add them end to end.
+   */
+  async requestSpaceJoin(userId: string, groupId: string): Promise<'member' | 'requested'> {
+    const result = await this.#db.transaction().execute(async (trx) => {
+      if ((await this.#activeRole(trx, groupId, userId)) !== null)
+        return { status: 'member' as const, notify: [] as string[] };
+      if (await this.#isBanned(trx, groupId, userId))
+        throw new AppError('FORBIDDEN', { detail: 'You cannot join this space.' });
+      await this.#requireEligible(groupId, userId);
+      await trx
+        .insertInto('group_join_requests')
+        .values({ conversation_id: groupId, user_id: userId, link_id: null })
+        .onConflict((oc) => oc.columns(['conversation_id', 'user_id']).doNothing())
+        .execute();
+      const admins = await trx
+        .selectFrom('conversation_members')
+        .select('user_id')
+        .where('conversation_id', '=', groupId)
+        .where('left_at', 'is', null)
+        .where('role', 'in', ['owner', 'admin'])
+        .execute();
+      return { status: 'requested' as const, notify: admins.map((row) => row.user_id) };
+    });
+    if (result.notify.length > 0)
+      this.#publisher.publish(result.notify, { type: 'group_requests', conversationId: groupId });
+    return result.status;
+  }
+
+  /** Which of these groups the user is in, or has asked to join. */
+  async spaceStatus(
+    userId: string,
+    groupIds: readonly string[],
+  ): Promise<{ joined: Set<string>; requested: Set<string> }> {
+    if (groupIds.length === 0) return { joined: new Set(), requested: new Set() };
+    const [members, requests] = await Promise.all([
+      this.#db
+        .selectFrom('conversation_members')
+        .select('conversation_id')
+        .where('user_id', '=', userId)
+        .where('left_at', 'is', null)
+        .where('conversation_id', 'in', [...groupIds])
+        .execute(),
+      this.#db
+        .selectFrom('group_join_requests')
+        .select('conversation_id')
+        .where('user_id', '=', userId)
+        .where('conversation_id', 'in', [...groupIds])
+        .execute(),
+    ]);
+    return {
+      joined: new Set(members.map((row) => row.conversation_id)),
+      requested: new Set(requests.map((row) => row.conversation_id)),
+    };
+  }
+
+  /**
+   * Takes users out of groups on the community's behalf (left, kicked, banned, lost a role).
+   * Members' devices then remove them from the encryption group (they are no longer listed).
+   * A space owner who loses eligibility is removed too; server-side ownership passes to the
+   * longest-standing admin, whose device then takes over end to end (the group policy lets an
+   * admin become owner once the owner is gone). With no admin the space has no owner.
+   */
+  async removeFromGroups(userIds: readonly string[], groupIds: readonly string[]): Promise<void> {
+    if (userIds.length === 0 || groupIds.length === 0) return;
+    const notified = await this.#db.transaction().execute(async (trx) => {
+      const affected = new Map<string, string[]>();
+      for (const groupId of groupIds) {
+        const members = await this.#memberIds(trx, groupId);
+        const leaving = userIds.filter((userId) => members.includes(userId));
+        await trx
+          .deleteFrom('group_join_requests')
+          .where('conversation_id', '=', groupId)
+          .where('user_id', 'in', [...userIds])
+          .execute();
+        if (leaving.length === 0) continue;
+        const removed = await trx
+          .updateTable('conversation_members')
+          .set({ left_at: new Date() })
+          .where('conversation_id', '=', groupId)
+          .where('user_id', 'in', leaving)
+          .where('left_at', 'is', null)
+          .returning('role')
+          .execute();
+        if (removed.some((row) => row.role === 'owner')) await this.#promoteSuccessor(trx, groupId);
+        affected.set(groupId, members);
+      }
+      return affected;
+    });
+    for (const [groupId, members] of notified) this.#notify(members, groupId);
+  }
+
+  async #promoteSuccessor(trx: Transaction<Database>, groupId: string): Promise<void> {
+    const next = await trx
+      .selectFrom('conversation_members')
+      .select('user_id')
+      .where('conversation_id', '=', groupId)
+      .where('left_at', 'is', null)
+      .where('role', '=', 'admin')
+      .orderBy('joined_at')
+      .limit(1)
+      .executeTakeFirst();
+    if (next !== undefined)
+      await trx
+        .updateTable('conversation_members')
+        .set({ role: 'owner' })
+        .where('conversation_id', '=', groupId)
+        .where('user_id', '=', next.user_id)
+        .execute();
+  }
+
+  /** Deletes groups on the community's behalf (space or community deleted). */
+  async deleteGroups(groupIds: readonly string[]): Promise<void> {
+    if (groupIds.length === 0) return;
+    const notified = await this.#db.transaction().execute(async (trx) => {
+      const affected = new Map<string, string[]>();
+      const now = new Date();
+      for (const groupId of groupIds) {
+        affected.set(groupId, await this.#memberIds(trx, groupId));
+        await trx
+          .updateTable('conversations')
+          .set({ deleted_at: now })
+          .where('id', '=', groupId)
+          .where('deleted_at', 'is', null)
+          .execute();
+        await trx
+          .updateTable('conversation_members')
+          .set({ left_at: now })
+          .where('conversation_id', '=', groupId)
+          .where('left_at', 'is', null)
+          .execute();
+        await trx
+          .updateTable('group_links')
+          .set({ revoked_at: now })
+          .where('conversation_id', '=', groupId)
+          .execute();
+      }
+      return affected;
+    });
+    for (const [groupId, members] of notified) this.#notify(members, groupId);
   }
 }

@@ -37,4 +37,14 @@ describe(ROUTE_ID, () => {
     expect(statuses.filter((status) => status === 200)).toHaveLength(20); // burst
     expect(statuses.at(-1)).toBe(429);
   });
+
+  it('applies the configurable per-address flood guard before the route limit', async () => {
+    current = await buildTestApp({ ipFloodLimitPerMinute: 8 });
+    const statuses: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      statuses.push((await current.app.inject({ url: '/api/v1/meta/version' })).statusCode);
+    }
+    // Burst of a quarter of the per-minute limit, then rejected.
+    expect(statuses).toEqual([200, 200, 429, 429, 429]);
+  });
 });

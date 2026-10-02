@@ -178,7 +178,7 @@ export class TestClient {
   readonly userAgent: string;
 
   async request(
-    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     url: string,
     body?: unknown,
   ): Promise<LightMyRequestResponse> {
@@ -210,6 +210,7 @@ export class TestClient {
   get = (url: string) => this.request('GET', url);
   post = (url: string, body: unknown = {}) => this.request('POST', url, body);
   put = (url: string, body: unknown) => this.request('PUT', url, body);
+  patch = (url: string, body: unknown) => this.request('PATCH', url, body);
   delete = (url: string) => this.request('DELETE', url);
 }
 

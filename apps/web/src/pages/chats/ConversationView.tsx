@@ -62,7 +62,7 @@ function usePresence(userId: string | null): Presence | null {
 
 export function ConversationView({ conversation }: { conversation: ConversationState }): ReactNode {
   const store = useMessagingStore();
-  const { uploads } = useMessaging();
+  const { uploads, spaces } = useMessaging();
   const { me } = useSession();
   const myId = me?.id ?? '';
   const peer = peerOf(conversation, myId);
@@ -106,7 +106,8 @@ export function ConversationView({ conversation }: { conversation: ConversationS
   const verified = conversation.security.verified.includes(peer.userId);
   const username = (userId: string) =>
     meta.members.find((m) => m.userId === userId)?.username ?? 'someone';
-  const title = conversationTitle(conversation, myId);
+  const space = spaces[conversation.meta.id];
+  const title = conversationTitle(conversation, myId, space);
   const policy = conversation.security.policy;
   const myRole = roleIn(policy, myId);
   const moderator = isGroup ? myRole === 'owner' || myRole === 'admin' : true;

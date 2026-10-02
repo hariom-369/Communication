@@ -1,4 +1,14 @@
 import {
+  communityBanListSchema,
+  communityInvitePreviewSchema,
+  communityLinkListSchema,
+  communityListSchema,
+  communityMemberListSchema,
+  communitySchema,
+  createdCommunityLinkSchema,
+  joinSpaceResponseSchema,
+  mySpacesSchema,
+  spaceListSchema,
   addMembersResultSchema,
   banListSchema,
   createGroupResponseSchema,
@@ -122,6 +132,133 @@ export const endpoints = {
     ),
   conversation: (id: string) =>
     api('GET', `/conversations/${encodeURIComponent(id)}`, conversationSchema),
+
+  // ---- communities (docs/groups.md §5) ----
+  myCommunities: () => api('GET', '/communities', communityListSchema),
+  discoverCommunities: (q: string) =>
+    api('GET', `/community-directory?q=${encodeURIComponent(q)}`, communityListSchema),
+  community: (id: string) => api('GET', `/communities/${encodeURIComponent(id)}`, communitySchema),
+  createCommunity: (body: {
+    name: string;
+    description: string;
+    visibility: 'public' | 'private';
+    rules: string;
+    minAccountAgeDays: number;
+  }) => api('POST', '/communities', z.object({ id: z.string() }), body),
+  updateCommunity: (
+    id: string,
+    body: Partial<{
+      name: string;
+      description: string;
+      visibility: 'public' | 'private';
+      rules: string;
+      minAccountAgeDays: number;
+    }>,
+  ) => api('PATCH', `/communities/${encodeURIComponent(id)}`, okResponseSchema, body),
+  deleteCommunity: (id: string) =>
+    api('DELETE', `/communities/${encodeURIComponent(id)}`, okResponseSchema),
+  joinCommunity: (id: string, rulesVersion: number) =>
+    api('POST', `/communities/${encodeURIComponent(id)}/join`, okResponseSchema, { rulesVersion }),
+  leaveCommunity: (id: string) =>
+    api('POST', `/communities/${encodeURIComponent(id)}/leave`, okResponseSchema, {}),
+  communityMembers: (id: string, cursor?: string) =>
+    api(
+      'GET',
+      `/communities/${encodeURIComponent(id)}/members${cursor === undefined ? '' : `?cursor=${encodeURIComponent(cursor)}`}`,
+      communityMemberListSchema,
+    ),
+  transferCommunity: (id: string, userId: string) =>
+    api('POST', `/communities/${encodeURIComponent(id)}/owner`, okResponseSchema, { userId }),
+  createCommunityRole: (
+    id: string,
+    body: { name: string; position: number; permissions: number },
+  ) =>
+    api('POST', `/communities/${encodeURIComponent(id)}/roles`, z.object({ id: z.string() }), body),
+  updateCommunityRole: (
+    id: string,
+    roleId: string,
+    body: Partial<{ name: string; position: number; permissions: number }>,
+  ) =>
+    api(
+      'PATCH',
+      `/communities/${encodeURIComponent(id)}/roles/${encodeURIComponent(roleId)}`,
+      okResponseSchema,
+      body,
+    ),
+  deleteCommunityRole: (id: string, roleId: string) =>
+    api(
+      'DELETE',
+      `/communities/${encodeURIComponent(id)}/roles/${encodeURIComponent(roleId)}`,
+      okResponseSchema,
+    ),
+  setCommunityMemberRoles: (id: string, userId: string, roleIds: readonly string[]) =>
+    api(
+      'PUT',
+      `/communities/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}/roles`,
+      okResponseSchema,
+      { roleIds },
+    ),
+  kickFromCommunity: (id: string, userId: string) =>
+    api(
+      'DELETE',
+      `/communities/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`,
+      okResponseSchema,
+    ),
+  banFromCommunity: (id: string, userId: string) =>
+    api('POST', `/communities/${encodeURIComponent(id)}/bans`, okResponseSchema, { userId }),
+  communityBans: (id: string) =>
+    api('GET', `/communities/${encodeURIComponent(id)}/bans`, communityBanListSchema),
+  unbanFromCommunity: (id: string, userId: string) =>
+    api(
+      'DELETE',
+      `/communities/${encodeURIComponent(id)}/bans/${encodeURIComponent(userId)}`,
+      okResponseSchema,
+    ),
+  createCommunityLink: (id: string, body: { expiresInHours: number; maxUses: number | null }) =>
+    api('POST', `/communities/${encodeURIComponent(id)}/links`, createdCommunityLinkSchema, body),
+  communityLinks: (id: string) =>
+    api('GET', `/communities/${encodeURIComponent(id)}/links`, communityLinkListSchema),
+  revokeCommunityLink: (id: string, linkId: string) =>
+    api(
+      'DELETE',
+      `/communities/${encodeURIComponent(id)}/links/${encodeURIComponent(linkId)}`,
+      okResponseSchema,
+    ),
+  previewCommunityInvite: (token: string) =>
+    api('GET', `/community-invites/${encodeURIComponent(token)}`, communityInvitePreviewSchema),
+  joinCommunityInvite: (token: string, rulesVersion: number) =>
+    api(
+      'POST',
+      `/community-invites/${encodeURIComponent(token)}/join`,
+      z.object({ id: z.string() }),
+      { rulesVersion },
+    ),
+  createSpace: (
+    id: string,
+    body: { name: string; roleIds: readonly string[]; autoApprove: boolean; ciphersuite: number },
+  ) =>
+    api(
+      'POST',
+      `/communities/${encodeURIComponent(id)}/spaces`,
+      z.object({ id: z.string() }),
+      body,
+    ),
+  spaces: (id: string) =>
+    api('GET', `/communities/${encodeURIComponent(id)}/spaces`, spaceListSchema),
+  deleteSpace: (id: string, spaceId: string) =>
+    api(
+      'DELETE',
+      `/communities/${encodeURIComponent(id)}/spaces/${encodeURIComponent(spaceId)}`,
+      okResponseSchema,
+    ),
+  joinSpace: (id: string, spaceId: string) =>
+    api(
+      'POST',
+      `/communities/${encodeURIComponent(id)}/spaces/${encodeURIComponent(spaceId)}/join`,
+      joinSpaceResponseSchema,
+      {},
+    ),
+  mySpaces: () => api('GET', '/community-spaces', mySpacesSchema),
 
   // ---- groups (docs/groups.md) ----
   createGroup: (usernames: readonly string[], ciphersuite: number) =>
