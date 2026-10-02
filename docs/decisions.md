@@ -637,3 +637,55 @@ through audited libraries; the server can relay and store but not read or forge.
 
 **Status.** PROPOSED — implemented; NEEDS-SECURITY-REVIEW S-04 (linking, device trust) and S-06
 (backups).
+
+## ADR-043 — End-to-end encrypted attachments (Phase 6)
+
+**Decision.**
+- **Encryption** (`packages/crypto-core/src/media.rs`): a fresh random 256-bit key per
+  attachment; XChaCha20-Poly1305 in the STREAM construction (as backups, ADR-042) under
+  HKDF-SHA-256(key, `tessera-media-v1`), 64 KiB chunks, layout `TSM1` ‖ 19-byte nonce ‖ chunks.
+  The message carries `{blobId, key, plaintextSha256, ciphertextSha256, plaintextSize,
+  ciphertextSize}`; decryption returns plaintext only after both hashes and sizes match (constant
+  time). The worker encrypts and decrypts in 1 MiB slices, outside the MLS call queue.
+- **Transport** (`services/api/src/modules/media`): the API creates a multipart upload in object
+  storage (S3 API) under a random key `e2ee/<128-bit hex>`, and returns presigned `UploadPart`
+  URLs (15 minutes, `Content-Length` signed) for fixed 8 MiB parts; the browser uploads directly.
+  Completion checks the part list and the stored object's total size. Downloads return a 5-minute
+  presigned `GET`. The API never handles blob bytes.
+- **Authorization:** the sender lists the blob ids in `messaging.send` (`attachments`, ≤ 10); only
+  the sender's own finished uploads can be attached, in the same transaction as the message. A
+  link lives as long as the message (disappearing timers included); members of a linked
+  conversation can download while the link is live; everyone else gets the same 404 as for a
+  missing blob. The blob's expiry is the longest of its links; unsent uploads expire after a day;
+  a sweeper deletes objects and rows.
+- **Limits** (FREE tier until entitlements, Phase 13): 200 MiB per attachment (25 MiB photos),
+  10 uploads in progress, 300 uploads and 2 GiB per rolling day per account.
+- **Client processing:** JPEG/PNG/WebP photos are re-encoded through a canvas (drops EXIF/GPS and
+  all other metadata; ≤ 4096 px); a ≤ 320 px JPEG preview (≤ 32 KiB base64) goes inside the
+  encrypted message; videos get a poster frame; voice messages are recorded with MediaRecorder
+  (Opus) with a 48-bar waveform. Names are sanitised (paths, control and bidi-override characters).
+- **Display:** only an allow-list of image, video and audio types is rendered, from `blob:` URLs;
+  everything else — including HTML, SVG and files whose decoded type does not match — is a
+  download with `application/octet-stream`, and file types that can run code carry a warning.
+  The sender controls the declared type, so it is never trusted for rendering.
+- **Caching:** downloaded ciphertext is cached in IndexedDB (≤ 256 MiB); the key stays in the
+  encrypted history.
+- **Local and CI storage:** MinIO in `infra/docker/compose.yaml`; tests use the moto S3 emulator
+  (`TEST_S3_URL`), which does **not** verify signatures, so expiry and signed-length enforcement
+  are only asserted on the URL (and the size re-check at completion); a real S3 or MinIO run is
+  required before a shared environment.
+
+**Deferred (tracked).**
+- Public/channel media pipeline (malware scan, transcoding sandbox, CSAM hashing, polyglot and
+  decompression-bomb checks) → Phase 8, with the first public content; there is none yet.
+- In-app document viewers on a separate user-content origin (PDF.js in a sandboxed frame) →
+  Phase 14; documents are downloads.
+- Resuming an interrupted upload after a reload (parts are retried and URLs refreshed within a
+  session); forwarding attachments without re-upload; attachments inside backups (backups carry
+  the keys, so restored history can open attachments while the server still has them).
+- Server-side ciphertext checksum (S3 `x-amz-checksum-sha256`) at completion.
+
+**Why.** Same reviewed construction as backups, no new primitive; the server can store and
+relay but cannot read, alter undetected or enumerate attachments.
+
+**Status.** PROPOSED — implemented; NEEDS-SECURITY-REVIEW S-05.

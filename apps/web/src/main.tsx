@@ -1,3 +1,5 @@
+// Must stay first: configures Zod before any schema module is evaluated.
+import './zod-config.js';
 import '@tessera/ui/tokens.css';
 import '@tessera/ui/components.css';
 import './styles/app.css';

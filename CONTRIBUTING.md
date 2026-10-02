@@ -29,7 +29,7 @@ cp services/realtime/.env.example services/realtime/.env   # local only
 | `pnpm --filter @tessera/web dev` | web app with hot reload on http://localhost:5173 (proxies `/api` to :8080 and `/rt` to :8081) |
 | `pnpm --filter @tessera/realtime start` | realtime WebSocket service on :8081 (after `pnpm build`) |
 | `pnpm --filter @tessera/crypto-core lint` | `rustfmt --check` and `clippy -D warnings` for native and wasm32 targets (`pnpm test` runs `cargo test`) |
-| `cargo +nightly fuzz run <target>` (in `packages/crypto-core`) | fuzz `certificate`, `padding`, `snapshot`, `inbound` or `backup` (needs `cargo install cargo-fuzz`; CI fuzzes nightly) |
+| `cargo +nightly fuzz run <target>` (in `packages/crypto-core`) | fuzz `certificate`, `padding`, `snapshot`, `inbound`, `backup` or `media` (needs `cargo install cargo-fuzz`; CI fuzzes nightly) |
 | `pnpm --filter @tessera/web test:e2e` | end-to-end tests: starts API + realtime + SMTP capture and serves the production build (needs the `TEST_*` variables; run `pnpm build` first) |
 | `pnpm --filter @tessera/api migrate` | apply database migrations (after `pnpm build`) |
 
@@ -38,7 +38,14 @@ Integration tests need these variables and **fail rather than skip** without the
 ```sh
 export TEST_DATABASE_URL=postgres://tessera:tessera-local-only@localhost:5432/tessera
 export TEST_VALKEY_URL=redis://localhost:6379
+# S3-compatible store for encrypted attachments. Tests create their own buckets, which the
+# moto emulator allows without credentials (CI uses it too):
+#   python3 -m pip install --user "moto[server]==5.2.3" && moto_server -H 127.0.0.1 -p 59500
+export TEST_S3_URL=http://127.0.0.1:59500
 ```
+
+The local MinIO in the compose file (console at http://127.0.0.1:9001) backs the dev API
+(`MEDIA_S3_*` in `services/api/.env.example`).
 
 Locally, Mailpit (in the compose file) shows every email at http://127.0.0.1:8025.
 

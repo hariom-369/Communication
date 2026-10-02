@@ -44,6 +44,16 @@ const schema = z
     SESSION_IDLE_DAYS: env.positiveInt(30),
     SESSION_ABSOLUTE_DAYS: env.positiveInt(90),
 
+    /** Object storage for end-to-end encrypted attachments (docs/media.md §5). */
+    MEDIA_S3_BUCKET: z.string().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/),
+    MEDIA_S3_REGION: z.string().min(1).default('ap-south-1'),
+    /** S3-compatible endpoint (MinIO locally); unset for AWS. Must be reachable by browsers. */
+    MEDIA_S3_ENDPOINT: env.url(['https:', 'http:']).optional(),
+    MEDIA_S3_FORCE_PATH_STYLE: env.boolean(false),
+    /** Static credentials for local stores only; production uses the instance role. */
+    MEDIA_S3_ACCESS_KEY_ID: z.string().min(1).optional(),
+    MEDIA_S3_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+
     BUILD_VERSION: z.string().min(1).default('0.0.0-dev'),
     BUILD_COMMIT: z.string().min(1).default('unknown'),
     SHUTDOWN_DRAIN_MS: env.nonNegativeInt(5000),
@@ -70,6 +80,23 @@ const schema = z
         code: 'custom',
         path: ['DATABASE_URL'],
         message: 'Must set sslmode=verify-full in production',
+      });
+    }
+    if (config.MEDIA_S3_ENDPOINT?.startsWith('https://') === false) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['MEDIA_S3_ENDPOINT'],
+        message: 'Must be https in production',
+      });
+    }
+    if (
+      config.MEDIA_S3_ACCESS_KEY_ID !== undefined ||
+      config.MEDIA_S3_SECRET_ACCESS_KEY !== undefined
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['MEDIA_S3_ACCESS_KEY_ID'],
+        message: 'Use the instance role in production, not static keys',
       });
     }
     if (!config.PUBLIC_WEB_URL.startsWith('https://')) {

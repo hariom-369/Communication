@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 
+import { CreateBucketCommand } from '@aws-sdk/client-s3';
 import { createLogger, type Logger } from '@tessera/platform';
 import { CURRENT_TERMS_VERSION } from '@tessera/validation';
 import { MemoryDestination } from '@tessera/platform/testing';
@@ -15,6 +16,7 @@ import { MIGRATIONS_DIR } from '../paths.js';
 import type { EmailMessage, Mailer } from '../platform/email.js';
 import { SESSION_COOKIE } from '../platform/http/routes.js';
 import { loadMigrations, migrate } from '@tessera/platform';
+import { S3ObjectStore } from '../platform/object-store.js';
 import { ValkeyRateLimiter } from '../platform/rate-limit.js';
 import { createValkey } from '../platform/valkey.js';
 
@@ -58,6 +60,8 @@ export interface IntegrationApp {
   logs: MemoryDestination;
   logger: Logger;
   keyPrefix: string;
+  media: S3ObjectStore;
+  bucket: string;
   close(): Promise<void>;
 }
 
@@ -89,6 +93,16 @@ export async function startIntegrationApp(): Promise<IntegrationApp> {
   const mailer = new RecordingMailer();
   const keyPrefix = name.replaceAll('_', '-').slice(0, 32);
   const key = () => randomBytes(32).toString('base64');
+  // A bucket per test app on the S3-compatible test store (docs/testing.md).
+  const bucket = name.replaceAll('_', '-');
+  const media = new S3ObjectStore({
+    bucket,
+    region: 'us-east-1',
+    endpoint: requireEnv('TEST_S3_URL'),
+    forcePathStyle: true,
+    credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+  });
+  await media.client.send(new CreateBucketCommand({ Bucket: bucket }));
   const modules = composeModules(
     {
       PASSWORD_PEPPER: `p1:${key()}`,
@@ -105,7 +119,7 @@ export async function startIntegrationApp(): Promise<IntegrationApp> {
       MAILBOX_RETENTION_DAYS: 30,
       REALTIME_WS_PATH: '/rt/v1/ws',
     },
-    { db, valkey, mailer, logger },
+    { db, valkey, mailer, logger, media },
   );
   const app = await buildApp({
     logger,
@@ -128,6 +142,8 @@ export async function startIntegrationApp(): Promise<IntegrationApp> {
     logs,
     logger,
     keyPrefix,
+    media,
+    bucket,
     close: async () => {
       await app.close();
       await db.destroy();

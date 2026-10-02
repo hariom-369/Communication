@@ -11,6 +11,7 @@ pub mod error;
 pub mod identity;
 pub mod ids;
 pub mod link;
+pub mod media;
 pub mod padding;
 pub mod safety;
 

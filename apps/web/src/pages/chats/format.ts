@@ -21,3 +21,16 @@ export function lastSeen(iso: string): string {
   if (hours > -24) return `last seen ${relative.format(hours, 'hour')}`;
   return `last seen ${day.format(new Date(iso))}`;
 }
+
+/** "820 KB", "12.4 MB". */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
+/** "0:07", "12:30". */
+export function formatDuration(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}

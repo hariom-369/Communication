@@ -11,7 +11,8 @@ import { SMTPServer } from 'smtp-server';
  * Starts the full stack for E2E tests:
  *   PostgreSQL database `tessera_e2e` (fresh, migrated) · Valkey (existing) · SMTP capture on
  *   127.0.0.1:58025 with an HTTP inbox on :58026 · API on :58080 · web preview on :4173.
- * Requires TEST_DATABASE_URL and TEST_VALKEY_URL, like the integration tests (never skipped).
+ * Requires TEST_DATABASE_URL, TEST_VALKEY_URL and TEST_S3_URL (S3-compatible store for encrypted
+ * attachments), like the integration tests (never skipped).
  */
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -102,6 +103,18 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   });
   await new Promise<void>((resolve) => inboxServer.listen(INBOX_PORT, '127.0.0.1', resolve));
 
+  // A fresh bucket per run on the S3-compatible test store, with CORS for the web origin so the
+  // browser can PUT parts and GET attachments directly (docs/media.md §2). The test store
+  // accepts these setup requests unsigned.
+  const s3 = new URL(required('TEST_S3_URL'));
+  const bucket = `tessera-e2e-${Date.now().toString(36)}`;
+  const created = await fetch(new URL(`/${bucket}`, s3), { method: 'PUT' });
+  if (!created.ok) throw new Error(`Could not create the E2E bucket (${created.status})`);
+  const cors = `<CORSConfiguration><CORSRule><AllowedOrigin>http://localhost:4173</AllowedOrigin><AllowedMethod>PUT</AllowedMethod><AllowedMethod>GET</AllowedMethod><AllowedHeader>*</AllowedHeader><ExposeHeader>ETag</ExposeHeader><MaxAgeSeconds>600</MaxAgeSeconds></CORSRule></CORSConfiguration>`;
+  process.env['E2E_MEDIA_BUCKET'] = bucket; // tests inspect stored ciphertext
+  const corsSet = await fetch(new URL(`/${bucket}?cors`, s3), { method: 'PUT', body: cors });
+  if (!corsSet.ok) throw new Error(`Could not configure E2E bucket CORS (${corsSet.status})`);
+
   const key = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64');
   const apiEnv = {
     NODE_ENV: 'development',
@@ -121,6 +134,12 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     WEBAUTHN_RP_ID: 'localhost',
     TRUST_PROXY_HOPS: '1',
     SHUTDOWN_DRAIN_MS: '0',
+    MEDIA_S3_BUCKET: bucket,
+    MEDIA_S3_REGION: 'us-east-1',
+    MEDIA_S3_ENDPOINT: s3.origin,
+    MEDIA_S3_FORCE_PATH_STYLE: 'true',
+    MEDIA_S3_ACCESS_KEY_ID: 'e2e',
+    MEDIA_S3_SECRET_ACCESS_KEY: 'e2e',
   };
   // Test workers use it to reset the per-IP sign-up limit between spec files (support.ts).
   process.env['E2E_VALKEY_KEY_PREFIX'] = apiEnv.VALKEY_KEY_PREFIX;
@@ -162,6 +181,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     {
       TESSERA_API_URL: `http://127.0.0.1:${API_PORT}`,
       TESSERA_REALTIME_URL: 'ws://127.0.0.1:58081',
+      TESSERA_MEDIA_ORIGIN: s3.origin,
     },
     webDir,
   );

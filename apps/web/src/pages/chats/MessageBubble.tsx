@@ -9,6 +9,9 @@ import {
   type TimelineMessage,
 } from '../../messaging/timeline.js';
 
+import type { UploadProgress } from '../../messaging/store.js';
+
+import { AttachmentView, UploadingAttachment } from './AttachmentView.js';
 import { clockTime } from './format.js';
 
 const REACTIONS = ['👍', '❤️', '😂', '😮', '🙏'] as const;
@@ -21,6 +24,21 @@ const STATUS_TEXT: Record<DeliveryState, string> = {
   read: 'Read',
   failed: 'Not sent',
 };
+
+export function attachmentLabel(category: string): string {
+  switch (category) {
+    case 'image':
+      return '📷 Photo';
+    case 'video':
+      return '🎬 Video';
+    case 'voice':
+      return '🎤 Voice message';
+    case 'audio':
+      return '🎵 Audio';
+    default:
+      return '📄 File';
+  }
+}
 
 export interface MessageBubbleProps {
   message: TimelineMessage;
@@ -37,6 +55,9 @@ export interface MessageBubbleProps {
   onEdit: () => void;
   onDelete: () => void;
   onRetry: () => void;
+  /** Own attachment still uploading. */
+  upload?: UploadProgress | undefined;
+  onCancelUpload?: () => void;
 }
 
 /** One message. Text is rendered as React text nodes — never as HTML (docs/security.md §4). */
@@ -63,7 +84,13 @@ export function MessageBubble(props: MessageBubbleProps): ReactNode {
         {props.quoted === undefined ? null : (
           <p className="bubble__quote">
             <span className="bubble__quote-author">{props.quotedAuthor}</span>
-            {props.quoted.deleted ? 'Message deleted' : props.quoted.text}
+            {props.quoted.deleted
+              ? 'Message deleted'
+              : props.quoted.text !== ''
+                ? props.quoted.text
+                : props.quoted.attachment !== null
+                  ? attachmentLabel(props.quoted.attachment.category)
+                  : ''}
           </p>
         )}
         {message.undecodable ? (
@@ -75,7 +102,17 @@ export function MessageBubble(props: MessageBubbleProps): ReactNode {
             {mine ? 'You deleted this message' : 'This message was deleted'}
           </p>
         ) : (
-          <p className="bubble__text">{message.text}</p>
+          <>
+            {props.upload !== undefined ? (
+              <UploadingAttachment
+                upload={props.upload}
+                onCancel={() => props.onCancelUpload?.()}
+              />
+            ) : message.attachment !== null ? (
+              <AttachmentView attachment={message.attachment} />
+            ) : null}
+            {message.text === '' ? null : <p className="bubble__text">{message.text}</p>}
+          </>
         )}
         <p className="bubble__meta">
           {message.edited && !message.deleted ? <span>edited · </span> : null}

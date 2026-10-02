@@ -3,7 +3,13 @@ import 'fake-indexeddb/auto';
 
 import { readFileSync } from 'node:fs';
 
-import init, { CryptoClient, parseLinkCode, verifyLinkCode } from '@tessera/crypto-core';
+import init, {
+  CryptoClient,
+  MediaDecryptor,
+  MediaEncryptor,
+  parseLinkCode,
+  verifyLinkCode,
+} from '@tessera/crypto-core';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -27,7 +33,7 @@ beforeAll(async () => {
   await init({ module_or_path: wasm });
 });
 
-const core = { CryptoClient, parseLinkCode, verifyLinkCode };
+const core = { CryptoClient, MediaEncryptor, MediaDecryptor, parseLinkCode, verifyLinkCode };
 
 async function device(userId: string, factory = new IDBFactory()) {
   const engine = new CryptoEngine(core, factory);
@@ -392,5 +398,57 @@ describe('multi-device (docs/multi-device.md)', () => {
     const other = await device(ALICE);
     await other.engine.call('backupEnable', []);
     expect(await other.engine.call('backupOwns', [backup.manifest, backup.mac])).toBe(false);
+  });
+});
+
+describe('attachments (docs/media.md)', () => {
+  it('encrypts files in slices and only returns plaintext that matches the message', async () => {
+    const { engine } = await device(ALICE);
+    for (const size of [0, 1000, 64 * 1024, 3 * 1024 * 1024 + 17]) {
+      const bytes = new Uint8Array(size).map((_, i) => (i * 7) % 251);
+      const { ciphertext, digest } = await engine.call('mediaEncrypt', [new Blob([bytes])]);
+      expect(ciphertext.size).toBe(digest.ciphertextSize);
+      expect(digest.plaintextSize).toBe(size);
+      const plain = await engine.call('mediaDecrypt', [ciphertext, digest, 'image/png']);
+      expect(plain.type).toBe('image/png');
+      // Buffer comparison: a deep equality over megabytes is very slow.
+      expect(Buffer.from(await plain.arrayBuffer()).equals(Buffer.from(bytes))).toBe(true);
+    }
+    const { ciphertext, digest } = await engine.call('mediaEncrypt', [
+      new Blob([new Uint8Array(200_000).fill(3)]),
+    ]);
+    const bytes = new Uint8Array(await ciphertext.arrayBuffer());
+    const tampered = bytes.slice();
+    tampered[100_000] = (tampered[100_000] ?? 0) ^ 1;
+    // Modified, truncated, a different key, or a digest for other content: all refused.
+    await expect(
+      engine.call('mediaDecrypt', [new Blob([tampered]), digest, 'x']),
+    ).rejects.toMatchObject({ code: 'UNTRUSTED' });
+    await expect(
+      engine.call('mediaDecrypt', [new Blob([bytes.slice(0, -10)]), digest, 'x']),
+    ).rejects.toBeInstanceOf(CryptoError);
+    const other = await engine.call('mediaEncrypt', [new Blob([new Uint8Array(200_000).fill(4)])]);
+    await expect(
+      engine.call('mediaDecrypt', [ciphertext, { ...digest, key: other.digest.key }, 'x']),
+    ).rejects.toMatchObject({ code: 'UNTRUSTED' });
+    await expect(
+      engine.call('mediaDecrypt', [
+        ciphertext,
+        { ...digest, plaintextSha256: other.digest.plaintextSha256 },
+        'x',
+      ]),
+    ).rejects.toMatchObject({ code: 'UNTRUSTED' });
+    // Two encryptions of the same file share nothing (fresh key and nonce each time).
+    const again = await engine.call('mediaEncrypt', [new Blob([new Uint8Array(200_000).fill(3)])]);
+    expect(again.digest.key).not.toBe(digest.key);
+    expect(again.digest.ciphertextSha256).not.toBe(digest.ciphertextSha256);
+  }, 30_000);
+
+  it('caches downloaded ciphertext on the device', async () => {
+    const { engine } = await device(ALICE);
+    expect(await engine.call('mediaCached', ['b1'])).toBeNull();
+    await engine.call('mediaCache', ['b1', new Blob([new Uint8Array([1, 2, 3])])]);
+    const cached = await engine.call('mediaCached', ['b1']);
+    expect(new Uint8Array(await cached!.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
   });
 });

@@ -5,6 +5,7 @@ import pg from 'pg';
 import { composeModules } from './compose.js';
 import type { Database } from './db/schema.js';
 import type { RouteDefinition } from './platform/http/routes.js';
+import type { ObjectStore } from './platform/object-store.js';
 import { createValkey } from './platform/valkey.js';
 
 const unusedKey = Buffer.alloc(32).toString('base64');
@@ -37,6 +38,9 @@ export function routeCatalog(): { routes: RouteDefinition[]; close(): Promise<vo
       valkey,
       mailer: { send: () => Promise.reject(new Error('Route catalog cannot send email')) },
       logger: createLogger({ service: 'catalog', level: 'fatal', errorDetails: false }),
+      media: new Proxy({} as ObjectStore, {
+        get: () => () => Promise.reject(new Error('Route catalog has no object store')),
+      }),
     },
   );
   return {

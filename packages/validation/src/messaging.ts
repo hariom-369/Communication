@@ -87,6 +87,11 @@ export const sendMessageSchema = z.strictObject({
   epoch: z.number().int().nonnegative(),
   /** MLS PrivateMessage. */
   ciphertext: ciphertextSchema,
+  /**
+   * Attachments this message references (docs/media.md §2): uploaded by the sender, linked to
+   * this conversation so its members can download them. At most 10.
+   */
+  attachments: z.array(idSchema).max(10).optional(),
 });
 
 /** Largest Welcome accepted (it carries the ratchet tree; bounded by the group-size cap). */

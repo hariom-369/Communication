@@ -18,6 +18,7 @@ import type {
   HistoryRecord,
   Identity,
   IngestResult,
+  MediaDigest,
   SafetyNumber,
 } from '../crypto/protocol.js';
 import { defaultPasskeyName, passkeyPrf } from '../lib/webauthn.js';
@@ -1004,5 +1005,23 @@ export class E2eeSession {
 
   cursor(conversationId: string): Promise<number> {
     return this.#crypto.cursor(conversationId);
+  }
+
+  // ---- attachments (worker crypto; see media-transfer.ts) ------------------------------------
+
+  encryptMedia(file: Blob): Promise<{ ciphertext: Blob; digest: MediaDigest }> {
+    return this.#crypto.mediaEncrypt(file);
+  }
+
+  decryptMedia(ciphertext: Blob, digest: MediaDigest, type: string): Promise<Blob> {
+    return this.#crypto.mediaDecrypt(ciphertext, digest, type);
+  }
+
+  cachedMedia(blobId: string): Promise<Blob | null> {
+    return this.#crypto.mediaCached(blobId);
+  }
+
+  cacheMedia(blobId: string, ciphertext: Blob): Promise<void> {
+    return this.#crypto.mediaCache(blobId, ciphertext);
   }
 }

@@ -4,7 +4,7 @@ import { Link } from 'react-router';
 
 import { endpoints } from '../../api/endpoints.js';
 import { errorMessage } from '../../api/client.js';
-import { useMessagingStore } from '../../messaging/provider.js';
+import { useMessaging, useMessagingStore } from '../../messaging/provider.js';
 import type { ConversationView as ConversationState } from '../../messaging/store.js';
 import { useSession } from '../../state/session.js';
 
@@ -57,6 +57,7 @@ function usePresence(userId: string): Presence | null {
 
 export function ConversationView({ conversation }: { conversation: ConversationState }): ReactNode {
   const store = useMessagingStore();
+  const { uploads } = useMessaging();
   const { me } = useSession();
   const myId = me?.id ?? '';
   const peer = peerOf(conversation, myId);
@@ -180,6 +181,8 @@ export function ConversationView({ conversation }: { conversation: ConversationS
                         store.deleteForEveryone(conversationId, id);
                     }}
                     onRetry={() => store.retry(conversationId, id)}
+                    upload={uploads[id]}
+                    onCancelUpload={() => store.cancelUpload(conversationId, id)}
                   />
                 );
               })}
@@ -200,10 +203,19 @@ export function ConversationView({ conversation }: { conversation: ConversationS
           }
           onCancelContext={() => setContext(null)}
           onTyping={(state) => store.typing(conversationId, state)}
-          onSubmit={(text) => {
+          onSubmit={(text, attachments) => {
+            const replyTo = context?.kind === 'reply' ? context.id : null;
             if (context?.kind === 'edit') store.edit(conversationId, context.id, text);
+            else if (attachments.length === 0) store.sendText(conversationId, text, replyTo);
             else
-              store.sendText(conversationId, text, context?.kind === 'reply' ? context.id : null);
+              attachments.forEach((attachment, index) => {
+                store.sendAttachment(
+                  conversationId,
+                  attachment,
+                  index === 0 ? text : '',
+                  index === 0 ? replyTo : null,
+                );
+              });
             setContext(null);
           }}
         />

@@ -961,3 +961,128 @@ code {
 .chat-list__search {
   padding: 0 var(--t-space-3) var(--t-space-2);
 }
+
+/* Attachments (docs/media.md) --------------------------------------------------------------- */
+
+.composer__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--t-space-1);
+  margin: 0 0 var(--t-space-2);
+  padding: 0;
+  list-style: none;
+}
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-space-1);
+  max-width: 100%;
+  padding: 0.125rem var(--t-space-2);
+  border: 1px solid var(--t-color-border);
+  border-radius: var(--t-radius-pill);
+  background: var(--t-color-surface);
+  font-size: var(--t-text-sm);
+  overflow-wrap: anywhere;
+}
+.recorder {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--t-space-2);
+  font-variant-numeric: tabular-nums;
+}
+.recorder__dot {
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: 50%;
+  background: var(--t-color-danger);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .recorder__dot {
+    animation: recorder-pulse 1.2s ease-in-out infinite;
+  }
+}
+@keyframes recorder-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+.attachment {
+  display: grid;
+  gap: var(--t-space-1);
+  margin: 0 0 var(--t-space-1);
+  min-width: 0;
+}
+.attachment__zoom {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+.attachment__zoom[aria-pressed='true'] {
+  cursor: zoom-out;
+}
+.attachment__image,
+.attachment__video {
+  display: block;
+  width: auto;
+  max-width: min(100%, 20rem);
+  height: auto;
+  max-height: 20rem;
+  border-radius: var(--t-radius-md);
+  object-fit: contain;
+}
+.attachment__image--large {
+  max-width: 100%;
+  max-height: 80vh;
+}
+.attachment__image--preview {
+  filter: saturate(0.9);
+}
+.attachment__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--t-space-2);
+}
+.attachment__meta {
+  display: grid;
+  font-size: var(--t-text-sm);
+  overflow-wrap: anywhere;
+}
+.attachment__name {
+  font-weight: 600;
+}
+.attachment__icon {
+  font-size: var(--t-text-xl);
+}
+.attachment__status {
+  margin: 0;
+  font-size: var(--t-text-sm);
+}
+.attachment__status--error {
+  color: var(--t-color-danger);
+}
+.attachment__status--warning {
+  color: var(--t-color-warning);
+}
+.attachment__progress {
+  width: 100%;
+  accent-color: var(--t-color-accent);
+}
+.waveform {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 1.75rem;
+}
+.waveform span {
+  display: block;
+  width: 3px;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0.6;
+}
+audio {
+  max-width: 100%;
+}

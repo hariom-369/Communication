@@ -196,3 +196,37 @@ describe('read markers and delivery state', () => {
     expect(unreadCount(state, 'me')).toBe(1);
   });
 });
+
+describe('attachments', () => {
+  it('shows media messages with their caption and removes the attachment on delete', () => {
+    const attachment = {
+      media: {
+        blobId: 'b1',
+        key: 'k',
+        plaintextSha256: 'p',
+        ciphertextSha256: 'c',
+        plaintextSize: 1,
+        ciphertextSize: 40,
+      },
+      category: 'image' as const,
+      mime: 'image/jpeg',
+      name: 'cat.jpg',
+    };
+    let state = applyIncoming(emptyTimeline, {
+      seq: 1,
+      senderId: 'peer',
+      serverTime: 1000,
+      clientMessageId: 'm1',
+      content: { v: 1, id: 'm1', sentAt: 1, body: { kind: 'media', attachment, caption: 'look' } },
+    });
+    expect(state.byId['m1']).toMatchObject({ text: 'look', attachment });
+    state = applyIncoming(state, {
+      seq: 2,
+      senderId: 'peer',
+      serverTime: 2000,
+      clientMessageId: 'd1',
+      content: { v: 1, id: 'd1', sentAt: 2, body: { kind: 'delete', target: 'm1' } },
+    });
+    expect(state.byId['m1']).toMatchObject({ deleted: true, attachment: null, text: '' });
+  });
+});

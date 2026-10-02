@@ -1,6 +1,6 @@
 import { Button } from '@tessera/ui';
 import { useState, type ReactNode } from 'react';
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
+import { NavLink, Outlet, useLocation } from 'react-router';
 
 import { errorMessage } from '../api/client.js';
 import { endpoints } from '../api/endpoints.js';
@@ -20,7 +20,6 @@ const NAV: readonly { to: string; label: string }[] = [
 /** Signed-in layout. Desktop: navigation rail + content. Mobile: top bar + content. */
 export function AppShell(): ReactNode {
   const { me, clear } = useSession();
-  const navigate = useNavigate();
   const { pathname } = useLocation();
   const [signingOut, setSigningOut] = useState(false);
   const [error, setError] = useState<string>();
@@ -29,8 +28,9 @@ export function AppShell(): ReactNode {
     setSigningOut(true);
     try {
       await endpoints.logout();
+      // The route guard redirects to /login once the session is anonymous (a second, explicit
+      // navigation here was redundant).
       clear();
-      await navigate('/login', { replace: true });
     } catch (caught) {
       setError(errorMessage(caught));
       setSigningOut(false);

@@ -92,3 +92,10 @@ is in [phase-reports/phase-5.md](phase-reports/phase-5.md) §Security implicatio
 Residual risks: a user persuaded to approve an attacker's link code (T-11, mitigated by step-up,
 wording, email and contact notices); a removed device with full access keeps the identity key
 until "Start over"; backup rollback to an older authentic version is not yet detected.
+
+**Phase 6 delta (attachments).** New flows: browser ↔ object storage with presigned URLs, and
+blob ↔ conversation links on the server. The analysis is in
+[phase-reports/phase-6.md](phase-reports/phase-6.md) §Security implications and ADR-043. Residual
+risks: malware sent privately cannot be detected by Tessera (documented, media.md §3); the server
+learns attachment sizes and which conversation they were sent to; a presigned download URL can be
+used by whoever holds it for 5 minutes (it yields only ciphertext).

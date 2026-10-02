@@ -11,7 +11,13 @@ import type { endpoints as Endpoints } from '../api/endpoints.js';
 import type { HistoryRecord, IngestResult } from '../crypto/protocol.js';
 
 import { backoffDelay } from './backoff.js';
-import { contentSchema, type MessageBody, type MessageContent } from './content.js';
+import {
+  contentSchema,
+  type Attachment,
+  type MessageBody,
+  type MessageContent,
+} from './content.js';
+import type { MediaTransfer } from './media-transfer.js';
 import { SecurityBlocked, type ConversationSecurity, type DeviceStatus } from './e2ee.js';
 import type { SafetyNumber } from '../crypto/protocol.js';
 import { RealtimeClient, type ConnectionStatus } from './realtime-client.js';
@@ -103,12 +109,38 @@ function normalize(text: string): string {
   return text.normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase();
 }
 
+/** A file ready to send: already processed on this device (metadata stripped, previews made). */
+export interface OutgoingAttachment {
+  readonly file: Blob;
+  readonly info: Omit<Attachment, 'media'>;
+}
+
+export interface UploadProgress {
+  /** 0–1; null until encryption finished and the upload started. */
+  readonly fraction: number | null;
+  readonly name: string;
+  readonly category: Attachment['category'];
+  readonly size: number;
+  readonly failed: boolean;
+}
+
+interface MediaJob {
+  readonly conversationId: string;
+  readonly attachment: OutgoingAttachment;
+  readonly caption: string;
+  readonly replyTo: string | null;
+  readonly sentAt: number;
+  controller: AbortController;
+}
+
 export interface MessagingSnapshot {
   readonly status: ConnectionStatus;
   readonly device: DeviceStatus;
   readonly conversations: readonly ConversationView[];
   readonly loaded: boolean;
   readonly error: string | null;
+  /** Attachments being encrypted and uploaded, by message id. */
+  readonly uploads: Readonly<Record<string, UploadProgress>>;
 }
 
 interface OutboxEntry {
@@ -142,6 +174,8 @@ export interface StoreOptions {
   readonly api: Api;
   readonly security: SecurityPort;
   readonly me: { readonly id: string };
+  /** Encrypted attachment upload (absent: sending attachments is unavailable). */
+  readonly media?: Pick<MediaTransfer, 'upload'>;
   readonly createRealtime?: (
     options: ConstructorParameters<typeof RealtimeClient>[0],
   ) => Pick<RealtimeClient, 'start' | 'stop' | 'sendTyping' | 'reconnectNow' | 'interrupt'>;
@@ -191,6 +225,8 @@ export class MessagingStore {
   #typingSweep: ReturnType<typeof setInterval> | null = null;
   #unsubscribeSecurity: (() => void) | null = null;
   #started = false;
+  readonly #mediaJobs = new Map<string, MediaJob>();
+  readonly #uploads = new Map<string, UploadProgress>();
   /** Realtime connected and conversations loaded (the device is set up). */
   #live = false;
 
@@ -266,6 +302,7 @@ export class MessagingStore {
       conversations,
       loaded: this.#loaded,
       error: this.#error,
+      uploads: Object.fromEntries(this.#uploads),
     };
   }
 
@@ -297,6 +334,7 @@ export class MessagingStore {
   }
 
   stop(): void {
+    for (const job of this.#mediaJobs.values()) job.controller.abort();
     this.#started = false;
     this.#live = false;
     this.#realtime.stop();
@@ -679,7 +717,127 @@ export class MessagingStore {
       this.#control(conversationId, { kind: 'read', upToSeq: latestIncoming });
   }
 
+  /**
+   * Sends an attachment (with an optional caption): encrypted in the worker, uploaded with
+   * progress, then sent as an ordinary encrypted message that references it.
+   */
+  sendAttachment(
+    conversationId: string,
+    attachment: OutgoingAttachment,
+    caption: string,
+    replyTo: string | null,
+  ): string | null {
+    const conversation = this.#conversations.get(conversationId);
+    if (conversation === undefined || this.#options.media === undefined) return null;
+    const id = newId();
+    const job: MediaJob = {
+      conversationId,
+      attachment,
+      caption: caption.trim(),
+      replyTo,
+      sentAt: Date.now(),
+      controller: new AbortController(),
+    };
+    this.#mediaJobs.set(id, job);
+    conversation.timeline = addPending(conversation.timeline, {
+      id,
+      senderId: this.#options.me.id,
+      sentAt: job.sentAt,
+      text: job.caption,
+      replyTo,
+      // Placeholder reference until the upload finishes; never sent.
+      attachment: null,
+    });
+    void this.#upload(id, job);
+    return id;
+  }
+
+  /** Cancels an attachment that is still uploading. */
+  cancelUpload(conversationId: string, id: string): void {
+    const job = this.#mediaJobs.get(id);
+    const conversation = this.#conversations.get(conversationId);
+    if (job === undefined || conversation === undefined) return;
+    job.controller.abort();
+    this.#mediaJobs.delete(id);
+    this.#uploads.delete(id);
+    const byId = Object.fromEntries(
+      Object.entries(conversation.timeline.byId).filter(([key]) => key !== id),
+    );
+    conversation.timeline = {
+      ...conversation.timeline,
+      byId,
+      order: conversation.timeline.order.filter((other) => other !== id),
+    };
+    this.#emit();
+  }
+
+  async #upload(id: string, job: MediaJob): Promise<void> {
+    const conversation = this.#conversations.get(job.conversationId);
+    const media = this.#options.media;
+    if (conversation === undefined || media === undefined) return;
+    const progress = (fraction: number | null, failed = false) => {
+      this.#uploads.set(id, {
+        fraction,
+        name: job.attachment.info.name,
+        category: job.attachment.info.category,
+        size: job.attachment.file.size,
+        failed,
+      });
+      this.#emit();
+    };
+    progress(null);
+    try {
+      const reference = await media.upload(
+        job.attachment.file,
+        (fraction) => {
+          progress(fraction);
+        },
+        job.controller.signal,
+      );
+      this.#uploads.delete(id);
+      this.#mediaJobs.delete(id);
+      const attachment: Attachment = { ...job.attachment.info, media: reference };
+      const message = conversation.timeline.byId[id];
+      if (message !== undefined)
+        conversation.timeline = addPending(conversation.timeline, {
+          id,
+          senderId: message.senderId,
+          sentAt: message.sentAt,
+          text: message.text,
+          replyTo: message.replyTo,
+          attachment,
+        });
+      this.#enqueue(job.conversationId, {
+        v: 1,
+        id,
+        sentAt: job.sentAt,
+        body: {
+          kind: 'media',
+          attachment,
+          ...(job.caption === '' ? {} : { caption: job.caption }),
+          ...(job.replyTo === null ? {} : { replyTo: job.replyTo }),
+        },
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        this.#uploads.delete(id);
+        return;
+      }
+      conversation.timeline = setStatus(conversation.timeline, id, 'failed');
+      progress(null, true);
+    }
+  }
+
   retry(conversationId: string, id: string): void {
+    const job = this.#mediaJobs.get(id);
+    if (job !== undefined) {
+      const conversation = this.#conversations.get(conversationId);
+      if (conversation === undefined) return;
+      job.controller = new AbortController();
+      conversation.timeline = setStatus(conversation.timeline, id, 'sending');
+      void this.#upload(id, job);
+      return;
+    }
     const entry = this.#outbox.get(id);
     const conversation = this.#conversations.get(conversationId);
     if (entry === undefined || conversation === undefined) return;
@@ -746,11 +904,13 @@ export class MessagingStore {
     try {
       const json = JSON.stringify(entry.content);
       const encrypted = await this.#options.security.encrypt(conversation.meta, json);
+      const body = entry.content.body;
       const result = await this.#options.api.sendMessage(entry.conversationId, {
         clientMessageId: entry.id,
         senderDeviceId: encrypted.senderDeviceId,
         epoch: encrypted.epoch,
         ciphertext: encrypted.ciphertext,
+        ...(body.kind === 'media' ? { attachments: [body.attachment.media.blobId] } : {}),
       });
       conversation.blocked = null;
       const record: HistoryRecord = {
@@ -801,8 +961,8 @@ export class MessagingStore {
       if (!retryable || expired) {
         this.#outbox.delete(entry.id);
         conversation.timeline = setStatus(conversation.timeline, entry.id, 'failed');
-        // Keep failed text messages retryable by the user.
-        if (entry.content.body.kind === 'text')
+        // Keep failed text and media messages retryable by the user.
+        if (entry.content.body.kind === 'text' || entry.content.body.kind === 'media')
           this.#outbox.set(entry.id, { ...entry, timer: null });
         this.#emit();
         return;

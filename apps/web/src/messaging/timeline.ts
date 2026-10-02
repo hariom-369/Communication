@@ -1,4 +1,4 @@
-import type { MessageContent } from './content.js';
+import type { Attachment, MessageContent } from './content.js';
 
 /**
  * Conversation timeline — a pure state machine (no I/O), so every rule is unit-testable.
@@ -25,7 +25,9 @@ export interface TimelineMessage {
   readonly sentAt: number;
   /** Server acceptance time (authoritative for edit/delete windows); null while pending. */
   readonly serverTime: number | null;
+  /** Message text, or an attachment's caption. */
   readonly text: string;
+  readonly attachment: Attachment | null;
   readonly replyTo: string | null;
   readonly edited: boolean;
   readonly deleted: boolean;
@@ -87,10 +89,18 @@ function withMessage(
 /** Adds the local user's message before the server has accepted it. */
 export function addPending(
   state: TimelineState,
-  message: { id: string; senderId: string; sentAt: number; text: string; replyTo: string | null },
+  message: {
+    id: string;
+    senderId: string;
+    sentAt: number;
+    text: string;
+    replyTo: string | null;
+    attachment?: Attachment | null;
+  },
 ): TimelineState {
   return withMessage(state, {
     ...message,
+    attachment: message.attachment ?? null,
     seq: null,
     serverTime: null,
     edited: false,
@@ -122,6 +132,7 @@ export function applyIncoming(state: TimelineState, envelope: IncomingEnvelope):
       sentAt: envelope.serverTime,
       serverTime: envelope.serverTime,
       text: '',
+      attachment: null,
       replyTo: null,
       edited: false,
       deleted: false,
@@ -133,7 +144,8 @@ export function applyIncoming(state: TimelineState, envelope: IncomingEnvelope):
 
   const body = content.body;
   switch (body.kind) {
-    case 'text': {
+    case 'text':
+    case 'media': {
       const existing = base.byId[content.id];
       // Only the original sender's pending copy can be confirmed; ids are client-chosen, so an
       // id collision from another sender must not overwrite someone else's message.
@@ -144,7 +156,8 @@ export function applyIncoming(state: TimelineState, envelope: IncomingEnvelope):
         senderId: envelope.senderId,
         sentAt: content.sentAt,
         serverTime: envelope.serverTime,
-        text: body.text,
+        text: body.kind === 'text' ? body.text : (body.caption ?? ''),
+        attachment: body.kind === 'media' ? body.attachment : null,
         replyTo: body.replyTo ?? null,
         edited: existing?.edited ?? false,
         deleted: existing?.deleted ?? false,
@@ -164,7 +177,13 @@ export function applyIncoming(state: TimelineState, envelope: IncomingEnvelope):
       const target = base.byId[body.target];
       if (target?.serverTime == null || target.senderId !== envelope.senderId) return base;
       if (envelope.serverTime - target.serverTime > DELETE_WINDOW_MS) return base;
-      return withMessage(base, { ...target, text: '', deleted: true, reactions: {} });
+      return withMessage(base, {
+        ...target,
+        text: '',
+        attachment: null,
+        deleted: true,
+        reactions: {},
+      });
     }
     case 'reaction': {
       const target = base.byId[body.target];

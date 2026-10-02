@@ -443,7 +443,7 @@ describe("'realtime.ticket' and 'realtime.presence'", () => {
       WHERE table_schema = 'public'
         AND table_name IN ('conversations', 'conversation_members', 'direct_pairs', 'mailbox_messages',
                            'mls_welcomes', 'account_keys', 'devices', 'key_packages',
-                           'link_sessions', 'backups', 'backup_wraps')
+                           'link_sessions', 'backups', 'backup_wraps', 'media_blobs', 'media_links')
         AND data_type IN ('text', 'character varying', 'json', 'jsonb', 'bytea')
       ORDER BY table_name, column_name`.execute(env.db);
     // Only two CHECK-constrained enums are text; the single payload column is bytea, never
@@ -474,6 +474,11 @@ describe("'realtime.ticket' and 'realtime.presence'", () => {
       { table_name: 'link_sessions', column_name: 'short_id', data_type: 'bytea' },
       { table_name: 'link_sessions', column_name: 'signature_public', data_type: 'bytea' },
       { table_name: 'mailbox_messages', column_name: 'ciphertext', data_type: 'bytea' },
+      // Attachments: a random object key, the storage upload id and a status enum. No names,
+      // types or content; the blob itself is ciphertext in object storage.
+      { table_name: 'media_blobs', column_name: 'object_key', data_type: 'text' },
+      { table_name: 'media_blobs', column_name: 'status', data_type: 'text' },
+      { table_name: 'media_blobs', column_name: 'upload_id', data_type: 'text' },
       // MLS Welcome: encrypted to the invited device's KeyPackage (RFC 9420 §12.4.3.1).
       { table_name: 'mls_welcomes', column_name: 'welcome', data_type: 'bytea' },
     ]);

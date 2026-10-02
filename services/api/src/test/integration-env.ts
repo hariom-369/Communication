@@ -2,7 +2,9 @@
  * Integration tests require real PostgreSQL and Valkey. Missing configuration is a hard failure,
  * never a silent skip (docs/testing.md).
  */
-const missing = ['TEST_DATABASE_URL', 'TEST_VALKEY_URL'].filter((name) => !process.env[name]);
+const missing = ['TEST_DATABASE_URL', 'TEST_VALKEY_URL', 'TEST_S3_URL'].filter(
+  (name) => !process.env[name],
+);
 if (missing.length > 0) {
   throw new Error(
     `Integration tests need ${missing.join(', ')}. Start the services with ` +
@@ -10,7 +12,7 @@ if (missing.length > 0) {
   );
 }
 
-export function requireEnv(name: 'TEST_DATABASE_URL' | 'TEST_VALKEY_URL'): string {
+export function requireEnv(name: 'TEST_DATABASE_URL' | 'TEST_VALKEY_URL' | 'TEST_S3_URL'): string {
   const value = process.env[name];
   if (value === undefined || value === '') throw new Error(`${name} is not set`);
   return value;

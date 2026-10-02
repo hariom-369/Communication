@@ -1,4 +1,7 @@
 import {
+  mediaDownloadSchema,
+  uploadCreatedSchema,
+  uploadPartsResponseSchema,
   backupDownloadSchema,
   backupStatusSchema,
   linkCreatedSchema,
@@ -112,7 +115,13 @@ export const endpoints = {
     api('GET', `/conversations/${encodeURIComponent(id)}`, conversationSchema),
   sendMessage: (
     id: string,
-    body: { clientMessageId: string; senderDeviceId: string; epoch: number; ciphertext: string },
+    body: {
+      clientMessageId: string;
+      senderDeviceId: string;
+      epoch: number;
+      ciphertext: string;
+      attachments?: readonly string[];
+    },
   ) =>
     api(
       'POST',
@@ -194,6 +203,24 @@ export const endpoints = {
     api('POST', '/backups/versions', z.object({ version: z.number() }), body),
   latestBackup: () => api('GET', '/backups/latest', backupDownloadSchema),
   disableBackups: () => api('DELETE', '/backups', okResponseSchema),
+
+  // ---- encrypted attachments (docs/media.md) ----
+  createUpload: (size: number) => api('POST', '/media/uploads', uploadCreatedSchema, { size }),
+  uploadParts: (blobId: string, partNumbers: number[]) =>
+    api('POST', `/media/uploads/${encodeURIComponent(blobId)}/parts`, uploadPartsResponseSchema, {
+      partNumbers,
+    }),
+  completeUpload: (blobId: string, parts: { partNumber: number; etag: string }[]) =>
+    api(
+      'POST',
+      `/media/uploads/${encodeURIComponent(blobId)}/complete`,
+      z.object({ blobId: z.string() }),
+      { parts },
+    ),
+  abortUpload: (blobId: string) =>
+    api('DELETE', `/media/uploads/${encodeURIComponent(blobId)}`, okResponseSchema),
+  mediaDownload: (blobId: string) =>
+    api('GET', `/media/${encodeURIComponent(blobId)}`, mediaDownloadSchema),
 
   realtimeTicket: () => api('POST', '/realtime/ticket', realtimeTicketSchema, {}),
   presence: (userId: string) =>

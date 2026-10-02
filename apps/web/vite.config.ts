@@ -11,6 +11,13 @@ import { defineConfig } from 'vite';
  */
 const API_TARGET = process.env['TESSERA_API_URL'] ?? 'http://127.0.0.1:8080';
 const REALTIME_TARGET = process.env['TESSERA_REALTIME_URL'] ?? 'ws://127.0.0.1:8081';
+/**
+ * Object storage origin for encrypted attachments (presigned uploads and downloads go straight
+ * from the browser to storage; docs/media.md §2). Deployments set it to the bucket's origin.
+ */
+const MEDIA_ORIGIN = process.env['TESSERA_MEDIA_ORIGIN'];
+if (MEDIA_ORIGIN !== undefined && !/^https?:\/\/[a-z0-9.-]+(:\d+)?$/i.test(MEDIA_ORIGIN))
+  throw new Error('TESSERA_MEDIA_ORIGIN must be an origin like https://media.example.com');
 
 export const CONTENT_SECURITY_POLICY = [
   "default-src 'none'",
@@ -18,9 +25,11 @@ export const CONTENT_SECURITY_POLICY = [
   "script-src 'self' 'wasm-unsafe-eval'",
   "worker-src 'self'",
   "style-src 'self'",
-  "img-src 'self' data:",
+  // Decrypted attachments are shown from blob: URLs created in this origin; thumbnails are data:.
+  "img-src 'self' data: blob:",
+  "media-src 'self' blob:",
   "font-src 'self'",
-  "connect-src 'self'",
+  `connect-src 'self'${MEDIA_ORIGIN === undefined ? '' : ` ${MEDIA_ORIGIN}`}`,
   "manifest-src 'self'",
   "base-uri 'none'",
   "form-action 'self'",
@@ -36,7 +45,8 @@ const productionHeaders = {
   'Referrer-Policy': 'no-referrer',
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
-  'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
+  // Microphone for voice messages, from this origin only (asked when the user starts recording).
+  'Permissions-Policy': 'camera=(), microphone=(self), geolocation=(), payment=(), usb=()',
 };
 
 // Mirrors production routing: one origin, `/api` → API service, `/rt` → realtime service.

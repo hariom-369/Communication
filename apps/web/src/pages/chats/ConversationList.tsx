@@ -8,6 +8,7 @@ import type { ConversationView } from '../../messaging/store.js';
 import { useSession } from '../../state/session.js';
 
 import { shortTime } from './format.js';
+import { attachmentLabel } from './MessageBubble.js';
 
 const STATUS_LABEL = {
   online: 'Connected',
@@ -33,6 +34,10 @@ function preview(conversation: ConversationView): string {
     if (message === undefined) continue;
     if (message.deleted) return 'Message deleted';
     if (message.undecodable) return 'Message couldn’t be decrypted';
+    if (message.attachment !== null)
+      return message.text === ''
+        ? attachmentLabel(message.attachment.category)
+        : `${attachmentLabel(message.attachment.category)} · ${message.text}`;
     return message.text;
   }
   return 'No messages yet';

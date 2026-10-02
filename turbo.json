@@ -15,7 +15,7 @@
     "test:integration": {
       "dependsOn": ["^build"],
       "cache": false,
-      "passThroughEnv": ["TEST_DATABASE_URL", "TEST_VALKEY_URL"]
+      "passThroughEnv": ["TEST_DATABASE_URL", "TEST_VALKEY_URL", "TEST_S3_URL"]
     },
     "openapi": {
       "dependsOn": ["^build"],

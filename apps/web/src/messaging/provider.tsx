@@ -13,10 +13,12 @@ import { startCryptoWorker } from '../crypto/client.js';
 import { useSession } from '../state/session.js';
 
 import { E2eeSession } from './e2ee.js';
+import { MediaTransfer } from './media-transfer.js';
 import { MessagingStore, type MessagingSnapshot } from './store.js';
 
 const StoreContext = createContext<MessagingStore | null>(null);
 const E2eeContext = createContext<E2eeSession | null>(null);
+const MediaContext = createContext<MediaTransfer | null>(null);
 
 /**
  * Runs end-to-end encryption (a dedicated crypto worker) and the messaging store for the
@@ -25,12 +27,19 @@ const E2eeContext = createContext<E2eeSession | null>(null);
 export function MessagingProvider({ children }: { children: ReactNode }): ReactNode {
   const { me } = useSession();
   const userId = me?.id;
-  const { store, e2ee } = useMemo(() => {
-    if (userId === undefined) return { store: null, e2ee: null };
+  const { store, e2ee, media } = useMemo(() => {
+    if (userId === undefined) return { store: null, e2ee: null, media: null };
     const session = new E2eeSession(startCryptoWorker, endpoints, userId);
+    const transfer = new MediaTransfer(endpoints, session);
     return {
       e2ee: session,
-      store: new MessagingStore({ api: endpoints, security: session, me: { id: userId } }),
+      media: transfer,
+      store: new MessagingStore({
+        api: endpoints,
+        security: session,
+        me: { id: userId },
+        media: transfer,
+      }),
     };
   }, [userId]);
 
@@ -65,9 +74,16 @@ export function MessagingProvider({ children }: { children: ReactNode }): ReactN
 
   return (
     <E2eeContext.Provider value={e2ee}>
-      <StoreContext.Provider value={store}>{children}</StoreContext.Provider>
+      <MediaContext.Provider value={media}>
+        <StoreContext.Provider value={store}>{children}</StoreContext.Provider>
+      </MediaContext.Provider>
     </E2eeContext.Provider>
   );
+}
+
+/** Encrypted attachment transfer (download and decrypt for display). */
+export function useMediaTransfer(): MediaTransfer | null {
+  return useContext(MediaContext);
 }
 
 /** This device's end-to-end encryption session (devices, linking, backups); re-renders on change. */
@@ -88,6 +104,7 @@ const EMPTY: MessagingSnapshot = {
   conversations: [],
   loaded: false,
   error: null,
+  uploads: {},
 };
 const noop = () => () => undefined;
 

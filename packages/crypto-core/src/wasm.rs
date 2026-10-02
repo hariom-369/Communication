@@ -12,7 +12,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::client::{BackupSecret, Client, CommitOutput, Processed};
 use crate::error::CoreError;
-use crate::safety;
+use crate::{media, safety};
 
 fn js(error: CoreError) -> JsError {
     JsError::new(&format!("{}: {}", error.code(), error))
@@ -466,5 +466,137 @@ impl CryptoClient {
         Ok(commit_json(
             self.inner.self_update(conversation_id).map_err(js)?,
         ))
+    }
+}
+
+// ---------------------------------------------------------------- attachments (docs/media.md)
+
+fn digest_json(key: &[u8; media::KEY_BYTES], digest: &media::MediaDigest) -> String {
+    json!({
+        "key": B64.encode(key),
+        "plaintextSha256": B64.encode(digest.plaintext_sha256),
+        "ciphertextSha256": B64.encode(digest.ciphertext_sha256),
+        "plaintextSize": digest.plaintext_size,
+        "ciphertextSize": digest.ciphertext_size,
+    })
+    .to_string()
+}
+
+fn array32(value: &str, what: &'static str) -> Result<[u8; 32], JsError> {
+    bytes(value)?
+        .try_into()
+        .map_err(|_| js(CoreError::Malformed(what)))
+}
+
+/// Encrypts one attachment under a fresh random key, chunk by chunk (64 KiB plaintext chunks).
+#[wasm_bindgen]
+pub struct MediaEncryptor {
+    key: zeroize::Zeroizing<[u8; media::KEY_BYTES]>,
+    inner: Option<media::Encryptor>,
+    header: Vec<u8>,
+    digest: Option<media::MediaDigest>,
+}
+
+#[wasm_bindgen]
+impl MediaEncryptor {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Result<MediaEncryptor, JsError> {
+        use openmls_traits::random::OpenMlsRand;
+        let rng = openmls_rust_crypto::RustCrypto::default();
+        let key: [u8; media::KEY_BYTES] = rng
+            .random_array()
+            .map_err(|_| js(CoreError::Mls("random")))?;
+        let nonce: [u8; media::NONCE_BYTES] = rng
+            .random_array()
+            .map_err(|_| js(CoreError::Mls("random")))?;
+        let key = zeroize::Zeroizing::new(key);
+        let (inner, header) = media::Encryptor::new(&key, nonce);
+        Ok(Self {
+            key,
+            inner: Some(inner),
+            header,
+            digest: None,
+        })
+    }
+
+    /// The first ciphertext bytes.
+    pub fn header(&self) -> Vec<u8> {
+        self.header.clone()
+    }
+
+    pub fn push(&mut self, chunk: &[u8]) -> Result<Vec<u8>, JsError> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| js(CoreError::State("media encryption finished")))?
+            .push(chunk)
+            .map_err(js)
+    }
+
+    pub fn finish(&mut self, chunk: &[u8]) -> Result<Vec<u8>, JsError> {
+        let inner = self
+            .inner
+            .take()
+            .ok_or_else(|| js(CoreError::State("media encryption finished")))?;
+        let (out, digest) = inner.finish(chunk).map_err(js)?;
+        self.digest = Some(digest);
+        Ok(out)
+    }
+
+    /// `{key, plaintextSha256, ciphertextSha256, plaintextSize, ciphertextSize}` after `finish`.
+    pub fn digest(&self) -> Result<String, JsError> {
+        let digest = self
+            .digest
+            .as_ref()
+            .ok_or_else(|| js(CoreError::State("media encryption not finished")))?;
+        Ok(digest_json(&self.key, digest))
+    }
+}
+
+/// Decrypts one attachment chunk by chunk; `finish` checks it against the message's digest.
+#[wasm_bindgen]
+pub struct MediaDecryptor {
+    inner: Option<media::Decryptor>,
+}
+
+#[wasm_bindgen]
+impl MediaDecryptor {
+    #[wasm_bindgen(constructor)]
+    pub fn new(key: &str, header: &[u8]) -> Result<MediaDecryptor, JsError> {
+        let key = zeroize::Zeroizing::new(array32(key, "media key")?);
+        Ok(Self {
+            inner: Some(media::Decryptor::new(&key, header).map_err(js)?),
+        })
+    }
+
+    pub fn push(&mut self, chunk: &[u8]) -> Result<Vec<u8>, JsError> {
+        self.inner
+            .as_mut()
+            .ok_or_else(|| js(CoreError::State("media decryption finished")))?
+            .push(chunk)
+            .map_err(js)
+    }
+
+    /// `digest` is the JSON from the message: plaintextSha256, ciphertextSha256 (base64) and
+    /// plaintextSize, ciphertextSize.
+    pub fn finish(&mut self, chunk: &[u8], digest: &str) -> Result<Vec<u8>, JsError> {
+        let value: Value =
+            serde_json::from_str(digest).map_err(|_| js(CoreError::Malformed("json")))?;
+        let text = |name: &str| value[name].as_str().unwrap_or_default().to_owned();
+        let size = |name: &str| {
+            value[name]
+                .as_u64()
+                .ok_or_else(|| js(CoreError::Malformed("media size")))
+        };
+        let expected = media::MediaDigest {
+            plaintext_sha256: array32(&text("plaintextSha256"), "media hash")?,
+            ciphertext_sha256: array32(&text("ciphertextSha256"), "media hash")?,
+            plaintext_size: size("plaintextSize")?,
+            ciphertext_size: size("ciphertextSize")?,
+        };
+        let inner = self
+            .inner
+            .take()
+            .ok_or_else(|| js(CoreError::State("media decryption finished")))?;
+        inner.finish(chunk, &expected).map_err(js)
     }
 }

@@ -64,7 +64,7 @@ test.describe('sign-up, sign-in and account security', () => {
     await addVirtualAuthenticator(page);
     const identity = newIdentity();
     await page.goto('/signup');
-    await page.getByLabel('Email').fill(identity.email);
+    await page.getByLabel('Email', { exact: true }).fill(identity.email);
     await page.getByLabel('Username').fill(identity.username);
     await page.getByLabel('I am 18 years or older.').check();
     await page.getByLabel(/I accept the Terms/).check();
@@ -151,7 +151,10 @@ test.describe('sign-up, sign-in and account security', () => {
     const before = (await inbox(identity.email)).length;
     await page.getByRole('button', { name: 'Sign out' }).click();
     await page.getByRole('link', { name: 'Forgot your password?' }).click();
-    await page.getByLabel('Email').fill(identity.email);
+    // Wait for the new page and match the label exactly: during the route transition the login
+    // form ("Email or username") is still in the DOM, and a substring match would type into it.
+    await expect(page.getByRole('heading', { name: 'Reset your password' })).toBeVisible();
+    await page.getByLabel('Email', { exact: true }).fill(identity.email);
     await page.getByRole('button', { name: 'Send reset link' }).click();
     await expect(page.getByRole('status')).toContainText('Check your email');
 

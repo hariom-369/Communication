@@ -83,7 +83,10 @@ export function trackCspViolations(page: Page): string[] {
   const violations: string[] = [];
   page.on('console', (message) => {
     const text = message.text();
-    if (/Content Security Policy|Trusted Type/i.test(text)) violations.push(text);
+    // Chromium words Trusted Types reports in several ways ("Trusted Type", "TrustedScript",
+    // "TrustedString"); all of them are violations.
+    if (/Content Security Policy|Trusted ?(Type|Script|HTML|String)|unsafe-eval/i.test(text))
+      violations.push(text);
   });
   return violations;
 }
@@ -131,7 +134,7 @@ export async function signUpWithPassword(
   identity = newIdentity(),
 ): Promise<typeof identity> {
   await page.goto('/signup');
-  await page.getByLabel('Email').fill(identity.email);
+  await page.getByLabel('Email', { exact: true }).fill(identity.email);
   await page.getByLabel('Username').fill(identity.username);
   await page.getByLabel('I am 18 years or older.').check();
   await page.getByLabel(/I accept the Terms/).check();

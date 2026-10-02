@@ -62,3 +62,4 @@ export * from './messaging.js';
 export * from './realtime.js';
 export * from './keys.js';
 export * from './backups.js';
+export * from './media.js';

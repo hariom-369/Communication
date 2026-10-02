@@ -7,6 +7,7 @@ import { MIGRATIONS_DIR } from './paths.js';
 import { createDatabase, databaseHealthCheck } from './platform/db.js';
 import { SmtpMailer } from './platform/email.js';
 import { loadMigrations, migrationsHealthCheck } from '@tessera/platform';
+import { S3ObjectStore } from './platform/object-store.js';
 import { startSingletonTask } from './platform/periodic.js';
 import {
   InProcessRateLimiter,
@@ -83,7 +84,22 @@ async function main(): Promise<void> {
       return Promise.resolve();
     },
   });
-  const modules = composeModules(config, { db: database.db, valkey, mailer, logger });
+  const media = new S3ObjectStore({
+    bucket: config.MEDIA_S3_BUCKET,
+    region: config.MEDIA_S3_REGION,
+    endpoint: config.MEDIA_S3_ENDPOINT,
+    forcePathStyle: config.MEDIA_S3_FORCE_PATH_STYLE,
+    ...(config.MEDIA_S3_ACCESS_KEY_ID !== undefined &&
+    config.MEDIA_S3_SECRET_ACCESS_KEY !== undefined
+      ? {
+          credentials: {
+            accessKeyId: config.MEDIA_S3_ACCESS_KEY_ID,
+            secretAccessKey: config.MEDIA_S3_SECRET_ACCESS_KEY,
+          },
+        }
+      : {}),
+  });
+  const modules = composeModules(config, { db: database.db, valkey, mailer, logger, media });
 
   const sweeper = startSingletonTask({
     name: 'mailbox_sweeper',
@@ -94,6 +110,7 @@ async function main(): Promise<void> {
     task: async () => {
       await modules.messaging.sweep();
       await modules.keys.sweep();
+      await modules.media.sweep();
     },
   });
   lifecycle.onShutdown({ name: 'mailbox_sweeper', run: () => sweeper.stop() });

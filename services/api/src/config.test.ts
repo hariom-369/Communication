@@ -15,6 +15,7 @@ const base = {
   PASSWORD_PEPPER: `p1:${key}`,
   SECRET_BOX_KEYS: `k1:${key}`,
   WEBAUTHN_RP_ID: 'localhost',
+  MEDIA_S3_BUCKET: 'tessera-e2ee-media',
 };
 
 const production = {
@@ -61,11 +62,15 @@ describe('api config', () => {
         VALKEY_URL: 'redis://cache.internal:6379',
         PUBLIC_WEB_URL: 'http://app.tessera.example',
         SMTP_URL: 'smtp://relay.internal:25',
+        MEDIA_S3_ENDPOINT: 'http://minio.internal:9000',
+        MEDIA_S3_ACCESS_KEY_ID: 'static',
       }).sort(),
     ).toEqual([
       'ALLOWED_ORIGINS',
       'DATABASE_URL',
       'LOG_ERROR_DETAILS',
+      'MEDIA_S3_ACCESS_KEY_ID',
+      'MEDIA_S3_ENDPOINT',
       'PUBLIC_WEB_URL',
       'SMTP_URL',
       'VALKEY_URL',
@@ -77,6 +82,7 @@ describe('api config', () => {
       'ALLOWED_ORIGINS',
       'DATABASE_URL',
       'EMAIL_FROM',
+      'MEDIA_S3_BUCKET',
       'PASSWORD_PEPPER',
       'PUBLIC_WEB_URL',
       'SECRET_BOX_KEYS',

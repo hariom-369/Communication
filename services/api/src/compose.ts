@@ -18,10 +18,12 @@ import {
   SessionService,
 } from './modules/auth/index.js';
 import { KeysService, keysRoutes } from './modules/keys/index.js';
+import { MediaService, mediaRoutes } from './modules/media/index.js';
 import { MessagingService, messagingRoutes } from './modules/messaging/index.js';
 import { metaRoutes } from './modules/meta/index.js';
 import { RealtimeService, realtimeRoutes } from './modules/realtime/index.js';
 import type { Mailer } from './platform/email.js';
+import type { ObjectStore } from './platform/object-store.js';
 import type { RouteDefinition, SessionAuthenticator } from './platform/http/routes.js';
 import { ValkeyRealtimePublisher } from './platform/realtime-publisher.js';
 import { parseKeyring, SecretBox } from './platform/secrets.js';
@@ -53,6 +55,8 @@ export interface ModuleInfrastructure {
   readonly valkey: Redis;
   readonly mailer: Mailer;
   readonly logger: Logger;
+  /** Encrypted attachments (docs/media.md §5). */
+  readonly media: ObjectStore;
 }
 
 export interface Modules {
@@ -61,6 +65,7 @@ export interface Modules {
   readonly audit: AuditLog;
   readonly messaging: MessagingService;
   readonly keys: KeysService;
+  readonly media: MediaService;
 }
 
 const DAY_MS = 24 * 60 * 60_000;
@@ -126,6 +131,9 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
   messaging.useDevices(keys);
   keys.useNotifier(auth);
   const backups = new BackupsService(infra.db, audit, auth);
+  const media = new MediaService(infra.db, infra.media, infra.logger);
+  media.useMembership(messaging);
+  messaging.useAttachments(media);
   const realtime = new RealtimeService(infra.valkey, config.VALKEY_KEY_PREFIX, {
     privacySettings: (userId) => accounts.privacySettings(userId),
     areContacts: (a, b) => messaging.areContacts(a, b),
@@ -139,11 +147,13 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
       ...messagingRoutes({ messaging }),
       ...keysRoutes({ keys }),
       ...backupsRoutes({ backups }),
+      ...mediaRoutes({ media }),
       ...realtimeRoutes({ realtime, websocketPath: config.REALTIME_WS_PATH }),
     ],
     sessions,
     audit,
     messaging,
     keys,
+    media,
   };
 }

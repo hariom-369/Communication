@@ -67,7 +67,7 @@ no advertising profiling at launch.
 | Contacts / address book | No (not uploaded) | — | ADR-031 |
 | Call occurrence, participants, duration | Yes | 180 days | media E2EE |
 | Call media | No | — | |
-| Attachment existence, size, blob↔conversation link | Yes | 30 days | [media.md](media.md) |
+| Attachment existence, ciphertext size, uploader, blob↔conversation link, upload/download times | Yes | Until the referencing message expires (≤ 30 days); unsent uploads 1 day | [media.md](media.md), ADR-043. File names, types, dimensions, durations, previews and keys are **inside** the encrypted message only |
 | Push notification content | No (content-free push) | — | [notifications.md](notifications.md) |
 | Channel posts, comments, public profiles | Yes | until deleted | not E2EE |
 | Search queries (public directory) | Yes | 30 days, not linked to profile for analytics | |

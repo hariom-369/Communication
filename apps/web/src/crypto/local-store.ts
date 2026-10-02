@@ -14,8 +14,16 @@
  * so the ratchet state and the messages it produced are persisted together or not at all.
  */
 
-const DB_VERSION = 1;
-const STORES = ['meta', 'state', 'history', 'cursors'] as const;
+const DB_VERSION = 2;
+const STORES = ['meta', 'state', 'history', 'cursors', 'media'] as const;
+/** Downloaded attachment ciphertext kept on this device (oldest evicted first). */
+const MEDIA_CACHE_BYTES = 256 * 1024 * 1024;
+
+interface CachedMedia {
+  readonly blob: Blob;
+  readonly size: number;
+  readonly at: number;
+}
 
 interface Sealed {
   readonly iv: Uint8Array<ArrayBuffer>;
@@ -212,6 +220,38 @@ export class LocalStore {
     for (const entry of history) tx.objectStore('history').put(entry.value, entry.key);
     if (batch.clearCursors === true) tx.objectStore('cursors').clear();
     for (const entry of cursors) tx.objectStore('cursors').put(entry.value, entry.key);
+    await done(tx);
+  }
+
+  /**
+   * Attachment cache. Values are the attachment **ciphertext** exactly as downloaded: it is
+   * already encrypted under the attachment key, which lives only inside the encrypted history,
+   * so it is stored without a second layer (and can be large).
+   */
+  async getMedia(blobId: string): Promise<Blob | null> {
+    const tx = this.#db.transaction('media', 'readonly');
+    const entry = (await request(tx.objectStore('media').get(blobId))) as CachedMedia | undefined;
+    return entry?.blob ?? null;
+  }
+
+  async putMedia(blobId: string, blob: Blob): Promise<void> {
+    if (blob.size > MEDIA_CACHE_BYTES) return;
+    const tx = this.#db.transaction('media', 'readwrite');
+    const store = tx.objectStore('media');
+    const [keys, values] = await Promise.all([
+      request(store.getAllKeys()),
+      request(store.getAll()),
+    ]);
+    const entries = (values as CachedMedia[])
+      .map((value, index) => ({ key: keys[index] as string, size: value.size, at: value.at }))
+      .sort((a, b) => a.at - b.at);
+    let total = entries.reduce((sum, entry) => sum + entry.size, 0) + blob.size;
+    for (const entry of entries) {
+      if (total <= MEDIA_CACHE_BYTES) break;
+      store.delete(entry.key);
+      total -= entry.size;
+    }
+    store.put({ blob, size: blob.size, at: Date.now() } satisfies CachedMedia, blobId);
     await done(tx);
   }
 

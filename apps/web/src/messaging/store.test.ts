@@ -11,7 +11,7 @@ import {
   type ConversationSecurity,
   type DeviceStatus,
 } from './e2ee.js';
-import { MessagingStore, type SecurityPort } from './store.js';
+import { MessagingStore, type SecurityPort, type StoreOptions } from './store.js';
 
 /**
  * Transport and state rules of the messaging store. Encryption is replaced by a test double
@@ -182,6 +182,7 @@ function createStore(
   api: ReturnType<typeof fakeApi>,
   security = fakeSecurity(),
   shareReadReceipts = true,
+  media?: StoreOptions['media'],
 ) {
   let frameHandler: ((frame: ServerFrame) => void) | undefined;
   const realtime = {
@@ -195,6 +196,7 @@ function createStore(
     api,
     security: security.port,
     me: { id: ME },
+    ...(media === undefined ? {} : { media }),
     createRealtime: (options) => {
       frameHandler = options.onFrame;
       return realtime;
@@ -476,6 +478,70 @@ describe('MessagingStore', () => {
     expect(store.search('nothing like this')).toEqual([]);
     // Nothing is sent to the server to search.
     expect(api.messages.mock.calls.length).toBeLessThanOrEqual(1);
+    store.stop();
+  });
+
+  it('uploads an attachment, then sends a message that references it', async () => {
+    const bytes32 = btoa('k'.repeat(32));
+    const reference = {
+      blobId: 'blob-1',
+      key: bytes32,
+      plaintextSha256: bytes32,
+      ciphertextSha256: bytes32,
+      plaintextSize: 3,
+      ciphertextSize: 42,
+    };
+    let finish: (value: typeof reference) => void = () => undefined;
+    let fail: (error: Error) => void = () => undefined;
+    const media = {
+      upload: vi.fn(
+        (_file: Blob, onProgress: (f: number) => void) =>
+          new Promise<typeof reference>((resolve, reject) => {
+            onProgress(0.5);
+            finish = resolve;
+            fail = reject;
+          }),
+      ),
+    };
+    const api = fakeApi([]);
+    const { store, security } = createStore(api, fakeSecurity(), true, media);
+    await store.start();
+    const file = new Blob(['abc'], { type: 'image/png' });
+    const info = { category: 'image' as const, mime: 'image/png', name: 'a.png' };
+
+    const id = store.sendAttachment(CONVERSATION, { file, info }, '  a caption ', null)!;
+    expect(store.getSnapshot().uploads[id]).toMatchObject({ fraction: 0.5, name: 'a.png' });
+    expect(view(store).timeline.byId[id]).toMatchObject({ text: 'a caption', status: 'sending' });
+    // Nothing is sent before the upload finished.
+    expect(api.sendMessage).not.toHaveBeenCalled();
+
+    // A failed upload stays visible and can be retried.
+    fail(new Error('network'));
+    await vi.runOnlyPendingTimersAsync();
+    expect(store.getSnapshot().uploads[id]).toMatchObject({ failed: true });
+    expect(view(store).timeline.byId[id]?.status).toBe('failed');
+    store.retry(CONVERSATION, id);
+    finish(reference);
+    await vi.runOnlyPendingTimersAsync();
+
+    expect(store.getSnapshot().uploads[id]).toBeUndefined();
+    const sent = api.sendMessage.mock.calls[0] as unknown as [string, { attachments?: string[] }];
+    expect(sent[1].attachments).toEqual(['blob-1']);
+    const json = (security.mock.encrypt.mock.calls.at(-1) as unknown as [unknown, string])[1];
+    expect(JSON.parse(json)).toMatchObject({
+      id,
+      body: { kind: 'media', caption: 'a caption', attachment: { ...info, media: reference } },
+    });
+    expect(view(store).timeline.byId[id]).toMatchObject({
+      attachment: { name: 'a.png' },
+      status: null,
+    });
+
+    // Cancelling an upload in progress removes it without sending.
+    const second = store.sendAttachment(CONVERSATION, { file, info }, '', null)!;
+    store.cancelUpload(CONVERSATION, second);
+    expect(view(store).timeline.byId[second]).toBeUndefined();
+    expect(store.getSnapshot().uploads[second]).toBeUndefined();
     store.stop();
   });
 });

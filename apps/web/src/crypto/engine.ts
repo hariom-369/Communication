@@ -1,4 +1,4 @@
-import type { CryptoClient } from '@tessera/crypto-core';
+import type { CryptoClient, MediaDecryptor, MediaEncryptor } from '@tessera/crypto-core';
 
 import { LocalStore } from './local-store.js';
 import type {
@@ -12,6 +12,7 @@ import type {
   IdentityObservation,
   InboundMessage,
   IngestResult,
+  MediaDigest,
   Method,
   Pin,
   SafetyNumber,
@@ -36,6 +37,8 @@ export interface CoreModule {
     createPending(userId: string, now: number): CryptoClient;
     restore(snapshot: Uint8Array): CryptoClient;
   };
+  readonly MediaEncryptor: new () => MediaEncryptor;
+  readonly MediaDecryptor: new (key: string, header: Uint8Array) => MediaDecryptor;
   parseLinkCode(code: string): string;
   verifyLinkCode(code: string, shortId: string, hpkePublic: string, signaturePublic: string): void;
 }
@@ -54,6 +57,19 @@ function toCryptoError(error: unknown): CryptoError | null {
   const match = /^([A-Z_]+): (.*)$/s.exec(message);
   return match === null ? null : new CryptoError(match[1] ?? 'MLS', match[2] ?? '');
 }
+
+/** Methods that touch neither MLS state nor history: they need not wait behind MLS calls. */
+const CONCURRENT: ReadonlySet<Method> = new Set<Method>([
+  'mediaEncrypt',
+  'mediaDecrypt',
+  'mediaCached',
+  'mediaCache',
+]);
+const MEDIA_CHUNK = 64 * 1024;
+const MEDIA_TAG = 16;
+const MEDIA_HEADER = 23;
+/** Chunks read from the file per slice (1 MiB). */
+const MEDIA_SLICE_CHUNKS = 16;
 
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
@@ -93,6 +109,7 @@ export class CryptoEngine {
         throw new CryptoError('CRASH', 'The encryption engine restarted; please retry.');
       }
     };
+    if (CONCURRENT.has(method)) return run();
     const result = this.#queue.then(run, run);
     this.#queue = result.catch(() => undefined);
     return result;
@@ -359,6 +376,11 @@ export class CryptoEngine {
     backupPasskeyWrap: (prfOutput) =>
       Promise.resolve(this.#c.backupPasskeyWrap(fromBase64(prfOutput))),
 
+    mediaEncrypt: (file) => this.#encryptMedia(file),
+    mediaDecrypt: (ciphertext, digest, type) => this.#decryptMedia(ciphertext, digest, type),
+    mediaCached: (blobId) => this.#s.getMedia(blobId),
+    mediaCache: (blobId, ciphertext) => this.#s.putMedia(blobId, ciphertext),
+
     backupOwns: (manifest, mac) => Promise.resolve(this.#c.backupOwns(manifest, mac)),
 
     backupExport: async (version) => {
@@ -385,6 +407,66 @@ export class CryptoEngine {
       return { identity: this.#identity, version: result.version, createdAt: result.createdAt };
     },
   };
+
+  /** Streams a file through the media encryptor in 1 MiB slices (crypto-core media.rs). */
+  async #encryptMedia(file: Blob): Promise<{ ciphertext: Blob; digest: MediaDigest }> {
+    const encryptor = new this.#core.MediaEncryptor();
+    try {
+      const parts: Uint8Array<ArrayBuffer>[] = [encryptor.header() as Uint8Array<ArrayBuffer>];
+      const fullChunks = Math.floor(file.size / MEDIA_CHUNK);
+      for (let chunk = 0; chunk < fullChunks; chunk += MEDIA_SLICE_CHUNKS) {
+        const count = Math.min(MEDIA_SLICE_CHUNKS, fullChunks - chunk);
+        const slice = new Uint8Array(
+          await file.slice(chunk * MEDIA_CHUNK, (chunk + count) * MEDIA_CHUNK).arrayBuffer(),
+        );
+        for (let i = 0; i < count; i += 1)
+          parts.push(
+            encryptor.push(
+              slice.subarray(i * MEDIA_CHUNK, (i + 1) * MEDIA_CHUNK),
+            ) as Uint8Array<ArrayBuffer>,
+          );
+      }
+      const last = new Uint8Array(await file.slice(fullChunks * MEDIA_CHUNK).arrayBuffer());
+      parts.push(encryptor.finish(last) as Uint8Array<ArrayBuffer>);
+      const digest = JSON.parse(encryptor.digest()) as MediaDigest;
+      return { ciphertext: new Blob(parts, { type: 'application/octet-stream' }), digest };
+    } finally {
+      encryptor.free();
+    }
+  }
+
+  /** Decrypts in slices; the plaintext is returned only after the digest checks out. */
+  async #decryptMedia(ciphertext: Blob, digest: MediaDigest, type: string): Promise<Blob> {
+    if (ciphertext.size !== digest.ciphertextSize || ciphertext.size < MEDIA_HEADER + MEDIA_TAG)
+      throw new CryptoError('UNTRUSTED', 'media does not match the message');
+    const header = new Uint8Array(await ciphertext.slice(0, MEDIA_HEADER).arrayBuffer());
+    const decryptor = new this.#core.MediaDecryptor(digest.key, header);
+    try {
+      const full = MEDIA_CHUNK + MEDIA_TAG;
+      const body = ciphertext.size - MEDIA_HEADER;
+      const lastLength = body % full === 0 ? full : body % full;
+      const fullChunks = (body - lastLength) / full;
+      const parts: Uint8Array<ArrayBuffer>[] = [];
+      for (let chunk = 0; chunk < fullChunks; chunk += MEDIA_SLICE_CHUNKS) {
+        const count = Math.min(MEDIA_SLICE_CHUNKS, fullChunks - chunk);
+        const start = MEDIA_HEADER + chunk * full;
+        const slice = new Uint8Array(
+          await ciphertext.slice(start, start + count * full).arrayBuffer(),
+        );
+        for (let i = 0; i < count; i += 1)
+          parts.push(
+            decryptor.push(slice.subarray(i * full, (i + 1) * full)) as Uint8Array<ArrayBuffer>,
+          );
+      }
+      const last = new Uint8Array(
+        await ciphertext.slice(ciphertext.size - lastLength).arrayBuffer(),
+      );
+      parts.push(decryptor.finish(last, JSON.stringify(digest)) as Uint8Array<ArrayBuffer>);
+      return new Blob(parts, { type });
+    } finally {
+      decryptor.free();
+    }
+  }
 
   /** All local history as a bundle (JSON bytes). */
   async #bundle(): Promise<Uint8Array> {

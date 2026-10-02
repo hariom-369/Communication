@@ -131,6 +131,7 @@ export function messagingRoutes(deps: MessagingModuleDeps): RouteDefinition[] {
           senderDeviceId: body.senderDeviceId,
           epoch: body.epoch,
           ciphertext,
+          attachments: body.attachments,
         });
         return {
           seq: result.message.seq,

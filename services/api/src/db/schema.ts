@@ -218,6 +218,26 @@ export interface BackupsTable {
   created_at: Timestamp;
 }
 
+export interface MediaBlobsTable {
+  id: string;
+  owner_id: string;
+  object_key: string;
+  upload_id: string | null;
+  size: ColumnType<string, number, number>;
+  part_size: number;
+  status: 'uploading' | 'ready';
+  created_at: Timestamp;
+  completed_at: Date | null;
+  expires_at: Date;
+}
+
+export interface MediaLinksTable {
+  blob_id: string;
+  conversation_id: string;
+  created_at: Timestamp;
+  expires_at: Date;
+}
+
 export interface BackupWrapsTable {
   id: string;
   user_id: string;
@@ -273,6 +293,8 @@ export interface Database {
   link_sessions: LinkSessionsTable;
   backups: BackupsTable;
   backup_wraps: BackupWrapsTable;
+  media_blobs: MediaBlobsTable;
+  media_links: MediaLinksTable;
 }
 
 /** Owning module of every table ('platform' = infrastructure code outside modules/). */
@@ -301,4 +323,6 @@ export const TABLE_OWNERS: Readonly<Record<keyof Database, string>> = {
   link_sessions: 'keys',
   backups: 'backups',
   backup_wraps: 'backups',
+  media_blobs: 'media',
+  media_links: 'media',
 };

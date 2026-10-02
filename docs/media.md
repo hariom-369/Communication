@@ -1,6 +1,21 @@
 # Media architecture
 
-Status: NEEDS-SECURITY-REVIEW (S-05) · Decision: ADR-013
+Status: NEEDS-SECURITY-REVIEW (S-05) · Decisions: ADR-013, **043**
+
+> **Implemented in Phase 6 (ADR-043), with these differences from the design below:**
+> - Encryption uses the STREAM construction over XChaCha20-Poly1305 (64 KiB chunks), as backups
+>   do, instead of libsodium `secretstream`.
+> - The server does not record a ciphertext hash; recipients check the hashes the message carries.
+>   Completion checks the part list and the total size.
+> - Download authorization is "member of a conversation the sender linked the blob to, while that
+>   message is live", or the uploader. Forwarding without re-upload is not implemented yet.
+> - Photos are re-encoded (EXIF/GPS removed); HEIC, GIF and SVG are sent as files. Documents are
+>   downloads only — no in-app viewer yet. Location and contact cards are not implemented.
+> - §4 (public media pipeline) is not built: there is no public content until channels (Phase 8).
+> - §6 tests: tampering, truncation, wrong key, hash mismatch, wrong total size, download without
+>   membership, link expiry, EXIF removal and multi-part upload are covered (Rust, engine,
+>   integration, E2E). Presigned-URL expiry and signed lengths are not enforced by the test store;
+>   the public-path tests wait for §4.
 
 ## 1. Types and limits (FREE tier; higher tiers via entitlements)
 

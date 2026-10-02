@@ -1,5 +1,11 @@
 /// <reference lib="webworker" />
-import init, { CryptoClient, parseLinkCode, verifyLinkCode } from '@tessera/crypto-core';
+import init, {
+  CryptoClient,
+  MediaDecryptor,
+  MediaEncryptor,
+  parseLinkCode,
+  verifyLinkCode,
+} from '@tessera/crypto-core';
 import wasmUrl from '@tessera/crypto-core/wasm?url';
 
 import { CryptoEngine, CryptoError } from './engine.js';
@@ -13,7 +19,13 @@ import type { RpcRequest, RpcResponse } from './protocol.js';
 declare const self: DedicatedWorkerGlobalScope;
 
 const ready = init({ module_or_path: wasmUrl });
-const engine = new CryptoEngine({ CryptoClient, parseLinkCode, verifyLinkCode });
+const engine = new CryptoEngine({
+  CryptoClient,
+  MediaEncryptor,
+  MediaDecryptor,
+  parseLinkCode,
+  verifyLinkCode,
+});
 
 self.onmessage = (event: MessageEvent<RpcRequest>) => {
   const { id, method, params } = event.data;

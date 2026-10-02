@@ -38,5 +38,30 @@ services:
       - '127.0.0.1:1025:1025'
       - '127.0.0.1:8025:8025'
 
+  minio:
+    # S3-compatible object storage for encrypted attachments (docs/media.md §5).
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: ['server', '/data', '--console-address', ':9001']
+    environment:
+      MINIO_ROOT_USER: tessera-local
+      MINIO_ROOT_PASSWORD: tessera-local-only
+      # Browsers upload and download with presigned URLs, so the web origins need CORS.
+      MINIO_API_CORS_ALLOW_ORIGIN: http://localhost:5173,http://localhost:4173
+    ports:
+      - '127.0.0.1:9000:9000'
+      - '127.0.0.1:9001:9001'
+    volumes:
+      - minio-data:/data
+
+  minio-setup:
+    # Creates the bucket and lets the local web app upload and download directly (CORS).
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on: [minio]
+    entrypoint: >-
+      sh -c "until mc alias set local http://minio:9000 tessera-local tessera-local-only; do sleep 1; done;
+      mc mb --ignore-existing local/tessera-e2ee-media;
+      mc ilm rule add --expire-days 31 local/tessera-e2ee-media || true"
+
 volumes:
   postgres-data:
+  minio-data:

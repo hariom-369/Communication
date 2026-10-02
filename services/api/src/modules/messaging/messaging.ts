@@ -36,6 +36,14 @@ export interface MessagingDevices {
   isActiveDevice(userId: string, deviceId: string): Promise<boolean>;
 }
 
+/** Links attachments to the conversation inside the send transaction (media module). */
+export interface MessagingAttachments {
+  attach(
+    trx: Transaction<Database>,
+    input: { userId: string; conversationId: string; blobIds: readonly string[]; expiresAt: Date },
+  ): Promise<void>;
+}
+
 export interface MessagingDirectory {
   discoverableByUsername(username: string): Promise<{ id: string; username: string } | null>;
   usernames(userIds: readonly string[]): Promise<Map<string, string>>;
@@ -80,6 +88,7 @@ export class MessagingService {
   readonly #config: MessagingConfig;
   readonly #logger: Logger;
   #devices: MessagingDevices | null = null;
+  #attachments: MessagingAttachments | null = null;
 
   constructor(
     db: Kysely<Database>,
@@ -96,6 +105,10 @@ export class MessagingService {
   }
 
   /** Wired by the composition root (keys and messaging depend on each other's interfaces). */
+  useAttachments(attachments: MessagingAttachments): void {
+    this.#attachments = attachments;
+  }
+
   useDevices(devices: MessagingDevices): void {
     this.#devices = devices;
   }
@@ -220,7 +233,13 @@ export class MessagingService {
   async send(
     userId: string,
     conversationId: string,
-    input: { clientMessageId: string; senderDeviceId: string; epoch: number; ciphertext: Buffer },
+    input: {
+      clientMessageId: string;
+      senderDeviceId: string;
+      epoch: number;
+      ciphertext: Buffer;
+      attachments?: readonly string[] | undefined;
+    },
   ): Promise<{ message: MailboxMessage; duplicate: boolean }> {
     await this.#requireActiveDevice(userId, input.senderDeviceId);
     const result = await this.#db.transaction().execute(async (trx) => {
@@ -262,6 +281,15 @@ export class MessagingService {
         })
         .returningAll()
         .executeTakeFirstOrThrow();
+      if (input.attachments !== undefined && input.attachments.length > 0) {
+        if (this.#attachments === null) throw new Error('messaging: attachments not configured');
+        await this.#attachments.attach(trx, {
+          userId,
+          conversationId,
+          blobIds: input.attachments,
+          expiresAt: row.expires_at,
+        });
+      }
       await trx
         .updateTable('conversations')
         .set({ last_seq: seq, last_activity_at: now })
@@ -534,6 +562,19 @@ export class MessagingService {
       .where('user_high', '=', high)
       .executeTakeFirst();
     return row !== undefined;
+  }
+
+  /** The subset of `conversationIds` the user currently belongs to. */
+  async memberOf(userId: string, conversationIds: readonly string[]): Promise<string[]> {
+    if (conversationIds.length === 0) return [];
+    const rows = await this.#db
+      .selectFrom('conversation_members')
+      .select('conversation_id')
+      .where('user_id', '=', userId)
+      .where('left_at', 'is', null)
+      .where('conversation_id', 'in', conversationIds)
+      .execute();
+    return rows.map((row) => row.conversation_id);
   }
 
   async isMember(userId: string, conversationId: string): Promise<boolean> {

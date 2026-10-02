@@ -31,6 +31,15 @@ export interface EncryptedBackup {
   readonly mac: string;
 }
 
+/** What decrypting an attachment needs; travels inside the MLS message (crypto-core media.rs). */
+export interface MediaDigest {
+  readonly key: string;
+  readonly plaintextSha256: string;
+  readonly ciphertextSha256: string;
+  readonly plaintextSize: number;
+  readonly ciphertextSize: number;
+}
+
 export interface Pin {
   readonly key: string;
   readonly version: number;
@@ -143,6 +152,14 @@ export interface CryptoApi {
   ): string;
   completeLink(sealed: string, shortId: string, expectedAsk: string, version: number): Identity;
   observeDevices(userId: string, deviceIds: string[]): string[];
+
+  // ---- attachments (docs/media.md); these run outside the MLS call queue ----
+  /** Encrypts a file under a fresh key; the ciphertext is what gets uploaded. */
+  mediaEncrypt(file: Blob): { ciphertext: Blob; digest: MediaDigest };
+  /** Decrypts and verifies against the message's digest; nothing is returned on mismatch. */
+  mediaDecrypt(ciphertext: Blob, digest: MediaDigest, type: string): Blob;
+  mediaCached(blobId: string): Blob | null;
+  mediaCache(blobId: string, ciphertext: Blob): void;
 
   // ---- backups (docs/encrypted-backups.md) ----
   backupEnable(): { recoveryKey: string; wrap: string };

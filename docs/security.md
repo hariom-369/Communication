@@ -48,6 +48,14 @@ Web app, as implemented (Phase 4, `apps/web/vite.config.ts`): `script-src 'self'
 Trusted Types with exactly one policy, `tessera-worker`, which only produces same-origin script
 URLs for the crypto worker.
 
+Phase 6 additions: `img-src 'self' data: blob:` and `media-src 'self' blob:` (decrypted
+attachments are shown from `blob:` URLs created in the app; previews are `data:` JPEGs from inside
+the encrypted message), `connect-src` gains the object-storage origin (`TESSERA_MEDIA_ORIGIN`) for
+presigned uploads and downloads, and `Permissions-Policy: microphone=(self)` for voice messages.
+Decrypted attachments are only rendered inline for an allow-list of image/video/audio types; any
+other type (including HTML and SVG) is offered as a download with `application/octet-stream`, so a
+crafted attachment can never become a same-origin document (ADR-043).
+
 ## 4. Input validation and output encoding
 
 - All inputs validated with Zod at the edge of the API (strict objects — unknown keys
