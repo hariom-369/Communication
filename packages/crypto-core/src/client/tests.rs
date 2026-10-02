@@ -34,7 +34,7 @@ fn conversation() -> (Client, Client) {
     introduce(&mut alice, &mut bob);
     let key_package = bob.generate_key_packages(1, false).unwrap().remove(0);
     let output = alice
-        .create_group(CONVERSATION, &[key_package], &peers(&[BOB]), NOW)
+        .create_group(CONVERSATION, &[key_package], &peers(&[BOB]), None, NOW)
         .unwrap();
     assert_eq!(output.epoch, 0);
     assert_eq!(output.welcome_targets.len(), 1);
@@ -218,7 +218,7 @@ fn server_substituted_device_keys_are_rejected() {
     let forged = impostor.generate_key_packages(1, false).unwrap().remove(0);
     assert_eq!(
         alice
-            .create_group(CONVERSATION, &[forged], &peers(&[BOB]), NOW)
+            .create_group(CONVERSATION, &[forged], &peers(&[BOB]), None, NOW)
             .unwrap_err(),
         CoreError::Untrusted("certificate signature")
     );
@@ -238,6 +238,7 @@ fn key_packages_of_non_members_or_unknown_identities_are_rejected() {
             CONVERSATION,
             std::slice::from_ref(&mallory_package),
             &peers(&[BOB]),
+            None,
             NOW
         ),
         Err(CoreError::NotAllowed(_))
@@ -248,6 +249,7 @@ fn key_packages_of_non_members_or_unknown_identities_are_rejected() {
             CONVERSATION,
             &[mallory_package],
             &peers(&[BOB, MALLORY]),
+            None,
             NOW
         ),
         Err(CoreError::UnknownIdentity(_))
@@ -265,7 +267,7 @@ fn tampered_key_packages_are_rejected() {
         tampered[index] ^= 0x01;
         assert!(
             alice
-                .create_group(CONVERSATION, &[tampered], &peers(&[BOB]), NOW)
+                .create_group(CONVERSATION, &[tampered], &peers(&[BOB]), None, NOW)
                 .is_err()
         );
     }
@@ -281,7 +283,7 @@ fn welcomes_containing_untrusted_members_leave_no_state() {
         .unwrap();
     let package = bob.generate_key_packages(1, false).unwrap().remove(0);
     let output = mallory
-        .create_group(CONVERSATION, &[package], &peers(&[BOB]), NOW)
+        .create_group(CONVERSATION, &[package], &peers(&[BOB]), None, NOW)
         .unwrap();
     let welcome = output.welcome.unwrap();
     assert!(matches!(
@@ -298,7 +300,7 @@ fn welcomes_for_a_different_conversation_are_rejected() {
     introduce(&mut alice, &mut bob);
     let package = bob.generate_key_packages(1, false).unwrap().remove(0);
     let output = alice
-        .create_group(CONVERSATION, &[package], &peers(&[BOB]), NOW)
+        .create_group(CONVERSATION, &[package], &peers(&[BOB]), None, NOW)
         .unwrap();
     assert_eq!(
         bob.join(
@@ -323,6 +325,7 @@ fn a_key_package_is_used_once() {
             CONVERSATION,
             std::slice::from_ref(&package),
             &peers(&[BOB]),
+            None,
             NOW,
         )
         .unwrap();
@@ -330,7 +333,7 @@ fn a_key_package_is_used_once() {
         .unwrap();
     // A second group built from the same (replayed) one-time package cannot be joined.
     let second = alice
-        .create_group(OTHER_CONVERSATION, &[package], &peers(&[BOB]), NOW)
+        .create_group(OTHER_CONVERSATION, &[package], &peers(&[BOB]), None, NOW)
         .unwrap();
     assert!(
         bob.join(
@@ -625,7 +628,7 @@ fn a_genuine_certificate_on_someone_elses_signature_key_is_rejected() {
     let forged = forged_key_package(&server, identity, bob.certificate().unwrap());
     assert_eq!(
         alice
-            .create_group(CONVERSATION, &[forged], &peers(&[BOB]), NOW)
+            .create_group(CONVERSATION, &[forged], &peers(&[BOB]), None, NOW)
             .unwrap_err(),
         CoreError::Untrusted("certificate signature key")
     );
@@ -643,7 +646,7 @@ fn a_certificate_for_another_device_or_user_is_rejected() {
     let forged = forged_key_package(&bob, other_device, bob.certificate().unwrap());
     assert_eq!(
         alice
-            .create_group(CONVERSATION, &[forged], &peers(&[BOB]), NOW)
+            .create_group(CONVERSATION, &[forged], &peers(&[BOB]), None, NOW)
             .unwrap_err(),
         CoreError::Untrusted("certificate identity")
     );
@@ -652,7 +655,7 @@ fn a_certificate_for_another_device_or_user_is_rejected() {
     let forged = forged_key_package(&bob, as_mallory, bob.certificate().unwrap());
     assert_eq!(
         alice
-            .create_group(CONVERSATION, &[forged], &peers(&[BOB, MALLORY]), NOW)
+            .create_group(CONVERSATION, &[forged], &peers(&[BOB, MALLORY]), None, NOW)
             .unwrap_err(),
         CoreError::Untrusted("certificate identity")
     );

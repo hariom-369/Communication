@@ -67,7 +67,22 @@ export function SecurityNotices(props: {
         A security check failed in this conversation, so some messages could not be decrypted.
       </Alert>,
     );
-  if (security.peerNotReady)
+  const group = meta.kind === 'group';
+  if (group && security.unconfirmed.length > 0)
+    notices.push(
+      <div key="unconfirmed" className="conversation__notice" role="status">
+        <p>
+          {security.unconfirmed.length === 1
+            ? '1 person the server lists has'
+            : `${security.unconfirmed.length} people the server lists have`}{' '}
+          not been confirmed by an admin yet, so they cannot read messages.
+        </p>
+        <Button size="sm" variant="ghost" onClick={props.onVerify}>
+          Review
+        </Button>
+      </div>,
+    );
+  if (security.peerNotReady && !group)
     notices.push(
       <p key="peer" className="conversation__notice">
         Your contact hasn’t set up encryption yet. Messages will be sent once they do.
@@ -76,7 +91,9 @@ export function SecurityNotices(props: {
   else if (security.waitingForWelcome)
     notices.push(
       <p key="welcome" className="conversation__notice">
-        Waiting for the other person’s device to add this one to the conversation…
+        {group
+          ? 'Waiting for a group member’s device to add this one…'
+          : 'Waiting for the other person’s device to add this one to the conversation…'}
       </p>,
     );
   return notices.length === 0 ? null : <>{notices}</>;

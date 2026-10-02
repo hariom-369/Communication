@@ -135,7 +135,7 @@ export interface AuditLogTable {
 
 export interface ConversationsTable {
   id: string;
-  kind: 'direct';
+  kind: 'direct' | 'group';
   ciphersuite: number;
   epoch: ColumnType<string, number | undefined, number>;
   last_seq: ColumnType<string, number | undefined, number>;
@@ -143,15 +143,61 @@ export interface ConversationsTable {
   disappearing_seconds: ColumnType<number, number | undefined, number>;
   created_by: string;
   created_at: Timestamp;
+  members_can_add: ColumnType<boolean, boolean | undefined, boolean>;
+  announcements_only: ColumnType<boolean, boolean | undefined, boolean>;
+  deleted_at: NullableTimestamp;
 }
 
 export interface ConversationMembersTable {
   conversation_id: string;
   user_id: string;
-  role: 'owner' | 'member';
+  role: 'owner' | 'admin' | 'member';
   acked_seq: ColumnType<string, number | undefined, number>;
   joined_at: Timestamp;
   left_at: NullableTimestamp;
+  added_by: string | null;
+}
+
+export interface MlsWelcomePayloadsTable {
+  id: string;
+  conversation_id: string;
+  welcome: Buffer;
+  expires_at: Date;
+}
+
+export interface GroupInvitationsTable {
+  conversation_id: string;
+  user_id: string;
+  invited_by: string;
+  created_at: Timestamp;
+  expires_at: Date;
+}
+
+export interface GroupLinksTable {
+  id: string;
+  conversation_id: string;
+  token_digest: Buffer;
+  created_by: string;
+  created_at: Timestamp;
+  expires_at: Date;
+  max_uses: number | null;
+  uses: ColumnType<number, number | undefined, number>;
+  preview_title: string | null;
+  revoked_at: NullableTimestamp;
+}
+
+export interface GroupJoinRequestsTable {
+  conversation_id: string;
+  user_id: string;
+  link_id: string | null;
+  created_at: Timestamp;
+}
+
+export interface GroupBansTable {
+  conversation_id: string;
+  user_id: string;
+  banned_by: string;
+  created_at: Timestamp;
 }
 
 export interface DirectPairsTable {
@@ -263,7 +309,8 @@ export interface MlsWelcomesTable {
   target_user_id: string;
   target_device_id: string;
   commit_seq: ColumnType<string, number, number>;
-  welcome: Buffer;
+  welcome: Buffer | null;
+  payload_id: string | null;
   created_at: Timestamp;
   expires_at: Date;
 }
@@ -295,6 +342,11 @@ export interface Database {
   backup_wraps: BackupWrapsTable;
   media_blobs: MediaBlobsTable;
   media_links: MediaLinksTable;
+  mls_welcome_payloads: MlsWelcomePayloadsTable;
+  group_invitations: GroupInvitationsTable;
+  group_links: GroupLinksTable;
+  group_join_requests: GroupJoinRequestsTable;
+  group_bans: GroupBansTable;
 }
 
 /** Owning module of every table ('platform' = infrastructure code outside modules/). */
@@ -325,4 +377,9 @@ export const TABLE_OWNERS: Readonly<Record<keyof Database, string>> = {
   backup_wraps: 'backups',
   media_blobs: 'media',
   media_links: 'media',
+  mls_welcome_payloads: 'messaging',
+  group_invitations: 'messaging',
+  group_links: 'messaging',
+  group_join_requests: 'messaging',
+  group_bans: 'messaging',
 };

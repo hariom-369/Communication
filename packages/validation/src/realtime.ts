@@ -56,6 +56,8 @@ export const serverFrameSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('keys_changed'), userId: z.string() }),
   /** An existing device approved a device-link request of this user. */
   z.object({ type: z.literal('link_approved'), linkId: z.string() }),
+  /** Someone asked to join a group this user administers. */
+  z.object({ type: z.literal('group_requests'), conversationId: z.string() }),
   z.object({ type: z.literal('reconnect'), afterMs: z.number() }),
 ]);
 export type ServerFrame = z.infer<typeof serverFrameSchema>;
@@ -86,6 +88,8 @@ export const realtimeEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('welcome'), conversationId: z.string() }),
   z.object({ type: z.literal('keys_changed'), userId: z.string() }),
   z.object({ type: z.literal('link_approved'), linkId: z.string() }),
+  /** Someone asked to join a group this user administers. */
+  z.object({ type: z.literal('group_requests'), conversationId: z.string() }),
   /** Sessions of this user were revoked or rotated; realtime re-validates open connections. */
   z.object({ type: z.literal('sessions_changed') }),
 ]);

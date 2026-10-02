@@ -45,6 +45,13 @@ export const attachmentSchema = z.strictObject({
 });
 export type Attachment = z.infer<typeof attachmentSchema>;
 
+/** Group names and descriptions (docs/groups.md §3): end-to-end encrypted, never on the server. */
+export const MAX_GROUP_NAME = 80;
+export const MAX_GROUP_DESCRIPTION = 500;
+export const MAX_POLL_OPTIONS = 12;
+export const MAX_MENTIONS = 50;
+const userRef = z.uuid();
+
 export const contentSchema = z.object({
   v: z.literal(1),
   /** Equals the transport clientMessageId, so retries and echoes are recognisable. */
@@ -56,6 +63,8 @@ export const contentSchema = z.object({
       kind: z.literal('text'),
       text: z.string().min(1).max(MAX_TEXT_LENGTH),
       replyTo: messageRef.optional(),
+      /** Members mentioned with @ (highlighted for them). */
+      mentions: z.array(userRef).max(MAX_MENTIONS).optional(),
     }),
     z.object({
       kind: z.literal('media'),
@@ -75,6 +84,49 @@ export const contentSchema = z.object({
     }),
     z.object({ kind: z.literal('delete'), target: messageRef }),
     z.object({ kind: z.literal('read'), upToSeq: z.number().int().positive() }),
+    // ---- groups (docs/groups.md) ----
+    /**
+     * Group name and description. Honoured from admins (or anyone when members may edit info).
+     * `snapshot` re-sends the current info after adding people, so they learn the name; it only
+     * fills in info a member does not have yet.
+     */
+    z.object({
+      kind: z.literal('group_info'),
+      name: z.string().trim().min(1).max(MAX_GROUP_NAME),
+      description: z.string().max(MAX_GROUP_DESCRIPTION),
+      snapshot: z.boolean().optional(),
+    }),
+    /**
+     * Membership intent: an admin (or a member, when members may add) confirms, end to end, who
+     * should be in the group. Devices add people to the encryption group only with an intent, so
+     * the server cannot slip anyone in (docs/groups.md §4).
+     */
+    z.object({
+      kind: z.literal('group_members'),
+      add: z.array(userRef).max(256),
+      remove: z.array(userRef).max(256),
+    }),
+    z.object({ kind: z.literal('pin'), target: messageRef, pinned: z.boolean() }),
+    z.object({
+      kind: z.literal('poll'),
+      question: z.string().trim().min(1).max(300),
+      options: z.array(z.string().trim().min(1).max(100)).min(2).max(MAX_POLL_OPTIONS),
+      multiple: z.boolean(),
+    }),
+    /** Latest vote per member counts; an empty list retracts it. */
+    z.object({
+      kind: z.literal('vote'),
+      target: messageRef,
+      choices: z
+        .array(
+          z
+            .number()
+            .int()
+            .min(0)
+            .max(MAX_POLL_OPTIONS - 1),
+        )
+        .max(MAX_POLL_OPTIONS),
+    }),
   ]),
 });
 export type MessageContent = z.infer<typeof contentSchema>;

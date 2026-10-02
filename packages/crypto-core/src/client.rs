@@ -25,6 +25,7 @@ use zeroize::Zeroizing;
 
 use crate::backup;
 use crate::error::{CoreError, Result};
+use crate::group_policy::{self, CommitEffect, GroupPolicy, POLICY_EXTENSION};
 use crate::identity::{AccountKey, CertificateBody, DeviceCertificate};
 use crate::ids::{Id, format_id, parse_id};
 use crate::link;
@@ -47,7 +48,9 @@ const OUT_OF_ORDER_TOLERANCE: u32 = 200;
 const MAXIMUM_FORWARD_DISTANCE: u32 = 1000;
 const MAX_PAST_EPOCHS: usize = 2;
 /// Upper bound on any inbound MLS message; the server enforces 64 KiB, allow framing slack.
-const MAX_MESSAGE_BYTES: usize = 70 * 1024;
+/// Largest inbound MLS message. Commits and Welcomes grow with group size (a 256-member Welcome is
+/// ~120 KiB; ADR-044); application messages are bounded far lower by the delivery service.
+const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 
 const SNAPSHOT_MAGIC: &[u8; 4] = b"TSC\x01";
 const STATE_VERSION: u32 = 1;
@@ -264,7 +267,10 @@ fn capabilities() -> Capabilities {
     Capabilities::new(
         None,
         Some(&[CIPHERSUITE]),
-        Some(&[ExtensionType::Unknown(CERT_EXTENSION)]),
+        Some(&[
+            ExtensionType::Unknown(CERT_EXTENSION),
+            ExtensionType::Unknown(POLICY_EXTENSION),
+        ]),
         None,
         Some(&[CredentialType::Basic]),
     )
@@ -303,6 +309,35 @@ fn map_process_error<E>(error: ProcessMessageError<E>) -> CoreError {
         ProcessMessageError::InvalidCommit(_) => CoreError::Untrusted("commit validation"),
         _ => CoreError::Mls("process message"),
     }
+}
+
+/// Group context for a group with roles: the policy, and RequiredCapabilities so every member
+/// device (now and later) understands it — MLS refuses to add a device that does not.
+fn policy_extension(policy: &GroupPolicy) -> Result<Extensions<GroupContext>> {
+    Extensions::from_vec(vec![
+        Extension::RequiredCapabilities(RequiredCapabilitiesExtension::new(
+            &[ExtensionType::Unknown(POLICY_EXTENSION)],
+            &[],
+            &[],
+        )),
+        Extension::Unknown(POLICY_EXTENSION, UnknownExtension(policy.encode()?)),
+    ])
+    .map_err(mls("policy extension"))
+}
+
+fn read_policy(extensions: &Extensions<GroupContext>) -> Result<Option<GroupPolicy>> {
+    extensions
+        .unknown(POLICY_EXTENSION)
+        .map(|extension| GroupPolicy::decode(&extension.0))
+        .transpose()
+}
+
+/// Users with at least one device in the group.
+fn group_users(group: &MlsGroup) -> Result<BTreeSet<Id>> {
+    group
+        .members()
+        .map(|member| split_identity(&member.credential).map(|(user, _)| user))
+        .collect()
 }
 
 impl Client {
@@ -1228,11 +1263,19 @@ impl Client {
         conversation_id: &str,
         key_packages: &[Vec<u8>],
         allowed_users: &[String],
+        policy: Option<GroupPolicy>,
         now: u64,
     ) -> Result<CommitOutput> {
         let conversation = parse_id(conversation_id)?;
         if self.has_group(conversation_id)? {
             return Err(CoreError::GroupExists);
+        }
+        // A group (not a 1:1 conversation) is created by its owner, with the policy in its
+        // group context from the first epoch.
+        if let Some(policy) = &policy
+            && policy.owner != format_id(&self.user_id)
+        {
+            return Err(CoreError::NotAllowed("the creator owns the group".into()));
         }
         let allowed = self.parse_allowed(allowed_users)?;
         let mut packages = Vec::with_capacity(key_packages.len());
@@ -1242,7 +1285,11 @@ impl Client {
             packages.push(package);
             targets.push(target);
         }
-        let mut group = MlsGroup::builder()
+        let mut builder = MlsGroup::builder();
+        if let Some(policy) = &policy {
+            builder = builder.with_group_context_extensions(policy_extension(policy)?);
+        }
+        let mut group = builder
             .with_group_id(group_id(&conversation))
             .ciphersuite(CIPHERSUITE)
             .with_wire_format_policy(MIXED_PLAINTEXT_WIRE_FORMAT_POLICY)
@@ -1272,7 +1319,124 @@ impl Client {
                 epoch: 0,
             });
         }
-        self.commit(&mut group, packages, Vec::new(), targets, false)
+        self.commit(&mut group, packages, Vec::new(), targets, false, None)
+    }
+
+    /// The group's roles and settings (authenticated by MLS), or None for 1:1 conversations.
+    pub fn group_policy(&self, conversation_id: &str) -> Result<Option<GroupPolicy>> {
+        let group = self.load_group(&parse_id(conversation_id)?)?;
+        read_policy(group.extensions())
+    }
+
+    /// Commit changing the group's roles or settings; refused locally unless this device's user
+    /// is allowed to make the change (every other member checks it again).
+    pub fn update_policy(
+        &mut self,
+        conversation_id: &str,
+        policy: GroupPolicy,
+        allowed_users: &[String],
+    ) -> Result<CommitOutput> {
+        let conversation = parse_id(conversation_id)?;
+        let allowed = self.parse_allowed(allowed_users)?;
+        let mut group = self.load_group(&conversation)?;
+        let old =
+            read_policy(group.extensions())?.ok_or(CoreError::State("not a group with roles"))?;
+        let new = policy.normalised();
+        let me = format_id(&self.user_id);
+        group_policy::authorize(
+            &old,
+            &CommitEffect {
+                committer: &me,
+                new_users: BTreeSet::new(),
+                removed_users: BTreeSet::new(),
+                new_policy: Some(new.clone()),
+            },
+            |user| {
+                parse_id(user)
+                    .map(|id| allowed.contains(&id))
+                    .unwrap_or(false)
+            },
+        )?;
+        self.commit(
+            &mut group,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            false,
+            Some(new),
+        )
+    }
+
+    /// Checks a commit (ours or another member's) against the group's policy before it.
+    fn authorize_commit(
+        &self,
+        group: &MlsGroup,
+        committer: &Id,
+        added_users: &[Id],
+        removed_leaves: &[LeafNodeIndex],
+        new_extensions: Option<&Extensions<GroupContext>>,
+        allowed: &BTreeSet<Id>,
+    ) -> Result<()> {
+        let old = read_policy(group.extensions())?;
+        let new = new_extensions.map(read_policy).transpose()?;
+        let Some(old) = old else {
+            // 1:1 conversations never gain a policy.
+            return match new.flatten() {
+                Some(_) => Err(CoreError::Untrusted("policy added to a conversation")),
+                None => Ok(()),
+            };
+        };
+        let new_policy = match new {
+            None => None,
+            Some(None) => return Err(CoreError::Untrusted("group policy removed")),
+            Some(Some(policy)) => Some(policy),
+        };
+        let before = group_users(group)?;
+        let mut remaining: BTreeMap<Id, usize> = BTreeMap::new();
+        for member in group.members() {
+            let (user, _) = split_identity(&member.credential)?;
+            *remaining.entry(user).or_default() += 1;
+        }
+        for index in removed_leaves {
+            let leaf = group
+                .public_group()
+                .leaf(*index)
+                .ok_or(CoreError::Untrusted("removal of unknown leaf"))?;
+            let (user, _) = split_identity(leaf.credential())?;
+            if let Some(count) = remaining.get_mut(&user) {
+                *count = count.saturating_sub(1);
+            }
+        }
+        let new_users: BTreeSet<String> = added_users
+            .iter()
+            .filter(|user| !before.contains(*user))
+            .map(format_id)
+            .collect();
+        let removed_users: BTreeSet<String> = remaining
+            .iter()
+            .filter(|(user, count)| **count == 0 && !added_users.contains(user))
+            .map(|(user, _)| format_id(user))
+            .collect();
+        if before.len() + new_users.len() - removed_users.len().min(before.len())
+            > group_policy::MAX_GROUP_USERS
+        {
+            return Err(CoreError::NotAllowed("group is full".into()));
+        }
+        let committer = format_id(committer);
+        group_policy::authorize(
+            &old,
+            &CommitEffect {
+                committer: &committer,
+                new_users,
+                removed_users,
+                new_policy,
+            },
+            |user| {
+                parse_id(user)
+                    .map(|id| allowed.contains(&id))
+                    .unwrap_or(false)
+            },
+        )
     }
 
     fn commit(
@@ -1282,12 +1446,19 @@ impl Client {
         removals: Vec<LeafNodeIndex>,
         targets: Vec<DeviceRef>,
         force_self_update: bool,
+        policy: Option<GroupPolicy>,
     ) -> Result<CommitOutput> {
         let epoch = group.epoch().as_u64();
-        let bundle = group
+        let mut builder = group
             .commit_builder()
             .propose_adds(adds)
-            .propose_removals(removals)
+            .propose_removals(removals);
+        if let Some(policy) = &policy {
+            builder = builder
+                .propose_group_context_extensions(policy_extension(policy)?)
+                .map_err(mls("policy proposal"))?;
+        }
+        let bundle = builder
             .force_self_update(force_self_update)
             .load_psks(self.provider.storage())
             .map_err(mls("commit psks"))?
@@ -1485,9 +1656,28 @@ impl Client {
             }
             ProcessedMessageContent::StagedCommitMessage(staged) => {
                 // Every leaf the commit introduces or changes must chain to a pinned identity.
+                let mut added_users = Vec::new();
                 for add in staged.add_proposals() {
-                    self.validate_leaf(add.add_proposal().key_package().leaf_node(), &allowed)?;
+                    let (user, _) =
+                        self.validate_leaf(add.add_proposal().key_package().leaf_node(), &allowed)?;
+                    added_users.push(user);
                 }
+                // …and the committer must be allowed to make it (group roles, ADR-044).
+                let removed: Vec<LeafNodeIndex> = staged
+                    .remove_proposals()
+                    .map(|remove| remove.remove_proposal().removed())
+                    .collect();
+                let context_changed = staged
+                    .queued_proposals()
+                    .any(|p| matches!(p.proposal(), Proposal::GroupContextExtensions(_)));
+                self.authorize_commit(
+                    &group,
+                    &sender_user,
+                    &added_users,
+                    &removed,
+                    context_changed.then(|| staged.group_context().extensions()),
+                    &allowed,
+                )?;
                 for update in staged.update_proposals() {
                     self.validate_leaf(update.update_proposal().leaf_node(), &allowed)?;
                 }
@@ -1551,7 +1741,19 @@ impl Client {
         if adds.is_empty() && removals.is_empty() {
             return Err(CoreError::Malformed("empty membership change"));
         }
-        self.commit(&mut group, adds, removals, targets, true)
+        let added_users = targets
+            .iter()
+            .map(|target| parse_id(&target.user_id))
+            .collect::<Result<Vec<_>>>()?;
+        self.authorize_commit(
+            &group,
+            &self.user_id,
+            &added_users,
+            &removals,
+            None,
+            &allowed,
+        )?;
+        self.commit(&mut group, adds, removals, targets, true, None)
     }
 
     /// Whether this device should issue a self-update now (PCS schedule, crypto-design §6).
@@ -1570,7 +1772,7 @@ impl Client {
     pub fn self_update(&mut self, conversation_id: &str) -> Result<CommitOutput> {
         let conversation = parse_id(conversation_id)?;
         let mut group = self.load_group(&conversation)?;
-        self.commit(&mut group, Vec::new(), Vec::new(), Vec::new(), true)
+        self.commit(&mut group, Vec::new(), Vec::new(), Vec::new(), true, None)
     }
 }
 
@@ -1579,3 +1781,6 @@ mod tests;
 
 #[cfg(test)]
 mod multidevice_tests;
+
+#[cfg(test)]
+mod group_tests;

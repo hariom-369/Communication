@@ -244,6 +244,9 @@ export class MessagingService {
     await this.#requireActiveDevice(userId, input.senderDeviceId);
     const result = await this.#db.transaction().execute(async (trx) => {
       const conversation = await this.#lockMembership(trx, userId, conversationId);
+      // Announcements-only groups: only admins post (server mirror of the E2EE setting).
+      if (conversation.announcements_only && conversation.role === 'member')
+        throw new AppError('FORBIDDEN', { detail: 'Only admins can send messages in this group.' });
       const existing = await trx
         .selectFrom('mailbox_messages')
         .selectAll()
@@ -394,7 +397,17 @@ export class MessagingService {
         .where('user_id', '=', userId)
         .execute();
       if (input.welcome !== null && input.welcomeTargets.length > 0) {
-        const welcome = input.welcome;
+        // One stored copy, referenced by every target device.
+        const payloadId = newId();
+        await trx
+          .insertInto('mls_welcome_payloads')
+          .values({
+            id: payloadId,
+            conversation_id: conversationId,
+            welcome: input.welcome,
+            expires_at: expiresAt,
+          })
+          .execute();
         await trx
           .insertInto('mls_welcomes')
           .values(
@@ -404,7 +417,8 @@ export class MessagingService {
               target_user_id: target.userId,
               target_device_id: target.deviceId,
               commit_seq: seq,
-              welcome,
+              welcome: null,
+              payload_id: payloadId,
               created_at: now,
               expires_at: expiresAt,
             })),
@@ -428,18 +442,26 @@ export class MessagingService {
     await this.#requireActiveDevice(userId, deviceId);
     const rows = await this.#db
       .selectFrom('mls_welcomes')
-      .select(['id', 'conversation_id', 'commit_seq', 'welcome'])
-      .where('target_user_id', '=', userId)
-      .where('target_device_id', '=', deviceId)
-      .where('expires_at', '>', new Date())
-      .orderBy('created_at', 'asc')
-      .limit(100)
+      .leftJoin('mls_welcome_payloads', 'mls_welcome_payloads.id', 'mls_welcomes.payload_id')
+      .select([
+        'mls_welcomes.id',
+        'mls_welcomes.conversation_id',
+        'mls_welcomes.commit_seq',
+        'mls_welcomes.welcome',
+        'mls_welcome_payloads.welcome as payload',
+      ])
+      .where('mls_welcomes.target_user_id', '=', userId)
+      .where('mls_welcomes.target_device_id', '=', deviceId)
+      .where('mls_welcomes.expires_at', '>', new Date())
+      .orderBy('mls_welcomes.created_at', 'asc')
+      // Welcomes of large groups are big: a page at a time.
+      .limit(20)
       .execute();
     return rows.map((row) => ({
       id: row.id,
       conversationId: row.conversation_id,
       commitSeq: Number(row.commit_seq),
-      welcome: row.welcome.toString('base64'),
+      welcome: (row.welcome ?? row.payload ?? Buffer.alloc(0)).toString('base64'),
     }));
   }
 
@@ -552,7 +574,28 @@ export class MessagingService {
     return rows.map((row) => row.user_id);
   }
 
-  /** True if the two users share an active conversation ("contacts" for privacy purposes). */
+  /**
+   * True if the two users are both active members of some conversation, 1:1 or group (who may
+   * read each other's public keys and claim KeyPackages: everyone in a group must be able to
+   * verify everyone else's device certificates).
+   */
+  async sharesConversation(userA: string, userB: string): Promise<boolean> {
+    const row = await this.#db
+      .selectFrom('conversation_members as a')
+      .innerJoin('conversation_members as b', 'b.conversation_id', 'a.conversation_id')
+      .innerJoin('conversations as c', 'c.id', 'a.conversation_id')
+      .select('a.conversation_id')
+      .where('a.user_id', '=', userA)
+      .where('b.user_id', '=', userB)
+      .where('a.left_at', 'is', null)
+      .where('b.left_at', 'is', null)
+      .where('c.deleted_at', 'is', null)
+      .limit(1)
+      .executeTakeFirst();
+    return row !== undefined;
+  }
+
+  /** True if the two users have a 1:1 conversation ("contacts" for privacy purposes). */
   async areContacts(userA: string, userB: string): Promise<boolean> {
     const [low, high] = userA < userB ? [userA, userB] : [userB, userA];
     const row = await this.#db
@@ -627,6 +670,23 @@ export class MessagingService {
       .where('expires_at', '<=', new Date())
       .executeTakeFirst();
     total += Number(welcomes.numDeletedRows);
+    const payloads = await this.#db
+      .deleteFrom('mls_welcome_payloads')
+      .where((eb) =>
+        eb.or([
+          eb('expires_at', '<=', new Date()),
+          eb.not(
+            eb.exists(
+              eb
+                .selectFrom('mls_welcomes')
+                .select('mls_welcomes.id')
+                .whereRef('mls_welcomes.payload_id', '=', 'mls_welcome_payloads.id'),
+            ),
+          ),
+        ]),
+      )
+      .executeTakeFirst();
+    total += Number(payloads.numDeletedRows);
     if (total > 0) this.#logger.info('messaging.sweep', { count: total });
     return total;
   }
@@ -640,7 +700,7 @@ export class MessagingService {
       .execute();
     const members = await this.#db
       .selectFrom('conversation_members')
-      .select(['conversation_id', 'user_id', 'acked_seq'])
+      .select(['conversation_id', 'user_id', 'acked_seq', 'role'])
       .where('conversation_id', 'in', [...conversationIds])
       .where('left_at', 'is', null)
       .execute();
@@ -651,7 +711,9 @@ export class MessagingService {
       const conversation = byId.get(id);
       const own = members.filter((m) => m.conversation_id === id);
       const me = own.find((m) => m.user_id === userId);
-      if (conversation === undefined || me === undefined) continue; // not a member: invisible
+      // Not a member, or a deleted group: invisible.
+      if (conversation === undefined || me === undefined || conversation.deleted_at !== null)
+        continue;
       const peers = own.filter((m) => m.user_id !== userId);
       result.push({
         id: conversation.id,
@@ -664,9 +726,17 @@ export class MessagingService {
         members: own.map((m) => ({
           userId: m.user_id,
           username: usernames.get(m.user_id) ?? 'deleted',
+          role: m.role,
         })),
         ackedSeq: Number(me.acked_seq),
         peersAckedSeq: peers.length === 0 ? 0 : Math.min(...peers.map((m) => Number(m.acked_seq))),
+        settings:
+          conversation.kind === 'group'
+            ? {
+                membersCanAdd: conversation.members_can_add,
+                announcementsOnly: conversation.announcements_only,
+              }
+            : null,
       });
     }
     return result;
@@ -698,10 +768,13 @@ export class MessagingService {
         'conversations.last_seq',
         'conversations.epoch',
         'conversations.disappearing_seconds',
+        'conversations.announcements_only',
+        'conversation_members.role',
       ])
       .where('conversations.id', '=', conversationId)
       .where('conversation_members.user_id', '=', userId)
       .where('conversation_members.left_at', 'is', null)
+      .where('conversations.deleted_at', 'is', null)
       .forUpdate('conversations')
       .executeTakeFirst();
     if (row === undefined) throw new AppError('NOT_FOUND');

@@ -70,7 +70,7 @@ fn a_linked_trusted_device_joins_conversations_and_can_link_others() {
     let package = laptop.generate_key_packages(1, false).unwrap().remove(0);
     let bob_package = bob.generate_key_packages(1, false).unwrap().remove(0);
     let created = phone
-        .create_group(CONVERSATION, &[bob_package], &peers(&[BOB]), NOW)
+        .create_group(CONVERSATION, &[bob_package], &peers(&[BOB]), None, NOW)
         .unwrap();
     phone.merge_pending(CONVERSATION, NOW).unwrap();
     bob.join(

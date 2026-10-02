@@ -4,7 +4,7 @@ Status: NEEDS-SECURITY-REVIEW (S-01..S-06) · This document specifies **how we u
 established primitives. It specifies no new cryptographic protocol. Any change to this file
 requires review by the designated cryptography reviewer (CODEOWNERS).
 
-## 0. Implementation status (Phase 6)
+## 0. Implementation status (Phase 7a)
 
 Implemented in `packages/crypto-core` (Rust, compiled to WebAssembly for the web worker):
 
@@ -21,6 +21,7 @@ Implemented in `packages/crypto-core` (Rust, compiled to WebAssembly for the web
 | §7 Replay/dedupe | OpenMLS reuse guard (tested), server idempotency, client cursor per conversation. |
 | §8 Safety numbers | Implemented as specified (version constant `0x5453`); verified against an independent Python implementation. The UI compares the 60 digits; QR comparison arrives with camera-capable clients (the QR payload is already computed). |
 | Multi-device / backups | Device linking (typed code + HPKE), full-access vs messages-only devices, history transfer, encrypted backups with recovery key or passkey PRF — ADR-042, [multi-device.md](multi-device.md), [encrypted-backups.md](encrypted-backups.md). Fuzz target `backup`; `inbound` also covers link payloads and backup restore. |
+| Groups | Policy (roles/settings) as GroupContext extension `0xF0A2` with RequiredCapabilities; every staged commit authorised against the previous policy before merging (adds of new users, removals, policy changes); group cap 256 users (measured, ADR-044); commit/Welcome limit 1 MiB. No new primitive. |
 | §9 Payload | Versioned JSON content (ADR-039) + length padding to buckets. |
 | §10 Local storage | IndexedDB per user, AES-256-GCM under a non-extractable key, AAD binds each record to its position; MLS state, history and cursor written in one transaction; state persisted before any ciphertext leaves the worker. Downloaded attachments are cached as their (already encrypted) ciphertext, whose key lives only in the encrypted history; capped at 256 MiB, oldest first. |
 | §11 Parsing | Length limits before parsing; errors returned as values; fuzz targets for certificates, padding, snapshots, all inbound MLS bytes, backups and attachments (nightly CI). WASM panics trap; the worker reloads from the last persisted state. |

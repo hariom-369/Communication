@@ -2,7 +2,7 @@ import type { Conversation, MailboxMessage, ServerFrame } from '@tessera/validat
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError, NetworkError } from '../api/client.js';
-import type { HistoryRecord, IngestResult } from '../crypto/protocol.js';
+import type { GroupPolicy, HistoryRecord, IngestResult } from '../crypto/protocol.js';
 
 import type { MessageContent } from './content.js';
 import {
@@ -32,11 +32,12 @@ function meta(overrides: Partial<Conversation> = {}): Conversation {
     lastActivityAt: new Date(0).toISOString(),
     disappearingSeconds: 0,
     members: [
-      { userId: ME, username: 'me' },
-      { userId: PEER, username: 'peer' },
+      { userId: ME, username: 'me', role: 'member' },
+      { userId: PEER, username: 'peer', role: 'member' },
     ],
     ackedSeq: 0,
     peersAckedSeq: 0,
+    settings: null,
     ...overrides,
   };
 }
@@ -70,6 +71,7 @@ function fakeSecurity() {
   let security: ConversationSecurity = DEFAULT_SECURITY;
   let hasGroup = true;
   const listeners = new Set<() => void>();
+  const membersAdded = new Set<(conversationId: string, users: string[]) => void>();
   const port = {
     status: 'ready' as DeviceStatus,
     deviceId: `${ME}-device`,
@@ -113,7 +115,7 @@ function fakeSecurity() {
     }),
     recordOwn: vi.fn((conversationId: string, record: HistoryRecord) => {
       history.set(conversationId, [...(history.get(conversationId) ?? []), record]);
-      return Promise.resolve();
+      return Promise.resolve(record);
     }),
     history: (conversationId: string) => Promise.resolve(history.get(conversationId) ?? []),
     cursor: (conversationId: string) => Promise.resolve(cursors.get(conversationId) ?? 0),
@@ -123,6 +125,15 @@ function fakeSecurity() {
     setVerified: vi.fn(),
     acknowledgeChange: vi.fn(),
     resetIdentity: vi.fn(),
+    updatePolicy: vi.fn((_meta: Conversation, change: (policy: GroupPolicy) => GroupPolicy) => {
+      if (security.policy !== null) security = { ...security, policy: change(security.policy) };
+      return Promise.resolve(true);
+    }),
+    forgetGroup: vi.fn(() => Promise.resolve()),
+    onMembersAdded: (listener: (conversationId: string, users: string[]) => void) => {
+      membersAdded.add(listener);
+      return () => membersAdded.delete(listener);
+    },
   };
   return {
     port: port as unknown as SecurityPort,
@@ -131,6 +142,9 @@ function fakeSecurity() {
     setSecurity: (next: Partial<ConversationSecurity>) => {
       security = { ...security, ...next };
       for (const listener of listeners) listener();
+    },
+    membersAdded: (conversationId: string, users: string[]) => {
+      for (const listener of membersAdded) listener(conversationId, users);
     },
     setHasGroup: (value: boolean) => {
       hasGroup = value;
@@ -175,6 +189,17 @@ function fakeApi(server: MailboxMessage[] = []) {
     }),
     openDirect: vi.fn(),
     setDisappearing: vi.fn(),
+    createGroup: vi.fn(),
+    addMembers: vi.fn(),
+    removeMember: vi.fn().mockResolvedValue({ ok: true }),
+    banMember: vi.fn().mockResolvedValue({ ok: true }),
+    leaveGroup: vi.fn().mockResolvedValue({ ok: true }),
+    setRole: vi.fn().mockResolvedValue({ ok: true }),
+    transferOwnership: vi.fn().mockResolvedValue({ ok: true }),
+    updateGroupSettings: vi.fn().mockResolvedValue({ ok: true }),
+    deleteGroup: vi.fn().mockResolvedValue({ ok: true }),
+    approveJoinRequest: vi.fn().mockResolvedValue({ ok: true }),
+    acceptInvitation: vi.fn().mockResolvedValue({ ok: true }),
   };
 }
 
@@ -542,6 +567,202 @@ describe('MessagingStore', () => {
     store.cancelUpload(CONVERSATION, second);
     expect(view(store).timeline.byId[second]).toBeUndefined();
     expect(store.getSnapshot().uploads[second]).toBeUndefined();
+    store.stop();
+  });
+});
+
+describe('groups', () => {
+  const groupMeta = (members: [string, 'owner' | 'admin' | 'member'][]) =>
+    meta({
+      kind: 'group',
+      members: members.map(([userId, role]) => ({ userId, username: userId, role })),
+      settings: { membersCanAdd: false, announcementsOnly: false },
+    });
+  const policy = (overrides: Partial<GroupPolicy> = {}): GroupPolicy => ({
+    v: 1,
+    owner: ME,
+    admins: [],
+    membersCanAdd: false,
+    membersCanEditInfo: true,
+    announcementsOnly: false,
+    ...overrides,
+  });
+  const sentBodies = (api: ReturnType<typeof fakeApi>) =>
+    api.sendMessage.mock.calls.map(
+      (call) =>
+        (
+          JSON.parse(decode((call[1] as { ciphertext: string }).ciphertext)) as {
+            body: { kind: string };
+          }
+        ).body,
+    );
+
+  it('creates a group: the name travels encrypted, followed by the membership intent', async () => {
+    const api = fakeApi();
+    const created = groupMeta([
+      [ME, 'owner'],
+      [PEER, 'member'],
+    ]);
+    api.conversations.mockResolvedValue({ conversations: [], nextCursor: null });
+    api.sync.mockResolvedValue({ conversations: [] });
+    api.createGroup.mockResolvedValue({
+      conversationId: CONVERSATION,
+      added: [{ userId: PEER, username: 'peer' }],
+      invited: [{ userId: 'invitee', username: 'inv' }],
+      skipped: [],
+    });
+    api.conversation.mockResolvedValue(created);
+    const { store, security } = createStore(api);
+    await store.start();
+    const result = await store.createGroup(' Team ', ['peer', 'inv']);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(result).toEqual({ id: CONVERSATION, invited: ['inv'], skipped: [] });
+    expect(api.createGroup).toHaveBeenCalledWith(['peer', 'inv'], 1);
+    expect(JSON.stringify(api.createGroup.mock.calls)).not.toContain('Team');
+    expect(sentBodies(api)).toEqual([
+      { kind: 'group_info', name: 'Team', description: '' },
+      { kind: 'group_members', add: [PEER, 'invitee'], remove: [] },
+    ]);
+    // The intent being out triggers adding the people it names.
+    expect(security.mock.prepare).toHaveBeenCalled();
+    store.stop();
+  });
+
+  it('sends nothing in an announcement-only group unless this user is an admin', async () => {
+    const api = fakeApi();
+    api.conversations.mockResolvedValue({
+      conversations: [
+        groupMeta([
+          [PEER, 'owner'],
+          [ME, 'member'],
+        ]),
+      ],
+      nextCursor: null,
+    });
+    const security = fakeSecurity();
+    security.setSecurity({ policy: policy({ owner: PEER, announcementsOnly: true }) });
+    const { store } = createStore(api, security);
+    await store.start();
+    store.sendText(CONVERSATION, 'hello', null);
+    store.react(CONVERSATION, 'x', '👍');
+    store.sendPoll(CONVERSATION, 'Q?', ['a', 'b'], false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.sendMessage).not.toHaveBeenCalled();
+    security.setSecurity({
+      policy: policy({ owner: PEER, admins: [ME], announcementsOnly: true }),
+    });
+    store.sendText(CONVERSATION, 'hello', null);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.sendMessage).toHaveBeenCalledTimes(1);
+    store.stop();
+  });
+
+  it('commits role changes end to end before mirroring them to the server', async () => {
+    const api = fakeApi();
+    const group = groupMeta([
+      [ME, 'owner'],
+      [PEER, 'member'],
+    ]);
+    api.conversations.mockResolvedValue({ conversations: [group], nextCursor: null });
+    const security = fakeSecurity();
+    security.setSecurity({ policy: policy() });
+    const order: string[] = [];
+    security.mock.updatePolicy.mockImplementation((_meta, change) => {
+      order.push('commit');
+      security.setSecurity({ policy: change(policy()) });
+      return Promise.resolve(true);
+    });
+    api.setRole.mockImplementation(() => {
+      order.push('server');
+      return Promise.resolve({ ok: true });
+    });
+    const { store } = createStore(api, security);
+    await store.start();
+    await store.setRole(CONVERSATION, PEER, 'admin');
+    expect(order).toEqual(['commit', 'server']);
+    expect(api.setRole).toHaveBeenCalledWith(CONVERSATION, PEER, 'admin');
+    store.stop();
+  });
+
+  it('flags a server copy that fell behind and can finish the change', async () => {
+    const api = fakeApi();
+    const group = groupMeta([
+      [ME, 'owner'],
+      [PEER, 'admin'],
+    ]);
+    api.conversations.mockResolvedValue({ conversations: [group], nextCursor: null });
+    api.conversation.mockResolvedValue(group);
+    const security = fakeSecurity();
+    // Ownership moved end to end, but the re-authentication prompt was cancelled.
+    security.setSecurity({ policy: policy({ owner: PEER, admins: [ME] }) });
+    const { store } = createStore(api, security);
+    await store.start();
+    expect(store.serverCopyOutOfSync(CONVERSATION)).toBe(true);
+    let prompted = 0;
+    const withStepUp = <T>(action: () => Promise<T>): Promise<T | undefined> => {
+      prompted += 1;
+      return action();
+    };
+    expect(await store.syncServerCopy(CONVERSATION, withStepUp)).toBe(true);
+    expect(api.transferOwnership).toHaveBeenCalledWith(CONVERSATION, PEER);
+    expect(prompted).toBe(1);
+    store.stop();
+  });
+
+  it('shares the group name with people this device just added', async () => {
+    const api = fakeApi([
+      mailbox(1, PEER, { kind: 'group_info', name: 'Team', description: 'about' }),
+    ]);
+    const group = groupMeta([
+      [PEER, 'owner'],
+      [ME, 'admin'],
+    ]);
+    api.conversations.mockResolvedValue({ conversations: [group], nextCursor: null });
+    const security = fakeSecurity();
+    security.mock.ingest.mockImplementation((_m: Conversation, message: MailboxMessage) =>
+      Promise.resolve({
+        status: 'application',
+        record: {
+          seq: message.seq,
+          senderUserId: message.senderUserId,
+          senderDeviceId: message.senderDeviceId,
+          serverTime: message.serverTime,
+          clientMessageId: message.clientMessageId,
+          content: decode(message.ciphertext),
+          authority: { role: 'owner', editInfo: true, add: true },
+        },
+      } as IngestResult),
+    );
+    const { store } = createStore(api, security);
+    await store.start();
+    expect(view(store).timeline.group.name).toBe('Team');
+    security.membersAdded(CONVERSATION, ['newcomer']);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sentBodies(api)).toEqual([
+      { kind: 'group_info', name: 'Team', description: 'about', snapshot: true },
+    ]);
+    store.stop();
+  });
+
+  it('marks a group as left when it is no longer visible', async () => {
+    const api = fakeApi();
+    const group = groupMeta([
+      [PEER, 'owner'],
+      [ME, 'member'],
+    ]);
+    api.conversations.mockResolvedValue({ conversations: [group], nextCursor: null });
+    const { store, push, security } = createStore(api);
+    await store.start();
+    api.conversation.mockRejectedValue(
+      new ApiError({ type: 'about:blank', title: 'x', status: 404, code: 'NOT_FOUND' } as never),
+    );
+    push({ type: 'conversation', conversationId: CONVERSATION });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(view(store).removed).toBe(true);
+    expect(security.mock.forgetGroup).toHaveBeenCalledWith(CONVERSATION);
+    store.sendText(CONVERSATION, 'still here?', null);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.sendMessage).not.toHaveBeenCalled();
     store.stop();
   });
 });

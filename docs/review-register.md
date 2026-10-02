@@ -31,7 +31,7 @@ backup orchestration), `apps/web/src/lib/webauthn.ts` (PRF); `services/api/src/m
 | **S-09** | Metadata protection (sealed-sender-like delivery) | Post-GA | Research |
 | **S-10** | Message franking for verifiable E2EE abuse reports | ADR-021 | Cryptographic commitment design |
 | **S-11** | Private contact discovery (if phone numbers enabled) | ADR-031 | Enumeration/privacy |
-| **S-12** | MLS external commits for open community spaces; client-side policy enforcement | groups.md §5 | Membership authorization without an online admin |
+| **S-12** | Group policy in the MLS group context (`0xF0A2`) and client-side commit authorisation; intent-gated adds; MLS external commits for open community spaces | ADR-044, groups.md §0/§5 | Authorization rules, ghost-member resistance, owner-left takeover, membership without an online admin |
 | **S-13** | External penetration test + cryptographic audit of implementation | Public beta | Independent assurance |
 
 ## 2. Legal review (L-items) — qualified Indian counsel

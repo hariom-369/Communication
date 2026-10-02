@@ -8,6 +8,7 @@ pub mod backup;
 pub mod base32;
 pub mod client;
 pub mod error;
+pub mod group_policy;
 pub mod identity;
 pub mod ids;
 pub mod link;

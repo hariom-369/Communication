@@ -8,7 +8,10 @@ import type { ConversationView } from '../../messaging/store.js';
 import { useSession } from '../../state/session.js';
 
 import { shortTime } from './format.js';
+import { GroupInvitations } from './GroupInvitations.js';
 import { attachmentLabel } from './MessageBubble.js';
+import { NewGroupDialog } from './NewGroupDialog.js';
+import { conversationTitle } from './titles.js';
 
 const STATUS_LABEL = {
   online: 'Connected',
@@ -28,17 +31,27 @@ export function peerOf(
   );
 }
 
-function preview(conversation: ConversationView): string {
+function preview(conversation: ConversationView, myId: string): string {
   for (let i = conversation.timeline.order.length - 1; i >= 0; i--) {
     const message = conversation.timeline.byId[conversation.timeline.order[i] ?? ''];
     if (message === undefined) continue;
     if (message.deleted) return 'Message deleted';
     if (message.undecodable) return 'Message couldn’t be decrypted';
+    const who =
+      conversation.meta.kind === 'group'
+        ? message.senderId === myId
+          ? 'You: '
+          : `${conversation.meta.members.find((m) => m.userId === message.senderId)?.username ?? 'someone'}: `
+        : '';
+    if (message.poll !== null) return `${who}📊 ${message.text}`;
     if (message.attachment !== null)
-      return message.text === ''
-        ? attachmentLabel(message.attachment.category)
-        : `${attachmentLabel(message.attachment.category)} · ${message.text}`;
-    return message.text;
+      return (
+        who +
+        (message.text === ''
+          ? attachmentLabel(message.attachment.category)
+          : `${attachmentLabel(message.attachment.category)} · ${message.text}`)
+      );
+    return who + message.text;
   }
   return 'No messages yet';
 }
@@ -51,6 +64,7 @@ export function ConversationList({ activeId }: { activeId: string | undefined })
   const [username, setUsername] = useState('');
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const [groupOpen, setGroupOpen] = useState(false);
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query);
   const results = useMemo(
@@ -62,7 +76,7 @@ export function ConversationList({ activeId }: { activeId: string | undefined })
   const searching = query.trim().length >= 2;
   const nameOf = (conversationId: string) => {
     const conversation = snapshot.conversations.find((c) => c.meta.id === conversationId);
-    return conversation === undefined ? '' : peerOf(conversation, me?.id ?? '').username;
+    return conversation === undefined ? '' : conversationTitle(conversation, me?.id ?? '');
   };
 
   async function start(event: SubmitEvent) {
@@ -106,7 +120,14 @@ export function ConversationList({ activeId }: { activeId: string | undefined })
           Start
         </Button>
       </form>
+      <div className="button-row">
+        <Button size="sm" variant="ghost" onClick={() => setGroupOpen(true)}>
+          New group
+        </Button>
+      </div>
+      <NewGroupDialog open={groupOpen} onClose={() => setGroupOpen(false)} />
       {error === undefined ? null : <Alert tone="danger">{error}</Alert>}
+      {snapshot.loaded ? <GroupInvitations /> : null}
       {snapshot.error === null ? null : <Alert tone="warning">{snapshot.error}</Alert>}
       <div className="chat-list__search">
         <TextField
@@ -135,7 +156,7 @@ export function ConversationList({ activeId }: { activeId: string | undefined })
                   }}
                 >
                   <span className="chat-item__name">
-                    @{nameOf(result.conversationId)} · {shortTime(result.sentAt)}
+                    {nameOf(result.conversationId)} · {shortTime(result.sentAt)}
                   </span>
                   <span className="chat-item__preview">
                     <Highlight text={result.text} query={deferredQuery.trim()} />
@@ -155,7 +176,7 @@ export function ConversationList({ activeId }: { activeId: string | undefined })
       ) : (
         <ul className="chat-list__items">
           {snapshot.conversations.map((conversation) => {
-            const peer = peerOf(conversation, me?.id ?? '');
+            const title = conversationTitle(conversation, me?.id ?? '');
             return (
               <li key={conversation.meta.id}>
                 <NavLink
@@ -166,12 +187,14 @@ export function ConversationList({ activeId }: { activeId: string | undefined })
                   aria-current={conversation.meta.id === activeId ? 'page' : undefined}
                 >
                   <span className="avatar" aria-hidden="true">
-                    {peer.username.slice(0, 1).toUpperCase()}
+                    {(title.replace(/^@/, '').at(0) ?? '#').toUpperCase()}
                   </span>
                   <span className="chat-item__body">
-                    <span className="chat-item__name">@{peer.username}</span>
+                    <span className="chat-item__name">{title}</span>
                     <span className="chat-item__preview">
-                      {conversation.typing.length > 0 ? 'typing…' : preview(conversation)}
+                      {conversation.typing.length > 0
+                        ? 'typing…'
+                        : preview(conversation, me?.id ?? '')}
                     </span>
                   </span>
                   <span className="chat-item__meta">

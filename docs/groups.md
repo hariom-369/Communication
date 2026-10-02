@@ -1,6 +1,25 @@
 # Groups and communities
 
-Status: PROPOSED · Decisions: ADR-008, 009, 011, 012 · Crypto: [crypto-design.md](crypto-design.md)
+Status: Phase 7a IMPLEMENTED (E2EE groups) · communities §5 pending (7b) · Decisions: ADR-008,
+009, 011, 012, **044** · Crypto: [crypto-design.md](crypto-design.md) · Review: S-12
+
+## 0. What is implemented (Phase 7a)
+
+| Area | Where | Notes |
+|---|---|---|
+| Roles/settings in the MLS group context (`0xF0A2`), checked on every commit by every client | `crypto-core/src/group_policy.rs`, `client.rs` | ADR-044; permission matrix §2 below |
+| Server API: create, add, remove, ban/unban, leave, roles, ownership transfer (step-up), settings, delete (step-up), invitations, invite links, join requests | `services/api/src/modules/messaging/groups.ts`, `group-routes.ts`, migration `0007_groups.sql` | 256-member cap; privacy setting "group invitations" |
+| Intent-gated adds (no member the server makes up is ever added) | `apps/web/src/messaging/group-intents.ts`, `e2ee.ts` | §3 |
+| Encrypted name/description, pins, polls, votes, mentions, admin moderation deletes, announcement-only mode | `content.ts`, `timeline.ts`, `GroupPanel.tsx` | Rules enforced client-side from the sender's authenticated authority |
+| UI: new group, group details, invitations, `/invite/:token` page, pinned bar, polls | `apps/web/src/pages/chats/*`, `pages/InvitePage.tsx` | |
+
+**Differences from the original design below.** Group size is capped at 256, not 1,024 (measured,
+ADR-044). Members cannot create invite links or pin (admins only). Links always lead to an
+admin-approved request; there is no auto-join yet (S-12). Threads and group avatars are not
+implemented. If the owner deletes their account, ownership is not yet reassigned automatically;
+an admin can take over through the encryption policy, and the server mirror is fixed by "Finish
+saving".
+
 
 ## 1. Group encryption design (evaluated separately from 1:1)
 
@@ -36,6 +55,10 @@ violate the E2EE-held policy even if the server accepted them.
 
 ## 3. Membership flows
 
+- **Intent first (implemented)**: adding someone — at creation, by an admin, after an
+  invitation is accepted or a join request is approved — is first an encrypted
+  `group_members {add}` message from a permitted sender; only then does a permitted device
+  commit the Add. Removals send `group_members {remove}`.
 - **Add**: admin device claims KeyPackages for all of the new member's devices → Add
   commit + Welcomes. Server checks: actor is permitted; target's privacy setting
   "who can add me to groups" (everyone / contacts / nobody → invite instead); target has

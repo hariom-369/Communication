@@ -19,7 +19,7 @@ fn bob_snapshot() -> &'static [u8] {
         alice.observe_identity(BOB, &bob.ask_public_key(), 1).unwrap();
         bob.observe_identity(ALICE, &alice.ask_public_key(), 1).unwrap();
         let package = bob.generate_key_packages(1, false).unwrap().remove(0);
-        let out = alice.create_group(CONVERSATION, &[package], &[BOB.into()], 1).unwrap();
+        let out = alice.create_group(CONVERSATION, &[package], &[BOB.into()], None, 1).unwrap();
         alice.merge_pending(CONVERSATION, 1).unwrap();
         bob.join(CONVERSATION, &out.welcome.unwrap(), &[ALICE.into()], 1).unwrap();
         bob.snapshot().unwrap()

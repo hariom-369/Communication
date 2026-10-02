@@ -12,6 +12,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::client::{BackupSecret, Client, CommitOutput, Processed};
 use crate::error::CoreError;
+use crate::group_policy::GroupPolicy;
 use crate::{media, safety};
 
 fn js(error: CoreError) -> JsError {
@@ -345,16 +346,49 @@ impl CryptoClient {
         conversation_id: &str,
         key_packages: &str,
         allowed_users: &str,
+        policy: Option<String>,
         now: f64,
     ) -> Result<String, JsError> {
+        let policy = policy
+            .map(|json| {
+                serde_json::from_str::<GroupPolicy>(&json)
+                    .map(GroupPolicy::normalised)
+                    .map_err(|_| js(CoreError::Malformed("group policy")))
+            })
+            .transpose()?;
         let output = self
             .inner
             .create_group(
                 conversation_id,
                 &byte_list(key_packages)?,
                 &strings(allowed_users)?,
+                policy,
                 now as u64,
             )
+            .map_err(js)?;
+        Ok(commit_json(output))
+    }
+
+    /// The group's authenticated roles and settings as JSON, or `null` for 1:1 conversations.
+    #[wasm_bindgen(js_name = groupPolicy)]
+    pub fn group_policy(&self, conversation_id: &str) -> Result<String, JsError> {
+        let policy = self.inner.group_policy(conversation_id).map_err(js)?;
+        serde_json::to_string(&policy).map_err(|_| js(CoreError::State("encode")))
+    }
+
+    /// Commit changing roles or settings (`policy` JSON); refused unless allowed.
+    #[wasm_bindgen(js_name = updatePolicy)]
+    pub fn update_policy(
+        &mut self,
+        conversation_id: &str,
+        policy: &str,
+        allowed_users: &str,
+    ) -> Result<String, JsError> {
+        let policy: GroupPolicy =
+            serde_json::from_str(policy).map_err(|_| js(CoreError::Malformed("group policy")))?;
+        let output = self
+            .inner
+            .update_policy(conversation_id, policy, &strings(allowed_users)?)
             .map_err(js)?;
         Ok(commit_json(output))
     }

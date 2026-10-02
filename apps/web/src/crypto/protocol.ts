@@ -59,6 +59,22 @@ export interface CommitOutput {
   readonly epoch: number;
 }
 
+/**
+ * A group's roles and settings as agreed in the MLS group context (crypto-core group_policy.rs,
+ * ADR-044). This copy is authenticated end to end; the server's copy only drives its own API.
+ */
+export interface GroupPolicy {
+  readonly v: 1;
+  readonly owner: string;
+  /** Admins other than the owner, sorted. */
+  readonly admins: readonly string[];
+  readonly membersCanAdd: boolean;
+  readonly membersCanEditInfo: boolean;
+  readonly announcementsOnly: boolean;
+}
+
+export type GroupRole = 'owner' | 'admin' | 'member';
+
 /** A decrypted message as persisted in the device's encrypted history. */
 export interface HistoryRecord {
   readonly seq: number;
@@ -68,6 +84,20 @@ export interface HistoryRecord {
   readonly clientMessageId: string;
   /** Application content (JSON text), or null when it could not be decrypted. */
   readonly content: string | null;
+  /**
+   * What the sender was allowed to do under the authenticated group policy when the message was
+   * decrypted (groups only; absent for 1:1 conversations). Admin-only content such as pins and
+   * moderation deletes is honoured only when this allows it.
+   */
+  readonly authority?: SenderAuthority;
+}
+
+export interface SenderAuthority {
+  readonly role: GroupRole;
+  /** May change the group name and description. */
+  readonly editInfo: boolean;
+  /** May add people. */
+  readonly add: boolean;
 }
 
 export interface InboundMessage {
@@ -111,7 +141,16 @@ export interface CryptoApi {
   safetyNumber(userId: string): SafetyNumber;
   qrMatches(userId: string, scanned: string): boolean;
   group(conversationId: string): { exists: boolean; epoch: number; members: DeviceRef[] };
-  createGroup(conversationId: string, keyPackages: string[], allowed: string[]): CommitOutput;
+  createGroup(
+    conversationId: string,
+    keyPackages: string[],
+    allowed: string[],
+    policy: GroupPolicy | null,
+  ): CommitOutput;
+  /** The authenticated roles and settings of a group, or null (1:1, or no group yet). */
+  groupPolicy(conversationId: string): GroupPolicy | null;
+  /** Commits new roles or settings; refused unless this user may make the change. */
+  updatePolicy(conversationId: string, policy: GroupPolicy, allowed: string[]): CommitOutput;
   mergePending(conversationId: string): number;
   clearPending(conversationId: string): void;
   discardGroup(conversationId: string): void;
@@ -120,7 +159,8 @@ export interface CryptoApi {
   join(conversationId: string, welcome: string, allowed: string[], commitSeq: number): number;
   encrypt(conversationId: string, content: string): { ciphertext: string; epoch: number };
   ingest(conversationId: string, message: InboundMessage, allowed: string[]): IngestResult;
-  recordOwn(conversationId: string, record: HistoryRecord): void;
+  /** Stores our own sent message; returns it as stored (with the sender's group authority). */
+  recordOwn(conversationId: string, record: HistoryRecord): HistoryRecord;
   history(conversationId: string): HistoryRecord[];
   cursor(conversationId: string): number;
   updateMembers(

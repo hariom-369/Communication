@@ -1,19 +1,23 @@
 import { Alert, Button } from '@tessera/ui';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Link } from 'react-router';
+import { Link, useLocation } from 'react-router';
 
 import { endpoints } from '../../api/endpoints.js';
 import { errorMessage } from '../../api/client.js';
 import { useMessaging, useMessagingStore } from '../../messaging/provider.js';
+import { roleIn } from '../../messaging/e2ee.js';
 import type { ConversationView as ConversationState } from '../../messaging/store.js';
 import { useSession } from '../../state/session.js';
 
 import { Composer } from './Composer.js';
 import { peerOf } from './ConversationList.js';
 import { lastSeen } from './format.js';
+import { GroupPanel } from './GroupPanel.js';
 import { MessageBubble } from './MessageBubble.js';
+import { PollDialog } from './PollDialog.js';
 import { SafetyNumber } from './SafetyNumber.js';
 import { SecurityNotices } from './SecurityNotices.js';
+import { conversationTitle, mentionsIn } from './titles.js';
 import type { Presence } from './types.js';
 
 const TIMERS = [
@@ -33,9 +37,10 @@ function useNow(intervalMs: number): number {
   return now;
 }
 
-function usePresence(userId: string): Presence | null {
+function usePresence(userId: string | null): Presence | null {
   const [presence, setPresence] = useState<Presence | null>(null);
   useEffect(() => {
+    if (userId === null) return;
     let cancelled = false;
     const load = () => {
       endpoints.presence(userId).then(
@@ -61,7 +66,13 @@ export function ConversationView({ conversation }: { conversation: ConversationS
   const { me } = useSession();
   const myId = me?.id ?? '';
   const peer = peerOf(conversation, myId);
-  const presence = usePresence(peer.userId);
+  const isGroup = conversation.meta.kind === 'group';
+  const presence = usePresence(isGroup ? null : peer.userId);
+  const location = useLocation();
+  const [notice, setNotice] = useState<string | undefined>(
+    (location.state as { notice?: string } | null)?.notice,
+  );
+  const [pollOpen, setPollOpen] = useState(false);
   const now = useNow(30_000);
   const [context, setContext] = useState<{ kind: 'reply' | 'edit'; id: string } | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -95,6 +106,16 @@ export function ConversationView({ conversation }: { conversation: ConversationS
   const verified = conversation.security.verified.includes(peer.userId);
   const username = (userId: string) =>
     meta.members.find((m) => m.userId === userId)?.username ?? 'someone';
+  const title = conversationTitle(conversation, myId);
+  const policy = conversation.security.policy;
+  const myRole = roleIn(policy, myId);
+  const moderator = isGroup ? myRole === 'owner' || myRole === 'admin' : true;
+  const readOnly =
+    conversation.removed || (policy?.announcementsOnly === true && myRole === 'member');
+  const typingNames = conversation.typing.map((userId) => `@${username(userId)}`);
+  const pins = timeline.group.pins
+    .map((id) => timeline.byId[id])
+    .filter((message): message is NonNullable<typeof message> => message?.deleted === false);
 
   async function setTimer(seconds: 0 | 86400 | 604800 | 7776000) {
     setError(undefined);
@@ -114,17 +135,21 @@ export function ConversationView({ conversation }: { conversation: ConversationS
           </Link>
           <div className="conversation__title">
             <h2 id="conversation-title">
-              @{peer.username}
-              {verified ? <span className="verified-badge"> · Verified</span> : null}
+              {title}
+              {verified && !isGroup ? <span className="verified-badge"> · Verified</span> : null}
             </h2>
             <p className="conversation__presence" aria-live="polite">
-              {conversation.typing.includes(peer.userId)
-                ? 'typing…'
-                : presence?.online === true
-                  ? 'online'
-                  : presence?.lastSeenAt != null
-                    ? lastSeen(presence.lastSeenAt)
-                    : ''}
+              {isGroup
+                ? typingNames.length > 0
+                  ? `${typingNames.join(', ')} typing…`
+                  : `${meta.members.length} ${meta.members.length === 1 ? 'member' : 'members'}`
+                : conversation.typing.includes(peer.userId)
+                  ? 'typing…'
+                  : presence?.online === true
+                    ? 'online'
+                    : presence?.lastSeenAt != null
+                      ? lastSeen(presence.lastSeenAt)
+                      : ''}
             </p>
           </div>
           <Button
@@ -137,6 +162,25 @@ export function ConversationView({ conversation }: { conversation: ConversationS
           </Button>
         </header>
         {error === undefined ? null : <Alert tone="danger">{error}</Alert>}
+        {notice === undefined ? null : (
+          <div className="conversation__notice" role="status">
+            <p>{notice}</p>
+            <Button size="sm" variant="ghost" onClick={() => setNotice(undefined)}>
+              Dismiss
+            </Button>
+          </div>
+        )}
+        {pins.length === 0 ? null : (
+          <section className="pinned-bar" aria-label="Pinned messages">
+            {pins.slice(0, 3).map((message) => (
+              <p key={message.id} className="pinned-bar__item">
+                <span aria-hidden="true">📌 </span>
+                <span className="pinned-bar__author">{author(message.senderId)}: </span>
+                {message.text === '' ? 'Attachment' : message.text}
+              </p>
+            ))}
+          </section>
+        )}
         <SecurityNotices
           conversation={conversation}
           username={username}
@@ -150,11 +194,13 @@ export function ConversationView({ conversation }: { conversation: ConversationS
         ) : null}
         <div className="timeline">
           {timeline.order.length === 0 ? (
-            <p className="empty timeline__empty">Say hello to @{peer.username}.</p>
+            <p className="empty timeline__empty">
+              {isGroup ? 'No messages yet.' : `Say hello to @${peer.username}.`}
+            </p>
           ) : (
             <ol
               className="timeline__list"
-              aria-label={`Messages with @${peer.username}`}
+              aria-label={isGroup ? `Messages in ${title}` : `Messages with @${peer.username}`}
               aria-live="polite"
             >
               {timeline.order.map((id) => {
@@ -183,6 +229,20 @@ export function ConversationView({ conversation }: { conversation: ConversationS
                     onRetry={() => store.retry(conversationId, id)}
                     upload={uploads[id]}
                     onCancelUpload={() => store.cancelUpload(conversationId, id)}
+                    author={isGroup ? author(message.senderId) : undefined}
+                    canModerate={
+                      isGroup &&
+                      !readOnly &&
+                      (myRole === 'owner' || (myRole === 'admin' && message.authorRole !== 'owner'))
+                    }
+                    pinned={timeline.group.pins.includes(id)}
+                    onPin={
+                      moderator && !readOnly
+                        ? (pinned) => store.pin(conversationId, id, pinned)
+                        : undefined
+                    }
+                    canRespond={!readOnly}
+                    onVote={(choices) => store.vote(conversationId, id, choices)}
                   />
                 );
               })}
@@ -190,37 +250,73 @@ export function ConversationView({ conversation }: { conversation: ConversationS
           )}
           <div ref={bottom} />
         </div>
-        <Composer
-          key={context === null ? 'new' : `${context.kind}:${context.id}`}
-          context={
-            context === null || contextMessage === undefined
-              ? null
-              : {
-                  kind: context.kind,
-                  label: context.kind === 'reply' ? author(contextMessage.senderId) : 'message',
-                  text: contextMessage.text,
-                }
-          }
-          onCancelContext={() => setContext(null)}
-          onTyping={(state) => store.typing(conversationId, state)}
-          onSubmit={(text, attachments) => {
-            const replyTo = context?.kind === 'reply' ? context.id : null;
-            if (context?.kind === 'edit') store.edit(conversationId, context.id, text);
-            else if (attachments.length === 0) store.sendText(conversationId, text, replyTo);
-            else
-              attachments.forEach((attachment, index) => {
-                store.sendAttachment(
+        {readOnly ? (
+          <p className="conversation__notice composer-locked" role="status">
+            {conversation.removed
+              ? 'You are no longer a member of this group.'
+              : 'Only admins can send messages in this group.'}
+          </p>
+        ) : null}
+        {isGroup && !readOnly ? (
+          <>
+            <div className="button-row composer-extras">
+              <Button size="sm" variant="ghost" onClick={() => setPollOpen(true)}>
+                Poll
+              </Button>
+            </div>
+            <PollDialog
+              open={pollOpen}
+              onClose={() => setPollOpen(false)}
+              onCreate={(question, options, multiple) =>
+                store.sendPoll(conversationId, question, options, multiple)
+              }
+            />
+          </>
+        ) : null}
+        {readOnly ? null : (
+          <Composer
+            key={context === null ? 'new' : `${context.kind}:${context.id}`}
+            context={
+              context === null || contextMessage === undefined
+                ? null
+                : {
+                    kind: context.kind,
+                    label: context.kind === 'reply' ? author(contextMessage.senderId) : 'message',
+                    text: contextMessage.text,
+                  }
+            }
+            onCancelContext={() => setContext(null)}
+            onTyping={(state) => store.typing(conversationId, state)}
+            onSubmit={(text, attachments) => {
+              const replyTo = context?.kind === 'reply' ? context.id : null;
+              if (context?.kind === 'edit') store.edit(conversationId, context.id, text);
+              else if (attachments.length === 0)
+                store.sendText(
                   conversationId,
-                  attachment,
-                  index === 0 ? text : '',
-                  index === 0 ? replyTo : null,
+                  text,
+                  replyTo,
+                  isGroup ? mentionsIn(text, meta.members, myId) : [],
                 );
-              });
-            setContext(null);
-          }}
-        />
+              else
+                attachments.forEach((attachment, index) => {
+                  store.sendAttachment(
+                    conversationId,
+                    attachment,
+                    index === 0 ? text : '',
+                    index === 0 ? replyTo : null,
+                  );
+                });
+              setContext(null);
+            }}
+          />
+        )}
       </section>
-      {detailsOpen ? (
+      {detailsOpen && isGroup ? (
+        <aside className="conversation__details" aria-labelledby="details-heading">
+          <h2 id="details-heading">Group details</h2>
+          <GroupPanel conversation={conversation} myId={myId} />
+        </aside>
+      ) : detailsOpen ? (
         <aside className="conversation__details" aria-labelledby="details-heading">
           <h2 id="details-heading">Details</h2>
           <h3>Encryption</h3>

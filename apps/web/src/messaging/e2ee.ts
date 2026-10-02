@@ -15,6 +15,8 @@ import type { AsyncCryptoApi } from '../crypto/client.js';
 import { WorkerCryptoError } from '../crypto/client.js';
 import type {
   CommitOutput,
+  GroupPolicy,
+  GroupRole,
   HistoryRecord,
   Identity,
   IngestResult,
@@ -22,6 +24,9 @@ import type {
   SafetyNumber,
 } from '../crypto/protocol.js';
 import { defaultPasskeyName, passkeyPrf } from '../lib/webauthn.js';
+
+import { backoffDelay } from './backoff.js';
+import { intendedMembers } from './group-intents.js';
 
 /**
  * End-to-end encryption session for the signed-in user on this device (docs/e2ee.md §5).
@@ -112,6 +117,15 @@ export interface ConversationSecurity {
   readonly failed: boolean;
   /** Contacts who added a device since this device last looked (informational). */
   readonly newDevices: readonly string[];
+  /** Groups: the end-to-end authenticated roles and settings (null for 1:1 or before joining). */
+  readonly policy: GroupPolicy | null;
+  /** Groups: members the server lists who are not in the encryption group yet. */
+  readonly awaitingAdd: readonly string[];
+  /**
+   * Of those, the ones no admin has confirmed end to end (no membership intent). They are never
+   * added automatically; an admin can confirm them after checking who they are.
+   */
+  readonly unconfirmed: readonly string[];
 }
 
 export const DEFAULT_SECURITY: ConversationSecurity = {
@@ -121,7 +135,34 @@ export const DEFAULT_SECURITY: ConversationSecurity = {
   waitingForWelcome: false,
   failed: false,
   newDevices: [],
+  policy: null,
+  awaitingAdd: [],
+  unconfirmed: [],
 };
+
+/** A user's role under an authenticated group policy. */
+export function roleIn(policy: GroupPolicy | null, userId: string): GroupRole | null {
+  if (policy === null) return null;
+  if (policy.owner === userId) return 'owner';
+  return policy.admins.includes(userId) ? 'admin' : 'member';
+}
+
+/** Runs `work` over `items` with at most `limit` in flight (directory lookups for big groups). */
+async function eachLimited<T>(
+  items: readonly T[],
+  limit: number,
+  work: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const item = items[next] as T;
+      next += 1;
+      await work(item);
+    }
+  });
+  await Promise.all(runners);
+}
 
 /** Sending is not possible right now for a reason the user can see (and possibly resolve). */
 export class SecurityBlocked extends Error {
@@ -138,6 +179,16 @@ const KEYS_TTL_MS = 60_000;
 const LINK_POLL_MS = 2000;
 const BACKUP_EVERY_MS = 24 * 60 * 60_000;
 const BACKUP_CHECK_MS = 60 * 60_000;
+const DIRECTORY_CONCURRENCY = 8;
+const COMMIT_RETRIES = 5;
+
+/** Who is in a conversation, as a comparable string. */
+function membership(meta: Conversation): string {
+  return meta.members
+    .map((member) => `${member.userId}:${member.role}`)
+    .sort()
+    .join(',');
+}
 
 /** base64 → base64url without padding (URL path segment). */
 function toBase64Url(value: string): string {
@@ -172,6 +223,14 @@ export class E2eeSession {
   readonly #conversations = new Map<string, ConversationSecurity>();
   #welcomes: Promise<string[]> | null = null;
   readonly #preparing = new Map<string, Promise<void>>();
+  /** Newest conversation metadata seen per conversation, and queued re-runs of `prepare`. */
+  readonly #latest = new Map<string, Conversation>();
+  readonly #again = new Map<string, Promise<void>>();
+  /** Commits that lost an epoch race are retried (after catching up) with backoff. */
+  readonly #retries = new Map<string, { attempts: number; timer: ReturnType<typeof setTimeout> }>();
+  /** Membership intents per group, from decrypted history (invalidated by new messages). */
+  readonly #intents = new Map<string, Set<string>>();
+  readonly #membersAdded = new Set<(conversationId: string, users: string[]) => void>();
 
   #link: (LinkState & { linkId: string; shortId: string; label: string }) | null = null;
   #linkTimer: ReturnType<typeof setTimeout> | null = null;
@@ -202,6 +261,8 @@ export class E2eeSession {
     this.#link = null;
     if (this.#backupTimer !== null) clearInterval(this.#backupTimer);
     this.#backupTimer = null;
+    for (const retry of this.#retries.values()) clearTimeout(retry.timer);
+    this.#retries.clear();
     this.#connection?.close();
     this.#connection = null;
     this.#identity = null;
@@ -718,11 +779,11 @@ export class E2eeSession {
     const verified: string[] = [];
     const newDevices = new Set(this.security(conversationId).newDevices);
     let peerNotReady = false;
-    for (const peer of peers) {
+    await eachLimited(peers, DIRECTORY_CONCURRENCY, async (peer) => {
       const keys = await this.#userKeys(peer, force);
       if (keys === null) {
         peerNotReady = true;
-        continue;
+        return;
       }
       await this.#crypto.observeIdentity(peer, keys.askPublicKey, keys.askVersion);
       const pin = await this.#crypto.pin(peer);
@@ -737,7 +798,7 @@ export class E2eeSession {
           .catch(() => []);
         if (added.length > 0) newDevices.add(peer);
       }
-    }
+    });
     this.#update(conversationId, {
       keyChanged,
       verified,
@@ -793,8 +854,24 @@ export class E2eeSession {
    * created, and group membership matching the directory. Concurrent calls share one run.
    */
   prepare(meta: Conversation, force = false): Promise<void> {
+    const previous = this.#latest.get(meta.id);
+    this.#latest.set(meta.id, meta);
     const running = this.#preparing.get(meta.id);
-    if (running !== undefined) return running;
+    if (running !== undefined) {
+      if (previous === undefined || membership(previous) === membership(meta)) return running;
+      // The membership changed while a run was in progress: run once more with the newest list.
+      let again = this.#again.get(meta.id);
+      if (again === undefined) {
+        again = running
+          .catch(() => undefined)
+          .then(() => {
+            this.#again.delete(meta.id);
+            return this.prepare(this.#latest.get(meta.id) ?? meta, force);
+          });
+        this.#again.set(meta.id, again);
+      }
+      return again;
+    }
     const run = this.#prepare(meta, force).finally(() => {
       this.#preparing.delete(meta.id);
     });
@@ -812,15 +889,25 @@ export class E2eeSession {
       group = await this.#crypto.group(meta.id);
     }
     if (!group.exists) {
-      await this.#createGroup(meta, peers);
+      if (meta.kind === 'group') await this.#createGroupAsOwner(meta, peers);
+      else await this.#createGroup(meta, peers);
       group = await this.#crypto.group(meta.id);
       if (!group.exists) return;
     }
     this.#update(meta.id, { waitingForWelcome: false });
+    await this.#refreshPolicy(meta.id);
     await this.#syncMembership(meta, peers, group.members);
     if (await this.#crypto.needsUpdate(meta.id)) {
       await this.#publish(meta.id, await this.#crypto.selfUpdate(meta.id));
     }
+  }
+
+  async #refreshPolicy(conversationId: string): Promise<GroupPolicy | null> {
+    const policy = await this.#crypto.groupPolicy(conversationId);
+    const current = this.security(conversationId).policy;
+    if (JSON.stringify(current) !== JSON.stringify(policy))
+      this.#update(conversationId, { policy });
+    return policy;
   }
 
   async #createGroup(meta: Conversation, peers: string[]): Promise<void> {
@@ -840,57 +927,168 @@ export class E2eeSession {
       this.#update(meta.id, { peerNotReady: true });
       return;
     }
-    const output = await this.#crypto.createGroup(meta.id, keyPackages, peers);
-    const accepted = await this.#publish(meta.id, output);
+    const output = await this.#crypto.createGroup(meta.id, keyPackages, peers, null);
+    await this.#confirmCreated(meta.id, output);
+  }
+
+  /**
+   * Groups are created by their owner, with the authenticated policy from the first epoch and
+   * only the owner's own devices. Everyone else is added afterwards through membership intents
+   * (docs/groups.md §4), exactly like people added later — so a member the server invents at
+   * creation time is never added either.
+   */
+  async #createGroupAsOwner(meta: Conversation, peers: string[]): Promise<void> {
+    const owner = meta.members.find((member) => member.role === 'owner')?.userId;
+    const current = await this.#api.conversation(meta.id);
+    if (owner !== this.#me || current.epoch > 0) {
+      this.#update(meta.id, { waitingForWelcome: true });
+      return;
+    }
+    const mine = await this.#userKeys(this.#me);
+    const others = (mine?.devices ?? []).filter((device) => device.deviceId !== this.deviceId);
+    const keyPackages =
+      others.length === 0
+        ? []
+        : (await this.#api.claimKeyPackages(this.#me)).keyPackages
+            .filter((entry) => entry.deviceId !== this.deviceId)
+            .map((entry) => entry.keyPackage);
+    const policy: GroupPolicy = {
+      v: 1,
+      owner: this.#me,
+      admins: [],
+      membersCanAdd: meta.settings?.membersCanAdd ?? false,
+      membersCanEditInfo: true,
+      announcementsOnly: meta.settings?.announcementsOnly ?? false,
+    };
+    let output = await this.#crypto.createGroup(meta.id, keyPackages, [...peers, this.#me], policy);
+    // Alone in the group: an empty commit (self-update) still has to claim the first epoch.
+    if (output.commit === '') output = await this.#crypto.selfUpdate(meta.id);
+    await this.#confirmCreated(meta.id, output);
+  }
+
+  async #confirmCreated(conversationId: string, output: CommitOutput): Promise<void> {
+    const accepted = await this.#publish(conversationId, output);
     if (!accepted) {
       // Another member's device created the group first: use theirs. (A Welcome may already
       // have replaced our unconfirmed group; only discard it if it is still ours.)
-      await this.#crypto.abandonUnconfirmed(meta.id);
+      await this.#crypto.abandonUnconfirmed(conversationId);
       await this.processWelcomes();
-      if (!(await this.#crypto.group(meta.id)).exists)
-        this.#update(meta.id, { waitingForWelcome: true });
+      if (!(await this.#crypto.group(conversationId)).exists)
+        this.#update(conversationId, { waitingForWelcome: true });
     }
   }
 
-  /** Adds devices the directory lists but the group lacks, and removes revoked ones. */
+  /** Users confirmed end to end for a group (cached until a new message arrives). */
+  async #intended(conversationId: string): Promise<Set<string>> {
+    let intended = this.#intents.get(conversationId);
+    if (intended === undefined) {
+      intended = intendedMembers(await this.#crypto.history(conversationId), Date.now());
+      this.#intents.set(conversationId, intended);
+    }
+    return intended;
+  }
+
+  /**
+   * Adds devices the directory lists but the group lacks, and removes revoked ones. In groups
+   * also: removes everyone the server no longer lists, and adds new people only when this user
+   * may add them and a membership intent confirms them.
+   */
   async #syncMembership(
     meta: Conversation,
     peers: string[],
     members: readonly { userId: string; deviceId: string }[],
   ): Promise<void> {
+    const isGroup = meta.kind === 'group';
+    const inGroup = new Set(members.map((member) => member.userId));
+    const listed = new Set([...peers, this.#me]);
+    let candidates = peers;
+    if (isGroup) {
+      const newcomers = peers.filter((peer) => !inGroup.has(peer));
+      const policy = this.security(meta.id).policy;
+      const mayAdd =
+        policy !== null && (policy.membersCanAdd || roleIn(policy, this.#me) !== 'member');
+      const intended = newcomers.length === 0 ? new Set<string>() : await this.#intended(meta.id);
+      const unconfirmed = newcomers.filter((peer) => !intended.has(peer));
+      this.#update(meta.id, { awaitingAdd: newcomers, unconfirmed });
+      candidates = peers.filter((peer) => inGroup.has(peer) || (mayAdd && intended.has(peer)));
+    }
     const mine = await this.#userKeys(this.#me);
     const desired = new Map<string, Set<string>>();
     if (mine !== null)
       desired.set(this.#me, new Set(mine.devices.map((device) => device.deviceId)));
     const changed = this.security(meta.id).keyChanged;
-    for (const peer of peers) {
+    await eachLimited(candidates, DIRECTORY_CONCURRENCY, async (peer) => {
       // Devices of a contact whose identity changed are not added until the user accepts it.
-      if (changed.includes(peer)) continue;
+      if (changed.includes(peer)) return;
       const keys = await this.#userKeys(peer);
       if (keys !== null) desired.set(peer, new Set(keys.devices.map((device) => device.deviceId)));
-    }
+    });
     const present = new Set(members.map((member) => `${member.userId}/${member.deviceId}`));
     const remove: [string, string][] = members
       .filter((member) => {
+        // People who left or were removed (groups): all their devices go.
+        if (isGroup && !listed.has(member.userId)) return true;
         const devices = desired.get(member.userId);
         return devices !== undefined && !devices.has(member.deviceId);
       })
       .filter((member) => member.deviceId !== this.deviceId)
       .map((member) => [member.userId, member.deviceId]);
     const keyPackages: string[] = [];
-    for (const [userId, devices] of desired) {
+    const added = new Set<string>();
+    await eachLimited([...desired], DIRECTORY_CONCURRENCY, async ([userId, devices]) => {
       const missing = [...devices].filter((deviceId) => !present.has(`${userId}/${deviceId}`));
-      if (missing.length === 0) continue;
+      if (missing.length === 0) return;
       const claimed = await this.#api.claimKeyPackages(userId);
-      keyPackages.push(
-        ...claimed.keyPackages
-          .filter((entry) => missing.includes(entry.deviceId))
-          .map((entry) => entry.keyPackage),
-      );
-    }
+      const packages = claimed.keyPackages.filter((entry) => missing.includes(entry.deviceId));
+      keyPackages.push(...packages.map((entry) => entry.keyPackage));
+      if (packages.length > 0 && !inGroup.has(userId)) added.add(userId);
+    });
     if (keyPackages.length === 0 && remove.length === 0) return;
     const output = await this.#crypto.updateMembers(meta.id, keyPackages, remove, peers);
-    await this.#publish(meta.id, output);
+    if (await this.#publish(meta.id, output)) {
+      if (added.size > 0) {
+        const left = this.security(meta.id).awaitingAdd.filter((user) => !added.has(user));
+        this.#update(meta.id, {
+          awaitingAdd: left,
+          unconfirmed: this.security(meta.id).unconfirmed.filter((user) => left.includes(user)),
+        });
+        for (const listener of this.#membersAdded) listener(meta.id, [...added]);
+      }
+    }
+  }
+
+  /** Called after this device added people to a group (to share the group's info with them). */
+  onMembersAdded(listener: (conversationId: string, users: string[]) => void): () => void {
+    this.#membersAdded.add(listener);
+    return () => this.#membersAdded.delete(listener);
+  }
+
+  /**
+   * Commits a change to the group's roles or settings. Returns false if another commit won the
+   * epoch (catch up, then try again). Throws if this user may not make the change.
+   */
+  async updatePolicy(
+    meta: Conversation,
+    change: (policy: GroupPolicy) => GroupPolicy,
+  ): Promise<boolean> {
+    await this.prepare(meta);
+    const policy = await this.#refreshPolicy(meta.id);
+    if (policy === null) throw new SecurityBlocked('waiting');
+    const output = await this.#crypto.updatePolicy(meta.id, change(policy), [
+      ...this.#peers(meta),
+      this.#me,
+    ]);
+    const accepted = await this.#publish(meta.id, output);
+    if (accepted) await this.#refreshPolicy(meta.id);
+    return accepted;
+  }
+
+  /** This user left (or deleted) a group: drop the group state; decrypted history stays. */
+  async forgetGroup(conversationId: string): Promise<void> {
+    await this.#crypto.discardGroup(conversationId).catch(() => undefined);
+    this.#intents.delete(conversationId);
+    this.#conversations.delete(conversationId);
+    this.#emit();
   }
 
   /**
@@ -915,10 +1113,38 @@ export class E2eeSession {
         throw error;
       }
       await this.#crypto.clearPending(conversationId).catch(() => undefined);
+      this.#retryLater(conversationId);
       return false;
     }
     await this.#crypto.mergePending(conversationId);
     return true;
+  }
+
+  /**
+   * Another commit won the epoch: by the time this fires the winning commit has normally been
+   * processed, so preparing again re-evaluates membership against the new epoch.
+   */
+  #retryLater(conversationId: string): void {
+    const previous = this.#retries.get(conversationId);
+    const attempts = (previous?.attempts ?? 0) + 1;
+    if (previous !== undefined) clearTimeout(previous.timer);
+    if (attempts > COMMIT_RETRIES) {
+      this.#retries.delete(conversationId);
+      return;
+    }
+    const delay = 500 + backoffDelay(attempts, { baseMs: 500, capMs: 16_000 });
+    const timer = setTimeout(() => {
+      const meta = this.#latest.get(conversationId);
+      if (meta === undefined || this.#status !== 'ready') return;
+      void this.prepare(meta)
+        .then(() => {
+          // Still pending if this run lost again (#retryLater replaced the entry).
+          if (this.#retries.get(conversationId)?.timer === timer)
+            this.#retries.delete(conversationId);
+        })
+        .catch(() => undefined);
+    }, delay);
+    this.#retries.set(conversationId, { attempts, timer });
   }
 
   /** Joins every conversation a Welcome is waiting for. Returns the joined conversation ids. */
@@ -941,6 +1167,7 @@ export class E2eeSession {
         await this.#observe(meta.id, peers);
         await this.#crypto.join(meta.id, welcome.welcome, peers, welcome.commitSeq);
         this.#update(meta.id, { waitingForWelcome: false, failed: false });
+        await this.#refreshPolicy(meta.id);
         joined.push(meta.id);
       } catch (error) {
         if (!(error instanceof WorkerCryptoError && error.code === 'GROUP_EXISTS')) {
@@ -992,10 +1219,13 @@ export class E2eeSession {
       this.#update(meta.id, { failed: true });
     if (result.status === 'commit' && result.removedSelf)
       this.#update(meta.id, { waitingForWelcome: true });
+    if (result.status === 'commit' && meta.kind === 'group') await this.#refreshPolicy(meta.id);
+    if (result.status === 'application') this.#intents.delete(meta.id);
     return result;
   }
 
-  recordOwn(conversationId: string, record: HistoryRecord): Promise<void> {
+  recordOwn(conversationId: string, record: HistoryRecord): Promise<HistoryRecord> {
+    this.#intents.delete(conversationId);
     return this.#crypto.recordOwn(conversationId, record);
   }
 

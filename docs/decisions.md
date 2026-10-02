@@ -689,3 +689,66 @@ through audited libraries; the server can relay and store but not read or forge.
 relay but cannot read, alter undetected or enumerate attachments.
 
 **Status.** PROPOSED — implemented; NEEDS-SECURITY-REVIEW S-05.
+
+## ADR-044 — End-to-end encrypted groups: roles in the MLS group context, intent-gated adds (Phase 7a)
+
+**Context.** Groups need roles (owner, admins, members) and settings that the server can enforce
+on its own API, but a malicious or compromised server must not be able to make itself an admin,
+silently add an eavesdropper, or rewrite who may post. Group names, descriptions, pins and polls
+must not reach the server at all.
+
+**Decision.**
+- **Authoritative policy in MLS.** Roles and settings (`owner`, `admins`, `membersCanAdd`,
+  `membersCanEditInfo`, `announcementsOnly`) are a canonical JSON `GroupPolicy` in a private-use
+  **GroupContext extension `0xF0A2`**, plus a RequiredCapabilities extension so every member's
+  leaf must support it. The group context is agreed by all members (it enters the key schedule)
+  and reaches new members inside the signed GroupInfo of their Welcome. Only the owner creates a
+  group with a policy (`crypto-core group_policy.rs`).
+- **Every client authorises every commit** before merging it, against the policy in force before
+  the commit: adding a *user* not yet in the group needs an admin (or `membersCanAdd`); removing a
+  user needs an admin, never the owner, and only the owner removes admins — except that anyone
+  may complete the removal of a user the delivery service no longer lists (left/removed); policy
+  changes need an admin; role changes need the owner, or (only when the owner is no longer
+  listed) an admin promoting an existing admin to owner and nothing else. Adding or removing
+  *devices* of users already in the group is always allowed (governed by device certificates).
+  Unauthorised commits are rejected exactly like invalid ones.
+- **Server mirror.** The server keeps roles and the two server-relevant settings in
+  `conversation_members.role` and `conversations.members_can_add/announcements_only` to enforce
+  its API (who may add/remove/ban/link/approve, refusing members' sends in announcement-only
+  groups). Clients always commit the policy first, then mirror it; if a mirror call fails or a
+  re-authentication prompt is cancelled, the details panel offers "Finish saving". Clients act
+  only on the MLS copy.
+- **Intent-gated adds.** A malicious server can list anyone as a member. Devices therefore add a
+  *new user* only when an authenticated `group_members {add}` message from someone allowed to add
+  people (by the sender authority recorded at decryption time) names them, within 30 days, and no
+  later `remove` intent cancels it. Creation follows the same path: the owner creates the group
+  with only their own devices and every other member is added through an intent. People the
+  server lists without an intent are shown to admins as "not confirmed" with an explicit
+  "Confirm and add" after checking who they are.
+- **Group content is E2EE.** Name/description (`group_info`), pins, polls, votes and mentions are
+  ordinary encrypted content kinds. The timeline honours them only from senders whose recorded
+  authority allows it (pins and moderation deletes: admins; name: admins or anyone if
+  `membersCanEditInfo`). After adding people, the committing device sends a `group_info`
+  *snapshot*, accepted only by members who have no name yet.
+- **Invites.** Users whose privacy setting is `contacts` (default) or `nobody` receive an
+  invitation instead of being added. Invite links (128-bit token, SHA-256 digest stored, expiry,
+  max uses, revocable) always create a **join request** that an admin approves; the admin's device
+  then sends the intent and adds the person. An optional preview title is the only group metadata
+  the server can read. Auto-join (MLS external commits) is deferred to S-12.
+- **Size and limits.** Group cap **256 users** (`MAX_GROUP_USERS`, server `MAX_GROUP_MEMBERS`).
+  Measured natively (release, join + validation of a Welcome): 128 → 0.65 s, 256 → 1.27 s
+  (Welcome 117 KiB), 512 → 2.7 s, 1,024 → 5.6 s (Welcome 470 KiB; creating it 9 s). The
+  planned 1,024-member E2EE group is **not met** in the browser budget; the cap is raised only
+  after profiling (ratchet-tree validation dominates). Commit and Welcome limits are 1 MiB;
+  Welcomes are stored once per commit (`mls_welcome_payloads`), not once per target device.
+- **Key directory.** Users may read keys and claim KeyPackages of anyone they share an active
+  conversation with, 1:1 or group (previously 1:1 only), so members can verify every device.
+
+**Consequences.** A malicious server can still delay or withhold members, drop or reorder
+traffic, unlist someone (which lets any member remove them — equivalent to denying delivery),
+and see group membership and roles. It cannot add a reader, change roles or settings, or read
+names, pins or polls. A member who could legitimately add people can add anyone; intents within
+the 30-day window could be replayed by the server to re-list someone an admin removed only via
+the server (the client sends a `remove` intent on every UI removal to close this).
+
+**Status.** PROPOSED — implemented; NEEDS-SECURITY-REVIEW S-12.

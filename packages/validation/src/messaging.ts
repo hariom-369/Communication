@@ -43,14 +43,18 @@ export const disappearingSecondsSchema = z.union([
   z.literal(90 * 24 * 3600),
 ]);
 
+export const memberRoleSchema = z.enum(['owner', 'admin', 'member']);
+
 export const conversationMemberSchema = z.object({
   userId: z.string(),
   username: z.string(),
+  /** Server mirror of the role; clients act on the end-to-end authenticated group policy. */
+  role: memberRoleSchema,
 });
 
 export const conversationSchema = z.object({
   id: z.string(),
-  kind: z.enum(['direct']),
+  kind: z.enum(['direct', 'group']),
   ciphersuite: ciphersuiteSchema,
   epoch: z.number().int().nonnegative(),
   lastSeq: z.number().int().nonnegative(),
@@ -61,6 +65,8 @@ export const conversationSchema = z.object({
   ackedSeq: z.number().int().nonnegative(),
   /** Highest sequence number the *other* members have acknowledged (delivery state). */
   peersAckedSeq: z.number().int().nonnegative(),
+  /** Groups only (server mirror of the end-to-end policy). */
+  settings: z.object({ membersCanAdd: z.boolean(), announcementsOnly: z.boolean() }).nullable(),
 });
 export type Conversation = z.infer<typeof conversationSchema>;
 
@@ -94,8 +100,10 @@ export const sendMessageSchema = z.strictObject({
   attachments: z.array(idSchema).max(10).optional(),
 });
 
-/** Largest Welcome accepted (it carries the ratchet tree; bounded by the group-size cap). */
-export const MAX_WELCOME_BYTES = 64 * 1024;
+/** Largest Welcome or commit accepted: they grow with the group (a 256-member Welcome is ~120
+ * KiB; ADR-044). */
+export const MAX_WELCOME_BYTES = 1024 * 1024;
+export const MAX_COMMIT_BYTES = 1024 * 1024;
 
 /**
  * MLS commit for the delivery service (ADR-009): accepted only if `epoch` equals the
@@ -106,10 +114,10 @@ export const commitSchema = z.strictObject({
   senderDeviceId: idSchema,
   epoch: z.number().int().nonnegative(),
   /** MLS PublicMessage containing the Commit. */
-  commit: ciphertextSchema,
+  commit: base64Bytes(MAX_COMMIT_BYTES),
   /** Welcome for the devices this commit adds, delivered to each of `welcomeTargets`. */
   welcome: base64Bytes(MAX_WELCOME_BYTES).nullable(),
-  welcomeTargets: z.array(z.strictObject({ userId: idSchema, deviceId: idSchema })).max(100),
+  welcomeTargets: z.array(z.strictObject({ userId: idSchema, deviceId: idSchema })).max(2048),
 });
 
 export const commitResponseSchema = z.object({

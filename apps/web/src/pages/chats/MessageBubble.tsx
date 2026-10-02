@@ -6,6 +6,7 @@ import {
   DELETE_WINDOW_MS,
   EDIT_WINDOW_MS,
   type DeliveryState,
+  type Poll,
   type TimelineMessage,
 } from '../../messaging/timeline.js';
 
@@ -58,6 +59,71 @@ export interface MessageBubbleProps {
   /** Own attachment still uploading. */
   upload?: UploadProgress | undefined;
   onCancelUpload?: () => void;
+  // ---- groups ----
+  /** Sender name shown above others' messages in groups. */
+  author?: string | undefined;
+  /** This user may delete the message as a group admin. */
+  canModerate?: boolean;
+  /** Pinning is offered when given (admins in groups, anyone in 1:1 chats). */
+  pinned?: boolean;
+  onPin?: ((pinned: boolean) => void) | undefined;
+  /** False in announcement-only groups for members (no replies or reactions). */
+  canRespond?: boolean;
+  onVote?: (choices: number[]) => void;
+}
+
+function PollCard({
+  poll,
+  myId,
+  onVote,
+  disabled,
+}: {
+  poll: Poll;
+  myId: string;
+  onVote: ((choices: number[]) => void) | undefined;
+  disabled: boolean;
+}): ReactNode {
+  const mine = poll.votes[myId] ?? [];
+  const totals = poll.options.map(
+    (_, index) => Object.values(poll.votes).filter((choices) => choices.includes(index)).length,
+  );
+  const voters = Object.keys(poll.votes).length;
+  const toggle = (index: number) => {
+    if (onVote === undefined) return;
+    if (poll.multiple)
+      onVote(mine.includes(index) ? mine.filter((c) => c !== index) : [...mine, index]);
+    else onVote(mine.includes(index) ? [] : [index]);
+  };
+  return (
+    <fieldset className="poll">
+      <legend className="poll__question">{poll.question}</legend>
+      <p className="t-field__hint">
+        {poll.multiple ? 'Choose any' : 'Choose one'} · {voters} {voters === 1 ? 'vote' : 'votes'}
+      </p>
+      <ul className="poll__options">
+        {poll.options.map((option, index) => {
+          const share = voters === 0 ? 0 : Math.round(((totals[index] ?? 0) / voters) * 100);
+          return (
+            <li key={index}>
+              <button
+                type="button"
+                className="poll__option"
+                aria-pressed={mine.includes(index)}
+                disabled={disabled || onVote === undefined}
+                onClick={() => toggle(index)}
+              >
+                <span className="poll__label">{option}</span>
+                <span className="poll__count">
+                  {totals[index] ?? 0} · {share}%
+                </span>
+                <span className="poll__bar" style={{ inlineSize: `${share}%` }} aria-hidden />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </fieldset>
+  );
 }
 
 /** One message. Text is rendered as React text nodes — never as HTML (docs/security.md §4). */
@@ -67,7 +133,11 @@ export function MessageBubble(props: MessageBubbleProps): ReactNode {
   const state = mine ? deliveryState(message, props.peers, props.showRead) : null;
   const age = message.serverTime === null ? 0 : props.now - message.serverTime;
   const canEdit = mine && !message.deleted && message.seq !== null && age < EDIT_WINDOW_MS;
-  const canDelete = mine && !message.deleted && message.seq !== null && age < DELETE_WINDOW_MS;
+  const canDelete =
+    !message.deleted &&
+    message.seq !== null &&
+    ((mine && age < DELETE_WINDOW_MS) || (!mine && props.canModerate === true));
+  const canRespond = props.canRespond !== false;
   const accepted = message.seq !== null && !message.deleted && !message.undecodable;
   const myReaction = props.message.reactions[props.myId] ?? null;
   const reactionCounts = Object.values(message.reactions).reduce<Record<string, number>>(
@@ -79,8 +149,21 @@ export function MessageBubble(props: MessageBubbleProps): ReactNode {
   );
 
   return (
-    <li className={mine ? 'message message--mine' : 'message'} data-status={state ?? undefined}>
+    <li
+      className={[
+        'message',
+        mine ? 'message--mine' : '',
+        message.mentions.includes(props.myId) ? 'message--mention' : '',
+      ]
+        .filter((c) => c !== '')
+        .join(' ')}
+      data-status={state ?? undefined}
+    >
       <div className="bubble">
+        {props.author === undefined || mine ? null : (
+          <p className="bubble__author">{props.author}</p>
+        )}
+        {props.pinned === true ? <p className="bubble__pinned">📌 Pinned</p> : null}
         {props.quoted === undefined ? null : (
           <p className="bubble__quote">
             <span className="bubble__quote-author">{props.quotedAuthor}</span>
@@ -111,7 +194,16 @@ export function MessageBubble(props: MessageBubbleProps): ReactNode {
             ) : message.attachment !== null ? (
               <AttachmentView attachment={message.attachment} />
             ) : null}
-            {message.text === '' ? null : <p className="bubble__text">{message.text}</p>}
+            {message.poll !== null ? (
+              <PollCard
+                poll={message.poll}
+                myId={props.myId}
+                onVote={props.onVote}
+                disabled={!canRespond || message.seq === null}
+              />
+            ) : message.text === '' ? null : (
+              <p className="bubble__text">{message.text}</p>
+            )}
           </>
         )}
         <p className="bubble__meta">
@@ -151,7 +243,7 @@ export function MessageBubble(props: MessageBubbleProps): ReactNode {
           </button>
           {actionsOpen ? (
             <div className="action-bar" role="group" aria-label="Message actions">
-              {REACTIONS.map((emoji) => (
+              {(canRespond ? REACTIONS : []).map((emoji) => (
                 <button
                   key={emoji}
                   type="button"
@@ -166,16 +258,30 @@ export function MessageBubble(props: MessageBubbleProps): ReactNode {
                   {emoji}
                 </button>
               ))}
-              <button
-                type="button"
-                className="text-button"
-                onClick={() => {
-                  props.onReply();
-                  setActionsOpen(false);
-                }}
-              >
-                Reply
-              </button>
+              {canRespond ? (
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => {
+                    props.onReply();
+                    setActionsOpen(false);
+                  }}
+                >
+                  Reply
+                </button>
+              ) : null}
+              {props.onPin === undefined ? null : (
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={() => {
+                    props.onPin?.(props.pinned !== true);
+                    setActionsOpen(false);
+                  }}
+                >
+                  {props.pinned === true ? 'Unpin' : 'Pin'}
+                </button>
+              )}
               {canEdit ? (
                 <button
                   type="button"
@@ -197,7 +303,7 @@ export function MessageBubble(props: MessageBubbleProps): ReactNode {
                     setActionsOpen(false);
                   }}
                 >
-                  Delete for everyone
+                  {mine ? 'Delete for everyone' : 'Remove for everyone'}
                 </button>
               ) : null}
             </div>

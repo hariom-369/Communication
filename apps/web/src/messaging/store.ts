@@ -8,7 +8,7 @@ import {
 
 import { ApiError } from '../api/client.js';
 import type { endpoints as Endpoints } from '../api/endpoints.js';
-import type { HistoryRecord, IngestResult } from '../crypto/protocol.js';
+import type { GroupPolicy, HistoryRecord, IngestResult } from '../crypto/protocol.js';
 
 import { backoffDelay } from './backoff.js';
 import {
@@ -18,7 +18,7 @@ import {
   type MessageContent,
 } from './content.js';
 import type { MediaTransfer } from './media-transfer.js';
-import { SecurityBlocked, type ConversationSecurity, type DeviceStatus } from './e2ee.js';
+import { SecurityBlocked, roleIn, type ConversationSecurity, type DeviceStatus } from './e2ee.js';
 import type { SafetyNumber } from '../crypto/protocol.js';
 import { RealtimeClient, type ConnectionStatus } from './realtime-client.js';
 import {
@@ -54,7 +54,29 @@ type Api = Pick<
   | 'sendMessage'
   | 'openDirect'
   | 'setDisappearing'
+  | 'createGroup'
+  | 'addMembers'
+  | 'removeMember'
+  | 'banMember'
+  | 'leaveGroup'
+  | 'setRole'
+  | 'transferOwnership'
+  | 'updateGroupSettings'
+  | 'deleteGroup'
+  | 'approveJoinRequest'
+  | 'acceptInvitation'
 >;
+
+type WithStepUp = <T>(action: () => Promise<T>) => Promise<T | undefined>;
+
+/** Group settings as the user edits them (two are mirrored to the server for its API). */
+export interface GroupSettingsChange {
+  readonly membersCanAdd: boolean;
+  readonly membersCanEditInfo: boolean;
+  readonly announcementsOnly: boolean;
+}
+
+const POLICY_ATTEMPTS = 3;
 
 /** What the store needs from the end-to-end encryption session (see E2eeSession). */
 export interface SecurityPort {
@@ -70,7 +92,7 @@ export interface SecurityPort {
     content: string,
   ): Promise<{ ciphertext: string; epoch: number; senderDeviceId: string }>;
   ingest(meta: Conversation, message: MailboxMessage): Promise<IngestResult>;
-  recordOwn(conversationId: string, record: HistoryRecord): Promise<void>;
+  recordOwn(conversationId: string, record: HistoryRecord): Promise<HistoryRecord>;
   history(conversationId: string): Promise<HistoryRecord[]>;
   cursor(conversationId: string): Promise<number>;
   processWelcomes(): Promise<string[]>;
@@ -83,6 +105,10 @@ export interface SecurityPort {
   resetIdentity(
     withStepUp: <T>(action: () => Promise<T>) => Promise<T | undefined>,
   ): Promise<boolean>;
+  // Groups.
+  updatePolicy(meta: Conversation, change: (policy: GroupPolicy) => GroupPolicy): Promise<boolean>;
+  forgetGroup(conversationId: string): Promise<void>;
+  onMembersAdded(listener: (conversationId: string, users: string[]) => void): () => void;
 }
 
 export interface ConversationView {
@@ -95,6 +121,10 @@ export interface ConversationView {
   readonly security: ConversationSecurity;
   /** Messages waiting because of a security condition the user must resolve. */
   readonly blocked: SecurityBlocked['reason'] | null;
+  /** Groups: this user was removed or left during this session (history stays readable). */
+  readonly removed: boolean;
+  /** Groups: bumped when someone asks to join (admins refresh the request list). */
+  readonly requestHint: number;
 }
 
 export interface SearchResult {
@@ -163,6 +193,8 @@ interface MutableConversation {
   ackedLocally: number;
   blocked: SecurityBlocked['reason'] | null;
   hydrated: Promise<void> | null;
+  removed: boolean;
+  requestHint: number;
 }
 
 const TYPING_TTL_MS = 6000;
@@ -198,6 +230,7 @@ function envelope(record: HistoryRecord): IncomingEnvelope {
     senderId: record.senderUserId,
     serverTime: Date.parse(record.serverTime),
     clientMessageId: record.clientMessageId,
+    authority: record.authority,
     // Content must carry the transport id; anything else is treated as undecodable.
     content: content?.id === record.clientMessageId ? content : null,
   };
@@ -224,6 +257,7 @@ export class MessagingStore {
   #shareReadReceipts = false;
   #typingSweep: ReturnType<typeof setInterval> | null = null;
   #unsubscribeSecurity: (() => void) | null = null;
+  #unsubscribeMembers: (() => void) | null = null;
   #started = false;
   readonly #mediaJobs = new Map<string, MediaJob>();
   readonly #uploads = new Map<string, UploadProgress>();
@@ -293,6 +327,8 @@ export class MessagingStore {
           readUpTo: c.readUpTo,
           security: this.#options.security.security(c.meta.id),
           blocked: c.blocked,
+          removed: c.removed,
+          requestHint: c.requestHint,
         };
       })
       .sort((a, b) => Date.parse(b.meta.lastActivityAt) - Date.parse(a.meta.lastActivityAt));
@@ -314,6 +350,9 @@ export class MessagingStore {
       if (this.#started && !this.#live && this.#options.security.status === 'ready')
         void this.resume();
       this.#emit();
+    });
+    this.#unsubscribeMembers = this.#options.security.onMembersAdded((conversationId) => {
+      this.#shareGroupInfo(conversationId);
     });
     this.#started = true;
     this.#typingSweep = setInterval(() => {
@@ -339,6 +378,7 @@ export class MessagingStore {
     this.#live = false;
     this.#realtime.stop();
     this.#unsubscribeSecurity?.();
+    this.#unsubscribeMembers?.();
     if (this.#typingSweep !== null) clearInterval(this.#typingSweep);
     for (const entry of this.#outbox.values()) if (entry.timer !== null) clearTimeout(entry.timer);
     for (const conversation of this.#conversations.values())
@@ -405,6 +445,8 @@ export class MessagingStore {
       ackedLocally: meta.ackedSeq,
       blocked: null,
       hydrated: null,
+      removed: false,
+      requestHint: 0,
     };
     this.#conversations.set(meta.id, created);
     return created;
@@ -589,13 +631,31 @@ export class MessagingStore {
         try {
           const meta = await this.#options.api.conversation(frame.conversationId);
           const conversation = this.#upsert(meta);
+          conversation.removed = false;
           await this.#hydrate(conversation);
           this.#emit();
-          // A new conversation: set up its encryption group right away (best effort).
+          // New conversation or membership change: bring the encryption group in line.
           void this.#options.security.prepare(meta).catch(() => undefined);
-        } catch {
-          // Not visible to us (e.g. removed): ignore.
+        } catch (error) {
+          // No longer visible: we were removed from the group (or it was deleted).
+          const conversation = this.#conversations.get(frame.conversationId);
+          if (
+            conversation?.meta.kind === 'group' &&
+            error instanceof ApiError &&
+            (error.problem.status === 404 || error.problem.status === 403)
+          ) {
+            conversation.removed = true;
+            await this.#options.security.forgetGroup(frame.conversationId);
+            this.#emit();
+          }
         }
+        return;
+      }
+      case 'group_requests': {
+        const conversation = this.#conversations.get(frame.conversationId);
+        if (conversation === undefined) return;
+        conversation.requestHint += 1;
+        this.#emit();
         return;
       }
       case 'welcome': {
@@ -662,10 +722,17 @@ export class MessagingStore {
     return meta.id;
   }
 
-  sendText(conversationId: string, text: string, replyTo: string | null): void {
+  sendText(
+    conversationId: string,
+    text: string,
+    replyTo: string | null,
+    mentions: readonly string[] = [],
+  ): void {
     const conversation = this.#conversations.get(conversationId);
     const trimmed = text.trim();
-    if (conversation === undefined || trimmed === '') return;
+    if (conversation === undefined || trimmed === '' || !this.#maySend(conversation)) return;
+    const members = new Set(conversation.meta.members.map((member) => member.userId));
+    const mentioned = [...new Set(mentions)].filter((userId) => members.has(userId));
     const id = newId();
     const sentAt = Date.now();
     conversation.timeline = addPending(conversation.timeline, {
@@ -674,17 +741,32 @@ export class MessagingStore {
       sentAt,
       text: trimmed,
       replyTo,
+      mentions: mentioned,
     });
     this.#emit();
     this.#enqueue(conversationId, {
       v: 1,
       id,
       sentAt,
-      body:
-        replyTo === null
-          ? { kind: 'text', text: trimmed }
-          : { kind: 'text', text: trimmed, replyTo },
+      body: {
+        kind: 'text',
+        text: trimmed,
+        ...(replyTo === null ? {} : { replyTo }),
+        ...(mentioned.length === 0 ? {} : { mentions: mentioned }),
+      },
     });
+  }
+
+  /**
+   * In announcement-only groups only admins send anything (the server refuses everyone else;
+   * the authenticated policy decides what this device attempts).
+   */
+  #maySend(conversation: MutableConversation): boolean {
+    if (conversation.removed) return false;
+    const policy = this.#options.security.security(conversation.meta.id).policy;
+    return !(
+      policy?.announcementsOnly === true && roleIn(policy, this.#options.me.id) === 'member'
+    );
   }
 
   react(conversationId: string, target: string, emoji: string | null): void {
@@ -713,7 +795,7 @@ export class MessagingStore {
     if (latestIncoming <= conversation.readUpTo) return;
     conversation.readUpTo = latestIncoming;
     this.#emit();
-    if (this.#shareReadReceipts)
+    if (this.#shareReadReceipts && conversation.meta.kind === 'direct')
       this.#control(conversationId, { kind: 'read', upToSeq: latestIncoming });
   }
 
@@ -871,7 +953,292 @@ export class MessagingStore {
   }
 
   #control(conversationId: string, body: MessageBody): void {
+    const conversation = this.#conversations.get(conversationId);
+    if (conversation === undefined || !this.#maySend(conversation)) return;
     this.#enqueue(conversationId, { v: 1, id: newId(), sentAt: Date.now(), body });
+  }
+
+  // ---- groups (docs/groups.md) -------------------------------------------------------------------
+
+  #group(conversationId: string): MutableConversation {
+    const conversation = this.#conversations.get(conversationId);
+    if (conversation?.meta.kind !== 'group') throw new Error('Not a group.');
+    return conversation;
+  }
+
+  async #refresh(conversationId: string): Promise<Conversation> {
+    const meta = await this.#options.api.conversation(conversationId);
+    this.#upsert(meta);
+    this.#emit();
+    return meta;
+  }
+
+  /** Confirms, end to end, who should (or should no longer) be in the group. */
+  #intent(conversationId: string, add: readonly string[], remove: readonly string[]): void {
+    if (add.length === 0 && remove.length === 0) return;
+    this.#control(conversationId, { kind: 'group_members', add: [...add], remove: [...remove] });
+  }
+
+  /**
+   * Creates a group owned by this user. The name is end-to-end encrypted: it is sent as the
+   * group's first message, never to the server.
+   */
+  async createGroup(
+    name: string,
+    usernames: readonly string[],
+  ): Promise<{ id: string; invited: string[]; skipped: string[] }> {
+    const created = await this.#options.api.createGroup(usernames, MLS_CIPHERSUITE);
+    const meta = await this.#options.api.conversation(created.conversationId);
+    const conversation = this.#upsert(meta);
+    await this.#hydrate(conversation);
+    this.#emit();
+    this.#control(meta.id, { kind: 'group_info', name: name.trim(), description: '' });
+    this.#intent(
+      meta.id,
+      [...created.added, ...created.invited].map((user) => user.userId),
+      [],
+    );
+    return {
+      id: meta.id,
+      invited: created.invited.map((user) => user.username),
+      skipped: created.skipped.map((user) => user.username),
+    };
+  }
+
+  async addMembers(
+    conversationId: string,
+    usernames: readonly string[],
+  ): Promise<{ added: string[]; invited: string[]; skipped: string[] }> {
+    this.#group(conversationId);
+    const result = await this.#options.api.addMembers(conversationId, usernames);
+    this.#intent(
+      conversationId,
+      [...result.added, ...result.invited].map((user) => user.userId),
+      [],
+    );
+    await this.#refresh(conversationId);
+    return {
+      added: result.added.map((user) => user.username),
+      invited: result.invited.map((user) => user.username),
+      skipped: result.skipped.map((user) => `${user.username} (${user.reason})`),
+    };
+  }
+
+  /** Confirms people the server lists but no admin confirmed yet (after checking who they are). */
+  confirmMembers(conversationId: string, userIds: readonly string[]): void {
+    this.#intent(conversationId, userIds, []);
+  }
+
+  async approveJoinRequest(conversationId: string, userId: string): Promise<void> {
+    await this.#options.api.approveJoinRequest(conversationId, userId);
+    this.#intent(conversationId, [userId], []);
+    await this.#refresh(conversationId);
+  }
+
+  async removeMember(conversationId: string, userId: string, ban: boolean): Promise<void> {
+    this.#group(conversationId);
+    if (ban) await this.#options.api.banMember(conversationId, userId);
+    else await this.#options.api.removeMember(conversationId, userId);
+    this.#intent(conversationId, [], [userId]);
+    const meta = await this.#refresh(conversationId);
+    await this.#options.security.prepare(meta).catch(() => undefined);
+  }
+
+  async leaveGroup(conversationId: string): Promise<void> {
+    const conversation = this.#group(conversationId);
+    await this.#options.api.leaveGroup(conversationId);
+    conversation.removed = true;
+    await this.#options.security.forgetGroup(conversationId);
+    this.#emit();
+  }
+
+  async deleteGroup(conversationId: string, withStepUp: WithStepUp): Promise<boolean> {
+    const conversation = this.#group(conversationId);
+    const done = await withStepUp(() => this.#options.api.deleteGroup(conversationId));
+    if (done === undefined) return false;
+    conversation.removed = true;
+    await this.#options.security.forgetGroup(conversationId);
+    this.#conversations.delete(conversationId);
+    this.#emit();
+    return true;
+  }
+
+  async acceptInvitation(conversationId: string): Promise<void> {
+    await this.#options.api.acceptInvitation(conversationId);
+    const conversation = this.#upsert(await this.#options.api.conversation(conversationId));
+    await this.#hydrate(conversation);
+    this.#emit();
+    void this.#options.security.prepare(conversation.meta).catch(() => undefined);
+  }
+
+  /**
+   * Changes roles or settings: committed end to end first (every member checks it), then
+   * mirrored to the server so its API agrees. Retries if another commit landed first.
+   */
+  async #commitPolicy(
+    conversationId: string,
+    change: (policy: GroupPolicy) => GroupPolicy,
+  ): Promise<void> {
+    const conversation = this.#group(conversationId);
+    for (let attempt = 0; attempt < POLICY_ATTEMPTS; attempt += 1) {
+      if (await this.#options.security.updatePolicy(conversation.meta, change)) {
+        this.#emit();
+        return;
+      }
+      await this.#catchUpConversation(conversation, Number.MAX_SAFE_INTEGER);
+    }
+    throw new Error('The group changed while saving; try again.');
+  }
+
+  async setRole(conversationId: string, userId: string, role: 'admin' | 'member'): Promise<void> {
+    await this.#commitPolicy(conversationId, (policy) => ({
+      ...policy,
+      admins:
+        role === 'admin'
+          ? [...new Set([...policy.admins, userId])].sort()
+          : policy.admins.filter((admin) => admin !== userId),
+    }));
+    await this.syncServerCopy(conversationId);
+  }
+
+  /** Hands ownership to an admin (re-authentication required); this user stays an admin. */
+  async transferOwnership(
+    conversationId: string,
+    userId: string,
+    withStepUp: WithStepUp,
+  ): Promise<boolean> {
+    await this.#commitPolicy(conversationId, (policy) => ({
+      ...policy,
+      owner: userId,
+      admins: [...policy.admins.filter((admin) => admin !== userId), policy.owner].sort(),
+    }));
+    return this.syncServerCopy(conversationId, withStepUp);
+  }
+
+  async updateGroupSettings(conversationId: string, settings: GroupSettingsChange): Promise<void> {
+    await this.#commitPolicy(conversationId, (policy) => ({ ...policy, ...settings }));
+    await this.syncServerCopy(conversationId);
+  }
+
+  /**
+   * Whether the server's copy of roles and settings differs from the authenticated policy in a
+   * way this user can fix (e.g. a re-authentication prompt was cancelled half-way).
+   */
+  serverCopyOutOfSync(conversationId: string): boolean {
+    const conversation = this.#conversations.get(conversationId);
+    const policy = conversation === undefined ? null : this.#policyOf(conversation);
+    if (conversation === undefined || policy === null) return false;
+    const me = this.#options.me.id;
+    const serverRole = conversation.meta.members.find((m) => m.userId === me)?.role;
+    const settings = conversation.meta.settings;
+    if (
+      settings !== null &&
+      roleIn(policy, me) !== 'member' &&
+      (settings.membersCanAdd !== policy.membersCanAdd ||
+        settings.announcementsOnly !== policy.announcementsOnly)
+    )
+      return true;
+    if (serverRole !== 'owner') return false;
+    return conversation.meta.members.some((m) => m.role !== roleIn(policy, m.userId));
+  }
+
+  #policyOf(conversation: MutableConversation): GroupPolicy | null {
+    return this.#options.security.security(conversation.meta.id).policy;
+  }
+
+  /**
+   * Brings the server's copy of roles and settings in line with the end-to-end policy (only
+   * the parts this user is allowed to change on the server). Returns false if cancelled.
+   */
+  async syncServerCopy(conversationId: string, withStepUp?: WithStepUp): Promise<boolean> {
+    const conversation = this.#group(conversationId);
+    const policy = this.#policyOf(conversation);
+    if (policy === null) return true;
+    const me = this.#options.me.id;
+    const api = this.#options.api;
+    const settings = conversation.meta.settings;
+    if (
+      settings !== null &&
+      roleIn(policy, me) !== 'member' &&
+      (settings.membersCanAdd !== policy.membersCanAdd ||
+        settings.announcementsOnly !== policy.announcementsOnly)
+    )
+      await api.updateGroupSettings(conversationId, {
+        membersCanAdd: policy.membersCanAdd,
+        announcementsOnly: policy.announcementsOnly,
+      });
+    const serverOwner = conversation.meta.members.find((m) => m.role === 'owner')?.userId;
+    let done = true;
+    if (serverOwner === me) {
+      // Admin changes first (only the server's owner may make them), then ownership.
+      for (const member of conversation.meta.members) {
+        const role = roleIn(policy, member.userId);
+        if (member.userId === serverOwner || role === null || role === member.role) continue;
+        if (role === 'owner') {
+          if (member.role !== 'admin') await api.setRole(conversationId, member.userId, 'admin');
+          continue;
+        }
+        await api.setRole(conversationId, member.userId, role);
+      }
+      if (policy.owner !== me) {
+        const transfer = () => api.transferOwnership(conversationId, policy.owner);
+        done = (await (withStepUp === undefined ? transfer() : withStepUp(transfer))) !== undefined;
+      }
+    }
+    await this.#refresh(conversationId);
+    return done;
+  }
+
+  setGroupInfo(conversationId: string, name: string, description: string): void {
+    this.#group(conversationId);
+    const trimmed = name.trim();
+    if (trimmed === '') return;
+    this.#control(conversationId, {
+      kind: 'group_info',
+      name: trimmed,
+      description: description.trim(),
+    });
+  }
+
+  /** After this device added people: tell them the group's name (they cannot read history). */
+  #shareGroupInfo(conversationId: string): void {
+    const conversation = this.#conversations.get(conversationId);
+    const group = conversation?.timeline.group;
+    if (group?.name == null) return;
+    this.#control(conversationId, {
+      kind: 'group_info',
+      name: group.name,
+      description: group.description,
+      snapshot: true,
+    });
+  }
+
+  pin(conversationId: string, target: string, pinned: boolean): void {
+    this.#control(conversationId, { kind: 'pin', target, pinned });
+  }
+
+  sendPoll(conversationId: string, question: string, options: string[], multiple: boolean): void {
+    const conversation = this.#conversations.get(conversationId);
+    const cleaned = options.map((option) => option.trim()).filter((option) => option !== '');
+    if (conversation === undefined || question.trim() === '' || cleaned.length < 2) return;
+    if (!this.#maySend(conversation)) return;
+    const id = newId();
+    const sentAt = Date.now();
+    const poll = { question: question.trim(), options: cleaned, multiple };
+    conversation.timeline = addPending(conversation.timeline, {
+      id,
+      senderId: this.#options.me.id,
+      sentAt,
+      text: poll.question,
+      replyTo: null,
+      poll: { ...poll, votes: {} },
+    });
+    this.#emit();
+    this.#enqueue(conversationId, { v: 1, id, sentAt, body: { kind: 'poll', ...poll } });
+  }
+
+  vote(conversationId: string, target: string, choices: number[]): void {
+    this.#control(conversationId, { kind: 'vote', target, choices });
   }
 
   // ---- outbox ------------------------------------------------------------------------------------
@@ -921,15 +1288,18 @@ export class MessagingStore {
         clientMessageId: entry.id,
         content: json,
       };
-      await this.#options.security.recordOwn(entry.conversationId, record);
+      const stored = await this.#options.security.recordOwn(entry.conversationId, record);
       this.#outbox.delete(entry.id);
-      conversation.timeline = applyIncoming(conversation.timeline, envelope(record));
+      conversation.timeline = applyIncoming(conversation.timeline, envelope(stored));
       conversation.meta = {
         ...conversation.meta,
         lastSeq: Math.max(conversation.meta.lastSeq, result.seq),
         lastActivityAt: result.serverTime,
       };
       this.#emit();
+      // A membership intent is out: add (or remove) the people it names now.
+      if (body.kind === 'group_members')
+        void this.#options.security.prepare(conversation.meta).catch(() => undefined);
     } catch (error) {
       if (error instanceof SecurityBlocked) {
         // Waits for the user (key change) or for the other side (setup / Welcome).

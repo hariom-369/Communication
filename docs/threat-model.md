@@ -99,3 +99,13 @@ blob ↔ conversation links on the server. The analysis is in
 risks: malware sent privately cannot be detected by Tessera (documented, media.md §3); the server
 learns attachment sizes and which conversation they were sent to; a presigned download URL can be
 used by whoever holds it for 5 minutes (it yields only ciphertext).
+
+**Phase 7a delta (groups).** New flows: group policy commits, membership intents, invitations,
+invite links and join requests. The analysis is in [phase-reports/phase-7.md](phase-reports/phase-7.md)
+§Security implications and ADR-044. Mitigated: a malicious server adding a reader ("ghost
+member") — devices add new users only with an authenticated intent from a permitted sender, and
+every client rejects commits that the end-to-end policy does not allow; a server forging roles or
+settings — the authoritative copy is in the MLS group context. Residual risks: the server sees
+membership, roles and invite-link usage; it can delay or withhold members and unlist someone
+(after which any member removes them); an optional invite-link preview title is readable by the
+server; key-directory access now extends to everyone sharing a group.

@@ -3,6 +3,7 @@ import type { CryptoClient, MediaDecryptor, MediaEncryptor } from '@tessera/cryp
 import { LocalStore } from './local-store.js';
 import type {
   EncryptedBackup,
+  GroupPolicy,
   HistoryBundle,
   CommitOutput,
   CryptoApi,
@@ -16,6 +17,7 @@ import type {
   Method,
   Pin,
   SafetyNumber,
+  SenderAuthority,
 } from './protocol.js';
 
 /**
@@ -204,14 +206,25 @@ export class CryptoEngine {
       });
     },
 
-    createGroup: async (conversationId, keyPackages, allowed) => {
+    createGroup: async (conversationId, keyPackages, allowed, policy) => {
       const output = JSON.parse(
         this.#c.createGroup(
           conversationId,
           JSON.stringify(keyPackages),
           JSON.stringify(allowed),
+          policy === null ? undefined : JSON.stringify(policy),
           now(),
         ),
+      ) as CommitOutput;
+      await this.#persist();
+      return output;
+    },
+
+    groupPolicy: (conversationId) => Promise.resolve(this.#policy(conversationId)),
+
+    updatePolicy: async (conversationId, policy, allowed) => {
+      const output = JSON.parse(
+        this.#c.updatePolicy(conversationId, JSON.stringify(policy), JSON.stringify(allowed)),
       ) as CommitOutput;
       await this.#persist();
       return output;
@@ -263,7 +276,10 @@ export class CryptoEngine {
       this.#ingest(conversationId, message, allowed),
 
     recordOwn: async (conversationId, record) => {
-      await this.#s.commit({ history: [{ conversationId, seq: record.seq, record }] });
+      const authority = this.#authority(conversationId, record.senderUserId);
+      const stored = authority === undefined ? record : { ...record, authority };
+      await this.#s.commit({ history: [{ conversationId, seq: record.seq, record: stored }] });
+      return stored;
     },
 
     history: async (conversationId) => (await this.#s.history(conversationId)) as HistoryRecord[],
@@ -468,6 +484,24 @@ export class CryptoEngine {
     }
   }
 
+  #policy(conversationId: string): GroupPolicy | null {
+    if (!this.#c.hasGroup(conversationId)) return null;
+    return JSON.parse(this.#c.groupPolicy(conversationId)) as GroupPolicy | null;
+  }
+
+  /** What a user may do under the policy in force now (the epoch the message was sent in). */
+  #authority(conversationId: string, userId: string): SenderAuthority | undefined {
+    const policy = this.#policy(conversationId);
+    if (policy === null) return undefined;
+    const role =
+      policy.owner === userId ? 'owner' : policy.admins.includes(userId) ? 'admin' : 'member';
+    return {
+      role,
+      editInfo: role !== 'member' || policy.membersCanEditInfo,
+      add: role !== 'member' || policy.membersCanAdd,
+    };
+  }
+
   /** All local history as a bundle (JSON bytes). */
   async #bundle(): Promise<Uint8Array> {
     const conversations: Record<string, HistoryRecord[]> = {};
@@ -569,7 +603,7 @@ export class CryptoEngine {
       });
       return { status: 'undecryptable', reason: 'SENDER_MISMATCH', record };
     }
-    const record: HistoryRecord = {
+    let record: HistoryRecord = {
       seq: message.seq,
       senderUserId: processed.senderUserId,
       senderDeviceId: processed.senderDeviceId,
@@ -577,6 +611,8 @@ export class CryptoEngine {
       clientMessageId: message.clientMessageId,
       content: decoder.decode(fromBase64(processed.plaintext)),
     };
+    const authority = this.#authority(conversationId, processed.senderUserId);
+    if (authority !== undefined) record = { ...record, authority };
     await this.#persist({
       history: [{ conversationId, seq: message.seq, record }],
       cursors: [cursor],

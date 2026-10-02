@@ -1,4 +1,13 @@
 import {
+  addMembersResultSchema,
+  banListSchema,
+  createGroupResponseSchema,
+  createdInviteLinkSchema,
+  invitationListSchema,
+  inviteLinkListSchema,
+  invitePreviewSchema,
+  joinRequestListSchema,
+  type GroupSettings,
   mediaDownloadSchema,
   uploadCreatedSchema,
   uploadPartsResponseSchema,
@@ -113,6 +122,84 @@ export const endpoints = {
     ),
   conversation: (id: string) =>
     api('GET', `/conversations/${encodeURIComponent(id)}`, conversationSchema),
+
+  // ---- groups (docs/groups.md) ----
+  createGroup: (usernames: readonly string[], ciphersuite: number) =>
+    api('POST', '/groups', createGroupResponseSchema, { usernames, ciphersuite }),
+  addMembers: (id: string, usernames: readonly string[]) =>
+    api('POST', `/groups/${encodeURIComponent(id)}/members`, addMembersResultSchema, {
+      usernames,
+    }),
+  removeMember: (id: string, userId: string) =>
+    api(
+      'DELETE',
+      `/groups/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`,
+      okResponseSchema,
+    ),
+  banMember: (id: string, userId: string) =>
+    api('POST', `/groups/${encodeURIComponent(id)}/bans`, okResponseSchema, { userId }),
+  bans: (id: string) => api('GET', `/groups/${encodeURIComponent(id)}/bans`, banListSchema),
+  unban: (id: string, userId: string) =>
+    api(
+      'DELETE',
+      `/groups/${encodeURIComponent(id)}/bans/${encodeURIComponent(userId)}`,
+      okResponseSchema,
+    ),
+  leaveGroup: (id: string) =>
+    api('POST', `/groups/${encodeURIComponent(id)}/leave`, okResponseSchema, {}),
+  setRole: (id: string, userId: string, role: 'admin' | 'member') =>
+    api(
+      'PUT',
+      `/groups/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}/role`,
+      okResponseSchema,
+      { role },
+    ),
+  transferOwnership: (id: string, userId: string) =>
+    api('POST', `/groups/${encodeURIComponent(id)}/owner`, okResponseSchema, { userId }),
+  updateGroupSettings: (id: string, settings: GroupSettings) =>
+    api('PUT', `/groups/${encodeURIComponent(id)}/settings`, okResponseSchema, settings),
+  deleteGroup: (id: string) => api('DELETE', `/groups/${encodeURIComponent(id)}`, okResponseSchema),
+  groupInvitations: () => api('GET', '/group-invitations', invitationListSchema),
+  acceptInvitation: (id: string) =>
+    api('POST', `/group-invitations/${encodeURIComponent(id)}/accept`, okResponseSchema, {}),
+  declineInvitation: (id: string) =>
+    api('DELETE', `/group-invitations/${encodeURIComponent(id)}`, okResponseSchema),
+  createInviteLink: (
+    id: string,
+    body: { expiresInHours: number; maxUses: number | null; previewTitle: string | null },
+  ) => api('POST', `/groups/${encodeURIComponent(id)}/links`, createdInviteLinkSchema, body),
+  inviteLinks: (id: string) =>
+    api('GET', `/groups/${encodeURIComponent(id)}/links`, inviteLinkListSchema),
+  revokeInviteLink: (id: string, linkId: string) =>
+    api(
+      'DELETE',
+      `/groups/${encodeURIComponent(id)}/links/${encodeURIComponent(linkId)}`,
+      okResponseSchema,
+    ),
+  previewInvite: (token: string) =>
+    api('GET', `/invites/${encodeURIComponent(token)}`, invitePreviewSchema),
+  requestJoin: (token: string) =>
+    api(
+      'POST',
+      `/invites/${encodeURIComponent(token)}/join`,
+      z.object({ groupId: z.string().nullable() }),
+      {},
+    ),
+  joinRequests: (id: string) =>
+    api('GET', `/groups/${encodeURIComponent(id)}/requests`, joinRequestListSchema),
+  approveJoinRequest: (id: string, userId: string) =>
+    api(
+      'POST',
+      `/groups/${encodeURIComponent(id)}/requests/${encodeURIComponent(userId)}/approve`,
+      okResponseSchema,
+      {},
+    ),
+  rejectJoinRequest: (id: string, userId: string) =>
+    api(
+      'DELETE',
+      `/groups/${encodeURIComponent(id)}/requests/${encodeURIComponent(userId)}`,
+      okResponseSchema,
+    ),
   sendMessage: (
     id: string,
     body: {

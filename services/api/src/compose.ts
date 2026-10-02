@@ -19,7 +19,12 @@ import {
 } from './modules/auth/index.js';
 import { KeysService, keysRoutes } from './modules/keys/index.js';
 import { MediaService, mediaRoutes } from './modules/media/index.js';
-import { MessagingService, messagingRoutes } from './modules/messaging/index.js';
+import {
+  GroupsService,
+  MessagingService,
+  groupRoutes,
+  messagingRoutes,
+} from './modules/messaging/index.js';
 import { metaRoutes } from './modules/meta/index.js';
 import { RealtimeService, realtimeRoutes } from './modules/realtime/index.js';
 import type { Mailer } from './platform/email.js';
@@ -124,11 +129,12 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
     publisher,
     {
       contactsOf: (userId) => messaging.contactsOf(userId),
-      sharesConversation: (a, b) => messaging.areContacts(a, b),
+      sharesConversation: (a, b) => messaging.sharesConversation(a, b),
     },
     infra.logger,
   );
   messaging.useDevices(keys);
+  const groups = new GroupsService(infra.db, accounts, messaging, publisher, infra.logger);
   keys.useNotifier(auth);
   const backups = new BackupsService(infra.db, audit, auth);
   const media = new MediaService(infra.db, infra.media, infra.logger);
@@ -145,6 +151,7 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
       ...accountsRoutes({ accounts, sessions: auth, security: auth }),
       ...authRoutes({ auth, sessions, passkeys }),
       ...messagingRoutes({ messaging }),
+      ...groupRoutes({ groups }),
       ...keysRoutes({ keys }),
       ...backupsRoutes({ backups }),
       ...mediaRoutes({ media }),

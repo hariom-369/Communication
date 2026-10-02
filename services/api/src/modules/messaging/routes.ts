@@ -3,6 +3,8 @@ import {
   ackSchema,
   commitResponseSchema,
   commitSchema,
+  MAX_COMMIT_BYTES,
+  MAX_WELCOME_BYTES,
   conversationListQuerySchema,
   conversationListSchema,
   conversationSchema,
@@ -191,8 +193,8 @@ export function messagingRoutes(deps: MessagingModuleDeps): RouteDefinition[] {
       },
       schema: { params: conversationParams, body: commitSchema, response: commitResponseSchema },
       successStatus: 201,
-      // Commit (≤ 64 KiB) + Welcome (≤ 64 KiB) as base64 inside JSON.
-      bodyLimit: 192 * 1024,
+      // Commit and Welcome (≤ 1 MiB each, ADR-044) as base64 inside JSON, plus targets.
+      bodyLimit: Math.ceil(((MAX_COMMIT_BYTES + MAX_WELCOME_BYTES) * 4) / 3) + 256 * 1024,
       handler: async ({ params, body }, context) => {
         const commit = Buffer.from(body.commit, 'base64');
         if (commit.length === 0) throw new AppError('BAD_REQUEST', { detail: 'Empty commit.' });

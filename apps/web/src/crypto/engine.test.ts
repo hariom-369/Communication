@@ -68,12 +68,104 @@ async function conversation() {
   await alice.engine.call('observeIdentity', [BOB, bob.identity.askPublicKey!, 1]);
   await bob.engine.call('observeIdentity', [ALICE, alice.identity.askPublicKey!, 1]);
   const [keyPackage] = await bob.engine.call('keyPackages', [1, false]);
-  const created = await alice.engine.call('createGroup', [CONVERSATION, [keyPackage!], [BOB]]);
+  const created = await alice.engine.call('createGroup', [
+    CONVERSATION,
+    [keyPackage!],
+    [BOB],
+    null,
+  ]);
   await alice.engine.call('mergePending', [CONVERSATION]);
   const commit = inbound(alice, created.commit, 'commit');
   await bob.engine.call('join', [CONVERSATION, created.welcome!, [ALICE], commit.seq]);
   return { alice, bob, commit };
 }
+
+describe('groups (roles in the encryption state)', () => {
+  it('carries the policy to members and tags messages with the sender’s authority', async () => {
+    seq = 0;
+    const alice = await device(ALICE);
+    const bob = await device(BOB);
+    await alice.engine.call('observeIdentity', [BOB, bob.identity.askPublicKey!, 1]);
+    await bob.engine.call('observeIdentity', [ALICE, alice.identity.askPublicKey!, 1]);
+    const [keyPackage] = await bob.engine.call('keyPackages', [1, false]);
+    const policy = {
+      v: 1 as const,
+      owner: ALICE,
+      admins: [],
+      membersCanAdd: false,
+      membersCanEditInfo: false,
+      announcementsOnly: false,
+    };
+    // Only the owner can create a group with a policy.
+    await expect(
+      bob.engine.call('createGroup', [CONVERSATION, [], [ALICE], { ...policy }]),
+    ).rejects.toThrow(CryptoError);
+    const created = await alice.engine.call('createGroup', [
+      CONVERSATION,
+      [keyPackage!],
+      [BOB],
+      policy,
+    ]);
+    await alice.engine.call('mergePending', [CONVERSATION]);
+    const commit = inbound(alice, created.commit, 'commit');
+    await bob.engine.call('join', [CONVERSATION, created.welcome!, [ALICE], commit.seq]);
+    expect(await bob.engine.call('groupPolicy', [CONVERSATION])).toEqual(policy);
+
+    const { ciphertext } = await bob.engine.call('encrypt', [CONVERSATION, '{"x":1}']);
+    const fromBob = await alice.engine.call('ingest', [
+      CONVERSATION,
+      inbound(bob, ciphertext),
+      [BOB],
+    ]);
+    expect(fromBob).toMatchObject({
+      status: 'application',
+      record: { authority: { role: 'member', editInfo: false, add: false } },
+    });
+
+    // A member cannot promote themselves; the owner can promote them.
+    await expect(
+      bob.engine.call('updatePolicy', [CONVERSATION, { ...policy, admins: [BOB] }, [ALICE]]),
+    ).rejects.toThrow(CryptoError);
+    const promote = await alice.engine.call('updatePolicy', [
+      CONVERSATION,
+      { ...policy, admins: [BOB] },
+      [BOB],
+    ]);
+    await alice.engine.call('mergePending', [CONVERSATION]);
+    expect(
+      await bob.engine.call('ingest', [
+        CONVERSATION,
+        inbound(alice, promote.commit, 'commit'),
+        [ALICE],
+      ]),
+    ).toMatchObject({ status: 'commit' });
+    expect((await bob.engine.call('groupPolicy', [CONVERSATION]))?.admins).toEqual([BOB]);
+    const own = await bob.engine.call('recordOwn', [
+      CONVERSATION,
+      {
+        seq: 99,
+        senderUserId: BOB,
+        senderDeviceId: bob.identity.deviceId,
+        serverTime: new Date().toISOString(),
+        clientMessageId: 'own',
+        content: '{}',
+      },
+    ]);
+    expect(own.authority).toEqual({ role: 'admin', editInfo: true, add: true });
+  });
+
+  it('has no policy (and no authority) in 1:1 conversations', async () => {
+    const { alice, bob } = await conversation();
+    expect(await bob.engine.call('groupPolicy', [CONVERSATION])).toBeNull();
+    const { ciphertext } = await alice.engine.call('encrypt', [CONVERSATION, '{}']);
+    const result = await bob.engine.call('ingest', [
+      CONVERSATION,
+      inbound(alice, ciphertext),
+      [ALICE],
+    ]);
+    expect(result.status === 'application' && result.record.authority).toBeUndefined();
+  });
+});
 
 describe('crypto worker engine', () => {
   it('delivers messages and keeps decrypted history across restarts', async () => {
@@ -230,8 +322,13 @@ describe('simultaneous group creation', () => {
     const [bobPackage] = await bob.engine.call('keyPackages', [1, false]);
     const [alicePackage] = await alice.engine.call('keyPackages', [1, false]);
     // Both create the group at once; the server accepts Alice's commit.
-    const fromAlice = await alice.engine.call('createGroup', [CONVERSATION, [bobPackage!], [BOB]]);
-    await bob.engine.call('createGroup', [CONVERSATION, [alicePackage!], [ALICE]]);
+    const fromAlice = await alice.engine.call('createGroup', [
+      CONVERSATION,
+      [bobPackage!],
+      [BOB],
+      null,
+    ]);
+    await bob.engine.call('createGroup', [CONVERSATION, [alicePackage!], [ALICE], null]);
     await alice.engine.call('mergePending', [CONVERSATION]);
     // Alice's Welcome reaches Bob before his own commit is rejected.
     const commit = inbound(alice, fromAlice.commit, 'commit');
@@ -254,8 +351,13 @@ describe('losing the creation race', () => {
     await bob.engine.call('observeIdentity', [ALICE, alice.identity.askPublicKey!, 1]);
     const [bobPackage] = await bob.engine.call('keyPackages', [1, false]);
     const [alicePackage] = await alice.engine.call('keyPackages', [1, false]);
-    const fromAlice = await alice.engine.call('createGroup', [CONVERSATION, [bobPackage!], [BOB]]);
-    await bob.engine.call('createGroup', [CONVERSATION, [alicePackage!], [ALICE]]);
+    const fromAlice = await alice.engine.call('createGroup', [
+      CONVERSATION,
+      [bobPackage!],
+      [BOB],
+      null,
+    ]);
+    await bob.engine.call('createGroup', [CONVERSATION, [alicePackage!], [ALICE], null]);
     await alice.engine.call('mergePending', [CONVERSATION]);
     // The winning commit reaches Bob before the Welcome: not a failure, not consumed.
     const commit = inbound(alice, fromAlice.commit, 'commit');
