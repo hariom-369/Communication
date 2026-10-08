@@ -1,4 +1,17 @@
 import {
+  channelAdminListSchema,
+  channelAnalyticsSchema,
+  channelInvitePreviewSchema,
+  channelLinkListSchema,
+  channelListSchema,
+  channelPostSchema,
+  channelSchema,
+  commentListSchema,
+  commentSchema,
+  createdChannelLinkSchema,
+  linkPreviewSchema,
+  pollVotersSchema,
+  postListSchema,
   communityBanListSchema,
   communityInvitePreviewSchema,
   communityLinkListSchema,
@@ -60,6 +73,14 @@ import {
 import { z } from 'zod';
 
 import { api } from './client.js';
+
+interface ChannelInput {
+  title: string;
+  description: string;
+  visibility: 'public' | 'private';
+  commentsEnabled: boolean;
+  slowModeSeconds: number;
+}
 
 /** Typed API surface used by the web app; schemas are shared with the server. */
 export const endpoints = {
@@ -132,6 +153,171 @@ export const endpoints = {
     ),
   conversation: (id: string) =>
     api('GET', `/conversations/${encodeURIComponent(id)}`, conversationSchema),
+
+  // ---- channels (docs/channels.md; not end-to-end encrypted) ----
+  myChannels: () => api('GET', '/channels', channelListSchema),
+  discoverChannels: (q: string) =>
+    api('GET', `/channel-directory?q=${encodeURIComponent(q)}`, channelListSchema),
+  channel: (id: string) => api('GET', `/channels/${encodeURIComponent(id)}`, channelSchema),
+  channelByHandle: (handle: string) =>
+    api('GET', `/channel-handles/${encodeURIComponent(handle)}`, z.object({ id: z.string() })),
+  createChannel: (body: ChannelInput & { handle: string }) =>
+    api('POST', '/channels', z.object({ id: z.string() }), body),
+  updateChannel: (id: string, body: Partial<ChannelInput>) =>
+    api('PATCH', `/channels/${encodeURIComponent(id)}`, okResponseSchema, body),
+  deleteChannel: (id: string) =>
+    api('DELETE', `/channels/${encodeURIComponent(id)}`, okResponseSchema),
+  subscribeChannel: (id: string) =>
+    api('POST', `/channels/${encodeURIComponent(id)}/subscription`, okResponseSchema, {}),
+  unsubscribeChannel: (id: string) =>
+    api('DELETE', `/channels/${encodeURIComponent(id)}/subscription`, okResponseSchema),
+  channelAdmins: (id: string) =>
+    api('GET', `/channels/${encodeURIComponent(id)}/admins`, channelAdminListSchema),
+  addChannelAdmin: (id: string, username: string, permissions: number) =>
+    api('POST', `/channels/${encodeURIComponent(id)}/admins`, okResponseSchema, {
+      username,
+      permissions,
+    }),
+  setChannelAdmin: (id: string, userId: string, permissions: number) =>
+    api(
+      'PUT',
+      `/channels/${encodeURIComponent(id)}/admins/${encodeURIComponent(userId)}`,
+      okResponseSchema,
+      { permissions },
+    ),
+  removeChannelAdmin: (id: string, userId: string) =>
+    api(
+      'DELETE',
+      `/channels/${encodeURIComponent(id)}/admins/${encodeURIComponent(userId)}`,
+      okResponseSchema,
+    ),
+  requestChannelTransfer: (id: string, userId: string) =>
+    api(
+      'POST',
+      `/channels/${encodeURIComponent(id)}/ownership`,
+      z.object({ effectiveAt: z.string() }),
+      { userId },
+    ),
+  cancelChannelTransfer: (id: string) =>
+    api('DELETE', `/channels/${encodeURIComponent(id)}/ownership`, okResponseSchema),
+  createChannelLink: (id: string, body: { expiresInHours: number; maxUses: number | null }) =>
+    api('POST', `/channels/${encodeURIComponent(id)}/links`, createdChannelLinkSchema, body),
+  channelLinks: (id: string) =>
+    api('GET', `/channels/${encodeURIComponent(id)}/links`, channelLinkListSchema),
+  revokeChannelLink: (id: string, linkId: string) =>
+    api(
+      'DELETE',
+      `/channels/${encodeURIComponent(id)}/links/${encodeURIComponent(linkId)}`,
+      okResponseSchema,
+    ),
+  previewChannelInvite: (token: string) =>
+    api('GET', `/channel-invites/${encodeURIComponent(token)}`, channelInvitePreviewSchema),
+  joinChannelInvite: (token: string) =>
+    api(
+      'POST',
+      `/channel-invites/${encodeURIComponent(token)}/subscription`,
+      z.object({ id: z.string() }),
+      {},
+    ),
+  channelPosts: (
+    id: string,
+    query: { before?: string; status?: 'published' | 'draft' | 'scheduled'; limit?: number } = {},
+  ) => {
+    const params = new URLSearchParams();
+    if (query.before !== undefined) params.set('before', query.before);
+    if (query.status !== undefined) params.set('status', query.status);
+    params.set('limit', String(query.limit ?? 20));
+    return api(
+      'GET',
+      `/channels/${encodeURIComponent(id)}/posts?${params.toString()}`,
+      postListSchema,
+    );
+  },
+  searchChannel: (id: string, q: string) =>
+    api(
+      'GET',
+      `/channels/${encodeURIComponent(id)}/search?q=${encodeURIComponent(q)}`,
+      postListSchema,
+    ),
+  createChannelPost: (
+    id: string,
+    body: {
+      body: string;
+      previewUrl: string | null;
+      poll: {
+        question: string;
+        options: string[];
+        multiple: boolean;
+        anonymous: boolean;
+      } | null;
+      publish: string;
+    },
+  ) => api('POST', `/channels/${encodeURIComponent(id)}/posts`, channelPostSchema, body),
+  updateChannelPost: (id: string, postId: string, body: string) =>
+    api(
+      'PATCH',
+      `/channels/${encodeURIComponent(id)}/posts/${encodeURIComponent(postId)}`,
+      channelPostSchema,
+      { body },
+    ),
+  publishChannelPost: (id: string, postId: string) =>
+    api(
+      'POST',
+      `/channels/${encodeURIComponent(id)}/posts/${encodeURIComponent(postId)}/publish`,
+      channelPostSchema,
+      {},
+    ),
+  deleteChannelPost: (id: string, postId: string) =>
+    api(
+      'DELETE',
+      `/channels/${encodeURIComponent(id)}/posts/${encodeURIComponent(postId)}`,
+      okResponseSchema,
+    ),
+  reactToChannelPost: (id: string, postId: string, emoji: string | null) =>
+    api(
+      'PUT',
+      `/channels/${encodeURIComponent(id)}/posts/${encodeURIComponent(postId)}/reaction`,
+      channelPostSchema,
+      { emoji },
+    ),
+  voteInChannelPoll: (id: string, postId: string, choices: number[]) =>
+    api(
+      'PUT',
+      `/channels/${encodeURIComponent(id)}/posts/${encodeURIComponent(postId)}/vote`,
+      channelPostSchema,
+      { choices },
+    ),
+  channelPollVoters: (id: string, postId: string) =>
+    api(
+      'GET',
+      `/channels/${encodeURIComponent(id)}/posts/${encodeURIComponent(postId)}/voters`,
+      pollVotersSchema,
+    ),
+  channelComments: (id: string, postId: string, after?: string) =>
+    api(
+      'GET',
+      `/channels/${encodeURIComponent(id)}/posts/${encodeURIComponent(postId)}/comments${after === undefined ? '' : `?after=${encodeURIComponent(after)}`}`,
+      commentListSchema,
+    ),
+  addChannelComment: (id: string, postId: string, body: string) =>
+    api(
+      'POST',
+      `/channels/${encodeURIComponent(id)}/posts/${encodeURIComponent(postId)}/comments`,
+      commentSchema,
+      { body },
+    ),
+  deleteChannelComment: (id: string, commentId: string) =>
+    api(
+      'DELETE',
+      `/channels/${encodeURIComponent(id)}/comments/${encodeURIComponent(commentId)}`,
+      okResponseSchema,
+    ),
+  recordChannelViews: (id: string, postIds: string[]) =>
+    api('POST', `/channels/${encodeURIComponent(id)}/views`, okResponseSchema, { postIds }),
+  channelAnalytics: (id: string) =>
+    api('GET', `/channels/${encodeURIComponent(id)}/analytics`, channelAnalyticsSchema),
+  linkPreview: (url: string) =>
+    api('POST', '/link-previews', linkPreviewSchema.nullable(), { url }),
 
   // ---- communities (docs/groups.md §5) ----
   myCommunities: () => api('GET', '/communities', communityListSchema),

@@ -118,3 +118,14 @@ community enumeration (404 for non-members on every route), joining spaces outsi
 (eligibility checked on every path into a space). Residual: community container data is
 server-readable by design; a malicious server can admit anyone to auto-approve spaces (documented
 in the UI; default off); directory search exposes public community names to all users.
+
+**Phase 8 delta (channels).** New flows: server-side fetching of user-supplied URLs (link
+previews), public posting and commenting, scheduled publishing, view counting. Analysis in
+[phase-reports/phase-8.md](phase-reports/phase-8.md) and ADR-046. Mitigated: SSRF (DNS-pinned
+fetcher with a full deny-list, redirect re-validation, size/time caps; 65 SSRF tests, 6 mutation
+checks); privilege escalation among channel admins (permission subset and owner-only rules,
+tested); instant channel takeover (24 h cooling-off, re-authentication, audit); viewer tracking
+(HyperLogLog aggregates only); counter hot spots (sharded). Residual: the fetcher runs in the API
+process until it is isolated behind an egress proxy; spam and abuse in public comments rely on
+rate limits, slow mode and admin moderation until Phase 11 reporting; channel content is
+server-readable by design.

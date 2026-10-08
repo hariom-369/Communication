@@ -115,6 +115,25 @@ async function main(): Promise<void> {
   });
   lifecycle.onShutdown({ name: 'mailbox_sweeper', run: () => sweeper.stop() });
 
+  // Channels: scheduled posts and ownership transfers (exactly-once via compare-and-set), and
+  // the roll-up of daily view counts every five minutes.
+  let lastRollUp = 0;
+  const channelScheduler = startSingletonTask({
+    name: 'channel_scheduler',
+    lockKey: 0x6368616e, // "chan"
+    intervalMs: config.CHANNEL_SCHEDULER_INTERVAL_MS,
+    pool: database.pool,
+    logger,
+    task: async () => {
+      await modules.channels.runDue();
+      if (Date.now() - lastRollUp >= 5 * 60_000) {
+        lastRollUp = Date.now();
+        await modules.channels.rollUpViews();
+      }
+    },
+  });
+  lifecycle.onShutdown({ name: 'channel_scheduler', run: () => channelScheduler.stop() });
+
   const app = await buildApp({
     logger,
     rateLimiter,

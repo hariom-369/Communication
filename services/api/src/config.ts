@@ -41,6 +41,8 @@ const schema = z
      * share addresses (CGNAT, offices); signed-in users are limited per user by each route.
      */
     IP_FLOOD_LIMIT_PER_MINUTE: env.positiveInt(1200),
+    /** How often scheduled channel posts and ownership transfers are applied (ms). */
+    CHANNEL_SCHEDULER_INTERVAL_MS: env.positiveInt(15_000),
     /** Path (on the web origin) that the edge routes to services/realtime. */
     REALTIME_WS_PATH: z
       .string()

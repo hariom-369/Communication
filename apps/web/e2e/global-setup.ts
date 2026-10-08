@@ -136,6 +136,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     // Every simulated user in the suite comes from 127.0.0.1; the per-address flood guard is
     // for real networks, so it is raised here (per-user route limits still apply).
     IP_FLOOD_LIMIT_PER_MINUTE: '20000',
+    CHANNEL_SCHEDULER_INTERVAL_MS: '1000',
     SHUTDOWN_DRAIN_MS: '0',
     MEDIA_S3_BUCKET: bucket,
     MEDIA_S3_REGION: 'us-east-1',

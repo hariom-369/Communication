@@ -796,3 +796,47 @@ device to act on a request it sees. Notifications of community changes go to eve
 is acceptable at current scale and is revisited with Phase 8 fan-out.
 
 **Status.** PROPOSED — implemented; space membership rules under S-12.
+
+## ADR-046 — Channels implementation: fan-out on read, sharded counters, in-process SSRF fetcher (Phase 8)
+
+**Context.** Channels (ADR-012) are server-protected broadcast feeds that must work for audiences
+of a million or more, with scheduling, polls, reactions, comments, analytics and link previews,
+and without exposing per-subscriber behaviour to channel owners.
+
+**Decision.**
+- **Fan-out on read.** Publishing is one `channel_posts` insert plus an update of
+  `channels.last_post_at`; subscribers fetch keyset-paginated feeds. Measured: median publish
+  9.4 ms with 1,000,000 subscribers vs 11.5 ms with one, and zero writes to
+  `channel_subscribers` (`channels.scale.integration.test.ts`, run with `TESSERA_SCALE_TESTS=1`).
+  Open channel pages poll every 20 s; there are no per-subscriber realtime hints yet.
+- **Counters.** Subscriber counts and daily joins/leaves use 16-way sharded rows (no single hot
+  row); reaction counts are maintained in the same transaction as the reaction. Views are unique
+  per user per post per day in Valkey HyperLogLogs, rolled up every 5 minutes into
+  `channel_post_views`; owners see aggregates only.
+- **Scheduling.** A singleton scheduler (Postgres advisory lock) publishes due posts with a
+  compare-and-set (`status IN ('draft','scheduled') → 'published'`), so each post goes out exactly
+  once even with concurrent runs; it also applies ownership transfers.
+- **Ownership transfer** goes only to an existing admin, needs re-authentication, and takes effect
+  after 24 hours (cancellable); the previous owner stays as a full admin. Owner-only actions and
+  moderation of others' posts and comments are audited.
+- **Admin roles.** Bitset (`post`, `editAny`, `deleteAny`, `manageComments`, `viewAnalytics`,
+  `manageAdmins`, `editChannelInfo`); admins never grant permissions they lack, and only the
+  owner changes an admin who can manage admins.
+- **Link previews** are fetched only by the server, never accepted from clients, through the
+  SSRF-hardened fetcher (`services/api/src/platform/safe-fetch`). It implements every rule of
+  security.md §6 — https/443 only, DNS resolved once with every answer checked against the
+  deny-list (private, loopback, link-local/metadata, CGNAT, multicast, documentation, reserved;
+  IPv4-mapped IPv6 refused; NAT64/6to4/Teredo handled) and the connection pinned to a checked
+  address, redirects re-validated (max 3), 5 s deadline, 2 MiB cap, identity encoding, HTML head
+  only, fixed User-Agent, no cookies. Previews carry title, description and site name only — no
+  images (privacy and SSRF surface). Results, including failures, are cached for an hour/10 min.
+  **Deviation:** the fetcher runs in the API process, not as an isolated service behind an egress
+  proxy; that isolation is required before the first shared environment (tracked in security.md).
+- **Search.** Postgres full-text search (`simple` configuration) over published posts per
+  channel; cross-channel search moves to OpenSearch later.
+
+**Deferred.** Media in channel posts (needs the public-media scan/CSAM pipeline, Phase 11);
+reports and takedown workflows (Phase 11); subscriber notifications (Phase 10); link reputation
+checks (Phase 11 blocklist); realtime "channel updated" hints.
+
+**Status.** PROPOSED — implemented.

@@ -267,6 +267,132 @@ export interface CommunitySpaceRolesTable {
   role_id: string;
 }
 
+export interface ChannelsTable {
+  id: string;
+  handle: string;
+  title: string;
+  description: Generated<string>;
+  visibility: 'public' | 'private';
+  comments_enabled: Generated<boolean>;
+  slow_mode_seconds: Generated<number>;
+  owner_id: string;
+  last_post_at: Date | null;
+  created_at: Timestamp;
+  deleted_at: NullableTimestamp;
+}
+
+export interface ChannelAdminsTable {
+  channel_id: string;
+  user_id: string;
+  permissions: number;
+  added_by: string;
+  created_at: Timestamp;
+}
+
+export interface ChannelOwnershipTransfersTable {
+  channel_id: string;
+  to_user_id: string;
+  requested_by: string;
+  effective_at: Date;
+}
+
+export interface ChannelSubscribersTable {
+  channel_id: string;
+  user_id: string;
+  created_at: Timestamp;
+}
+
+export interface ChannelSubscriberCountsTable {
+  channel_id: string;
+  shard: number;
+  count: ColumnType<string, number | string, number | string>;
+}
+
+export interface ChannelSubscriberDailyTable {
+  channel_id: string;
+  // Read through to_char(): compared and written as YYYY-MM-DD strings.
+  day: ColumnType<string, string, string>;
+  shard: number;
+  joined: Generated<number>;
+  left_count: Generated<number>;
+}
+
+export type ChannelPostStatus = 'draft' | 'scheduled' | 'published' | 'removed';
+
+export interface ChannelPostsTable {
+  id: string;
+  channel_id: string;
+  author_id: string;
+  status: ChannelPostStatus;
+  body: string;
+  preview_url: string | null;
+  preview: ColumnType<unknown, string | null, string | null>;
+  publish_at: Date | null;
+  published_at: Date | null;
+  edited_at: Date | null;
+  removed_at: Date | null;
+  removed_by: string | null;
+  created_at: Timestamp;
+  search: ColumnType<string, never, never>;
+}
+
+export interface ChannelPollsTable {
+  post_id: string;
+  question: string;
+  options: ColumnType<string[], string, string>;
+  multiple: boolean;
+  anonymous: boolean;
+}
+
+export interface ChannelPollVotesTable {
+  post_id: string;
+  user_id: string;
+  option: number;
+  created_at: Timestamp;
+}
+
+export interface ChannelReactionsTable {
+  post_id: string;
+  user_id: string;
+  emoji: string;
+  created_at: Timestamp;
+}
+
+export interface ChannelReactionCountsTable {
+  post_id: string;
+  emoji: string;
+  count: ColumnType<string, number | string, number | string>;
+}
+
+export interface ChannelCommentsTable {
+  id: string;
+  post_id: string;
+  author_id: string;
+  body: string;
+  created_at: Timestamp;
+  removed_at: Date | null;
+  removed_by: string | null;
+}
+
+export interface ChannelPostViewsTable {
+  post_id: string;
+  // Read through to_char(): compared and written as YYYY-MM-DD strings.
+  day: ColumnType<string, string, string>;
+  views: ColumnType<string, number | string, number | string>;
+}
+
+export interface ChannelLinksTable {
+  id: string;
+  channel_id: string;
+  token_digest: Buffer;
+  created_by: string;
+  created_at: Timestamp;
+  expires_at: Date;
+  max_uses: number | null;
+  uses: Generated<number>;
+  revoked_at: NullableTimestamp;
+}
+
 export interface DirectPairsTable {
   user_low: string;
   user_high: string;
@@ -422,6 +548,20 @@ export interface Database {
   community_links: CommunityLinksTable;
   community_spaces: CommunitySpacesTable;
   community_space_roles: CommunitySpaceRolesTable;
+  channels: ChannelsTable;
+  channel_admins: ChannelAdminsTable;
+  channel_ownership_transfers: ChannelOwnershipTransfersTable;
+  channel_subscribers: ChannelSubscribersTable;
+  channel_subscriber_counts: ChannelSubscriberCountsTable;
+  channel_subscriber_daily: ChannelSubscriberDailyTable;
+  channel_posts: ChannelPostsTable;
+  channel_polls: ChannelPollsTable;
+  channel_poll_votes: ChannelPollVotesTable;
+  channel_reactions: ChannelReactionsTable;
+  channel_reaction_counts: ChannelReactionCountsTable;
+  channel_comments: ChannelCommentsTable;
+  channel_post_views: ChannelPostViewsTable;
+  channel_links: ChannelLinksTable;
 }
 
 /** Owning module of every table ('platform' = infrastructure code outside modules/). */
@@ -465,4 +605,18 @@ export const TABLE_OWNERS: Readonly<Record<keyof Database, string>> = {
   community_links: 'communities',
   community_spaces: 'communities',
   community_space_roles: 'communities',
+  channels: 'channels',
+  channel_admins: 'channels',
+  channel_ownership_transfers: 'channels',
+  channel_subscribers: 'channels',
+  channel_subscriber_counts: 'channels',
+  channel_subscriber_daily: 'channels',
+  channel_posts: 'channels',
+  channel_polls: 'channels',
+  channel_poll_votes: 'channels',
+  channel_reactions: 'channels',
+  channel_reaction_counts: 'channels',
+  channel_comments: 'channels',
+  channel_post_views: 'channels',
+  channel_links: 'channels',
 };

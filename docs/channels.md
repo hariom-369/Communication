@@ -1,6 +1,20 @@
 # Broadcast channels
 
-Status: PROPOSED · Decision: ADR-012 (channels are not E2EE)
+Status: Phase 8 IMPLEMENTED (except media, reports/takedowns, notifications — see §0) ·
+Decisions: ADR-012 (channels are not E2EE), ADR-046
+
+## 0. What is implemented (Phase 8)
+
+Channels module (`services/api/src/modules/channels`, migration `0009_channels.sql`, 35 routes)
+and web UI (`apps/web/src/pages/channels`): public and private channels with `@handle`, directory
+search, subscribe/unsubscribe, invite links for private channels; posts (text, polls, server-fetched
+link previews) as published, scheduled or draft; edit and removal; reactions from a fixed set;
+anonymous or public polls; comments with on/off and slow mode; per-channel full-text search;
+admin roles (§3) and delayed ownership transfer; aggregate analytics (views, reactions,
+comments, joins/leaves). Not yet: media in posts (Phase 11 pipeline), reports and takedown SLA
+timers (Phase 11), notifications (Phase 10), synthetic-content labels (Phase 11), realtime
+"updated" hints (pages poll). Avatars are not implemented.
+
 
 ## 1. Scope
 

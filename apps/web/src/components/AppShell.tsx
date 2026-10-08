@@ -12,6 +12,7 @@ import { OfflineBanner } from './OfflineBanner.js';
 const NAV: readonly { to: string; label: string }[] = [
   { to: '/chats', label: 'Chats' },
   { to: '/communities', label: 'Communities' },
+  { to: '/channels', label: 'Channels' },
   { to: '/settings/security', label: 'Security' },
   { to: '/settings/devices', label: 'Devices' },
   { to: '/settings/privacy', label: 'Privacy' },

@@ -7,6 +7,9 @@ import { HOME_PATH } from './home.js';
 import { MessagingProvider } from './messaging/provider.js';
 import { ChatsPage } from './pages/chats/ChatsPage.js';
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage.js';
+import { ChannelInvitePage } from './pages/channels/ChannelInvitePage.js';
+import { ChannelPage } from './pages/channels/ChannelPage.js';
+import { ChannelsPage } from './pages/channels/ChannelsPage.js';
 import { CommunitiesPage } from './pages/communities/CommunitiesPage.js';
 import { CommunityInvitePage } from './pages/communities/CommunityInvitePage.js';
 import { CommunityPage } from './pages/communities/CommunityPage.js';
@@ -139,6 +142,9 @@ const router = createBrowserRouter([
       { path: '/chats', element: <ChatsPage /> },
       { path: '/chats/:conversationId', element: <ChatsPage /> },
       { path: '/invite/:token', element: <InvitePage /> },
+      { path: '/channels', element: <ChannelsPage /> },
+      { path: '/channels/:channelId', element: <ChannelPage /> },
+      { path: '/channel-invite/:token', element: <ChannelInvitePage /> },
       { path: '/communities', element: <CommunitiesPage /> },
       { path: '/communities/:communityId', element: <CommunityPage /> },
       { path: '/join/:token', element: <CommunityInvitePage /> },

@@ -7,6 +7,7 @@ import type { Database } from './db/schema.js';
 import { AccountService, accountsRoutes } from './modules/accounts/index.js';
 import { AuditLog } from './modules/audit/index.js';
 import { BackupsService, backupsRoutes } from './modules/backups/index.js';
+import { ChannelsService, LinkPreviewer, channelRoutes } from './modules/channels/index.js';
 import { CommunitiesService, communityRoutes } from './modules/communities/index.js';
 import {
   AuthService,
@@ -72,6 +73,7 @@ export interface Modules {
   readonly messaging: MessagingService;
   readonly keys: KeysService;
   readonly media: MediaService;
+  readonly channels: ChannelsService;
 }
 
 const DAY_MS = 24 * 60 * 60_000;
@@ -145,6 +147,16 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
     infra.logger,
   );
   groups.useSpaces(communities);
+  const previews = new LinkPreviewer(infra.valkey, config.VALKEY_KEY_PREFIX);
+  const channels = new ChannelsService({
+    db: infra.db,
+    valkey: infra.valkey,
+    keyPrefix: config.VALKEY_KEY_PREFIX,
+    directory: accounts,
+    previews,
+    audit,
+    logger: infra.logger,
+  });
   keys.useNotifier(auth);
   const backups = new BackupsService(infra.db, audit, auth);
   const media = new MediaService(infra.db, infra.media, infra.logger);
@@ -163,6 +175,7 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
       ...messagingRoutes({ messaging }),
       ...groupRoutes({ groups }),
       ...communityRoutes({ communities }),
+      ...channelRoutes({ channels, previews }),
       ...keysRoutes({ keys }),
       ...backupsRoutes({ backups }),
       ...mediaRoutes({ media }),
@@ -173,5 +186,6 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
     messaging,
     keys,
     media,
+    channels,
   };
 }

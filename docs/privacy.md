@@ -72,6 +72,9 @@ no advertising profiling at launch.
 | Communities: name, description, rules (and which version each member accepted), visibility, roles and their permissions, members and their roles, bans, invite-link usage, space names and who is in each space | Yes | while the community exists (deleted with it; ban rows kept until lifted or the community is deleted) | needed to list, search and enforce communities (ADR-045); public communities are searchable by any signed-in user |
 | Group name, description, pins, polls, votes, mentions | **No** | — | E2EE content |
 | Invite links: token digest, expiry, use count, optional preview title | Yes | until revoked/expired and the group is deleted | the preview title is the only group text the server can read, and only if an admin sets one |
+| Channels: handle, title, description, visibility, posts, polls and votes, reactions, comments, admins, subscribers, invite-link usage | Yes — **not end-to-end encrypted** (labelled in the UI) | until deleted by the author/admin or the channel is deleted | ADR-012/046; public channels and their posts are visible to any signed-in user |
+| Channel views | Aggregate only: unique viewers per post per day (HyperLogLog), never who viewed | daily keys 40 days; daily totals while the post exists | owners see totals, never individuals |
+| Link previews in channel posts | The URL and the page's title/description/site name, fetched by the server | with the post; fetch cache 1 h | fetched by the SSRF-hardened fetcher, no images |
 | Push notification content | No (content-free push) | — | [notifications.md](notifications.md) |
 | Channel posts, comments, public profiles | Yes | until deleted | not E2EE |
 | Search queries (public directory) | Yes | 30 days, not linked to profile for analytics | |

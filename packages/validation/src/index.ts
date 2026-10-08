@@ -65,3 +65,4 @@ export * from './backups.js';
 export * from './media.js';
 export * from './groups.js';
 export * from './communities.js';
+export * from './channels.js';
