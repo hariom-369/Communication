@@ -7,6 +7,7 @@ import type { Database } from './db/schema.js';
 import { AccountService, accountsRoutes } from './modules/accounts/index.js';
 import { AuditLog } from './modules/audit/index.js';
 import { BackupsService, backupsRoutes } from './modules/backups/index.js';
+import { CallsService, LiveKitRooms, callRoutes } from './modules/calls/index.js';
 import { ChannelsService, LinkPreviewer, channelRoutes } from './modules/channels/index.js';
 import { CommunitiesService, communityRoutes } from './modules/communities/index.js';
 import {
@@ -55,6 +56,15 @@ export type ModuleConfig = Pick<
   | 'VALKEY_KEY_PREFIX'
   | 'MAILBOX_RETENTION_DAYS'
   | 'REALTIME_WS_PATH'
+  | 'TURN_URLS'
+  | 'TURN_SHARED_SECRET'
+  | 'TURN_TTL_SECONDS'
+  | 'STUN_URLS'
+  | 'LIVEKIT_URL'
+  | 'LIVEKIT_API_URL'
+  | 'LIVEKIT_API_KEY'
+  | 'LIVEKIT_API_SECRET'
+  | 'CALL_RECORD_RETENTION_DAYS'
 >;
 
 export interface ModuleInfrastructure {
@@ -74,6 +84,7 @@ export interface Modules {
   readonly keys: KeysService;
   readonly media: MediaService;
   readonly channels: ChannelsService;
+  readonly calls: CallsService;
 }
 
 const DAY_MS = 24 * 60 * 60_000;
@@ -167,6 +178,44 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
     areContacts: (a, b) => messaging.areContacts(a, b),
   });
 
+  const livekit =
+    config.LIVEKIT_URL !== undefined &&
+    config.LIVEKIT_API_URL !== undefined &&
+    config.LIVEKIT_API_KEY !== undefined &&
+    config.LIVEKIT_API_SECRET !== undefined
+      ? {
+          url: config.LIVEKIT_URL,
+          apiUrl: config.LIVEKIT_API_URL,
+          apiKey: config.LIVEKIT_API_KEY,
+          apiSecret: config.LIVEKIT_API_SECRET,
+        }
+      : null;
+  const calls = new CallsService({
+    db: infra.db,
+    conversations: {
+      callContext: (id) => messaging.callContext(id),
+      areContacts: (a, b) => messaging.areContacts(a, b),
+    },
+    devices: keys,
+    directory: accounts,
+    publisher,
+    sfu: livekit === null ? null : new LiveKitRooms(livekit),
+    config: {
+      turn:
+        config.TURN_URLS !== undefined && config.TURN_SHARED_SECRET !== undefined
+          ? {
+              urls: config.TURN_URLS,
+              secret: config.TURN_SHARED_SECRET,
+              ttlSeconds: config.TURN_TTL_SECONDS,
+            }
+          : null,
+      stunUrls: config.STUN_URLS ?? [],
+      sfu: livekit === null ? null : { url: livekit.url },
+      retentionDays: config.CALL_RECORD_RETENTION_DAYS,
+    },
+    logger: infra.logger,
+  });
+
   return {
     routes: [
       ...metaRoutes({ build: { version: config.BUILD_VERSION, commit: config.BUILD_COMMIT } }),
@@ -176,6 +225,7 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
       ...groupRoutes({ groups }),
       ...communityRoutes({ communities }),
       ...channelRoutes({ channels, previews }),
+      ...callRoutes({ calls }),
       ...keysRoutes({ keys }),
       ...backupsRoutes({ backups }),
       ...mediaRoutes({ media }),
@@ -187,5 +237,6 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
     keys,
     media,
     channels,
+    calls,
   };
 }

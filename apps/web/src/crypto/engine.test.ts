@@ -167,6 +167,25 @@ describe('groups (roles in the encryption state)', () => {
   });
 });
 
+describe('group-call keys (ADR-047)', () => {
+  it('gives both members the same per-call secret and distinct sender indexes', async () => {
+    const { alice, bob } = await conversation();
+    const call = '0192f0c1-7a3b-7c4d-8e5f-0000000ca11a';
+    const a = await alice.engine.call('callSecret', [CONVERSATION, call, 16]);
+    const b = await bob.engine.call('callSecret', [CONVERSATION, call, 16]);
+    expect(a.secret).toBe(b.secret);
+    expect(atob(a.secret)).toHaveLength(16);
+    expect(a.ownIndex).not.toBe(b.ownIndex);
+    expect(a.members.find((m) => m.index === b.ownIndex)?.deviceId).toBe(bob.identity.deviceId);
+    const other = await alice.engine.call('callSecret', [
+      CONVERSATION,
+      '0192f0c1-7a3b-7c4d-8e5f-0000000ca11b',
+      16,
+    ]);
+    expect(other.secret).not.toBe(a.secret);
+  });
+});
+
 describe('crypto worker engine', () => {
   it('delivers messages and keeps decrypted history across restarts', async () => {
     const { alice, bob, commit } = await conversation();

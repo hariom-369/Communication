@@ -89,6 +89,8 @@ jobs:
           python3 -m pip install --user "moto[server]==5.2.3"
           nohup ~/.local/bin/moto_server -H 127.0.0.1 -p 59500 > moto.log 2>&1 &
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:59500/ > /dev/null && break; sleep 1; done
+      - name: coturn for the TURN relay-policy test (infra/calls/turnserver.conf)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends coturn
       - run: pnpm test:integration
 
   e2e:
@@ -136,6 +138,18 @@ jobs:
           python3 -m pip install --user "moto[server]==5.2.3"
           nohup ~/.local/bin/moto_server -H 127.0.0.1 -p 59500 > moto.log 2>&1 &
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:59500/ > /dev/null && break; sleep 1; done
+      - name: Call infrastructure (coturn; LiveKit built from its pinned, checksum-verified Go module)
+        env:
+          LIVEKIT_VERSION: v1.13.9
+          GOTOOLCHAIN: auto
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends coturn
+          mkdir -p "$HOME/.local/bin" /tmp/livekit-build && cd /tmp/livekit-build
+          printf 'module build\ngo 1.24\n' > go.mod
+          dir=$(go mod download -json "github.com/livekit/livekit-server@${LIVEKIT_VERSION}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["Dir"])')
+          cp -r "$dir" src && chmod -R u+w src && cd src
+          go build -o "$HOME/.local/bin/livekit-server" ./cmd/server
+          "$HOME/.local/bin/livekit-server" --version
       - run: pnpm build
       - run: pnpm --filter @tessera/web exec playwright install --with-deps chromium
       - run: pnpm --filter @tessera/web test:e2e

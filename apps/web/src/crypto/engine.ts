@@ -5,6 +5,7 @@ import type {
   EncryptedBackup,
   GroupPolicy,
   HistoryBundle,
+  CallSecret,
   CommitOutput,
   CryptoApi,
   DeviceRef,
@@ -205,6 +206,11 @@ export class CryptoEngine {
         members: exists ? (JSON.parse(this.#c.members(conversationId)) as DeviceRef[]) : [],
       });
     },
+
+    callSecret: (conversationId, callId, keyLength) =>
+      Promise.resolve(
+        JSON.parse(this.#c.callSecret(conversationId, callId, keyLength)) as CallSecret,
+      ),
 
     createGroup: async (conversationId, keyPackages, allowed, policy) => {
       const output = JSON.parse(

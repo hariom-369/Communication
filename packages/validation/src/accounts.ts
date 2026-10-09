@@ -98,6 +98,12 @@ export const privacySettingsSchema = z.strictObject({
   readReceipts: z.boolean(),
   groupInvites: visibilitySchema,
   calls: visibilitySchema,
+  /**
+   * When to relay calls through Tessera's TURN servers so the other person never learns your IP
+   * address (docs/calling.md §2): always, unless you verified their safety number, or never.
+   * Enforced by your own device (it offers only relayed network paths).
+   */
+  callRelay: z.enum(['always', 'unverified', 'never']).default('unverified'),
   discoverableByUsername: z.boolean(),
 });
 export type PrivacySettings = z.infer<typeof privacySettingsSchema>;
@@ -109,5 +115,6 @@ export const DEFAULT_PRIVACY_SETTINGS: PrivacySettings = {
   readReceipts: true,
   groupInvites: 'contacts',
   calls: 'contacts',
+  callRelay: 'unverified',
   discoverableByUsername: true,
 };

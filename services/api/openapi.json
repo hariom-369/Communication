@@ -1284,6 +1284,15 @@
                         "nobody"
                       ]
                     },
+                    "callRelay": {
+                      "default": "unverified",
+                      "type": "string",
+                      "enum": [
+                        "always",
+                        "unverified",
+                        "never"
+                      ]
+                    },
                     "discoverableByUsername": {
                       "type": "boolean"
                     }
@@ -1295,6 +1304,7 @@
                     "readReceipts",
                     "groupInvites",
                     "calls",
+                    "callRelay",
                     "discoverableByUsername"
                   ],
                   "additionalProperties": false
@@ -1534,6 +1544,15 @@
                       "everyone",
                       "contacts",
                       "nobody"
+                    ]
+                  },
+                  "callRelay": {
+                    "default": "unverified",
+                    "type": "string",
+                    "enum": [
+                      "always",
+                      "unverified",
+                      "never"
                     ]
                   },
                   "discoverableByUsername": {
@@ -32646,6 +32665,2424 @@
                       "type": "null"
                     }
                   ]
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Error (RFC 9457 problem details)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "BAD_REQUEST",
+                        "VALIDATION_FAILED",
+                        "UNAUTHENTICATED",
+                        "FORBIDDEN",
+                        "CSRF_REJECTED",
+                        "NOT_FOUND",
+                        "METHOD_NOT_ALLOWED",
+                        "CONFLICT",
+                        "USERNAME_TAKEN",
+                        "INVALID_CREDENTIALS",
+                        "INVALID_CODE",
+                        "WEAK_PASSWORD",
+                        "STEP_UP_REQUIRED",
+                        "LAST_CREDENTIAL",
+                        "PAYLOAD_TOO_LARGE",
+                        "UNSUPPORTED_MEDIA_TYPE",
+                        "RATE_LIMITED",
+                        "SERVICE_UNAVAILABLE",
+                        "INTERNAL"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "minimum": 400,
+                      "maximum": 599
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "errorId": {
+                      "type": "string"
+                    },
+                    "retryAfterSeconds": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "fieldErrors": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "message"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "code",
+                    "title",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Error (RFC 9457 problem details)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "BAD_REQUEST",
+                        "VALIDATION_FAILED",
+                        "UNAUTHENTICATED",
+                        "FORBIDDEN",
+                        "CSRF_REJECTED",
+                        "NOT_FOUND",
+                        "METHOD_NOT_ALLOWED",
+                        "CONFLICT",
+                        "USERNAME_TAKEN",
+                        "INVALID_CREDENTIALS",
+                        "INVALID_CODE",
+                        "WEAK_PASSWORD",
+                        "STEP_UP_REQUIRED",
+                        "LAST_CREDENTIAL",
+                        "PAYLOAD_TOO_LARGE",
+                        "UNSUPPORTED_MEDIA_TYPE",
+                        "RATE_LIMITED",
+                        "SERVICE_UNAVAILABLE",
+                        "INTERNAL"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "minimum": 400,
+                      "maximum": 599
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "errorId": {
+                      "type": "string"
+                    },
+                    "retryAfterSeconds": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "fieldErrors": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "message"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "code",
+                    "title",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/calls/capabilities": {
+      "get": {
+        "operationId": "calls.capabilities",
+        "summary": "Whether TURN relaying and group calls are available",
+        "tags": [
+          "calls"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "relayAvailable": {
+                      "type": "boolean"
+                    },
+                    "groupCallsAvailable": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "relayAvailable",
+                    "groupCallsAvailable"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Error (RFC 9457 problem details)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "BAD_REQUEST",
+                        "VALIDATION_FAILED",
+                        "UNAUTHENTICATED",
+                        "FORBIDDEN",
+                        "CSRF_REJECTED",
+                        "NOT_FOUND",
+                        "METHOD_NOT_ALLOWED",
+                        "CONFLICT",
+                        "USERNAME_TAKEN",
+                        "INVALID_CREDENTIALS",
+                        "INVALID_CODE",
+                        "WEAK_PASSWORD",
+                        "STEP_UP_REQUIRED",
+                        "LAST_CREDENTIAL",
+                        "PAYLOAD_TOO_LARGE",
+                        "UNSUPPORTED_MEDIA_TYPE",
+                        "RATE_LIMITED",
+                        "SERVICE_UNAVAILABLE",
+                        "INTERNAL"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "minimum": 400,
+                      "maximum": 599
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "errorId": {
+                      "type": "string"
+                    },
+                    "retryAfterSeconds": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "fieldErrors": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "message"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "code",
+                    "title",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Error (RFC 9457 problem details)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "BAD_REQUEST",
+                        "VALIDATION_FAILED",
+                        "UNAUTHENTICATED",
+                        "FORBIDDEN",
+                        "CSRF_REJECTED",
+                        "NOT_FOUND",
+                        "METHOD_NOT_ALLOWED",
+                        "CONFLICT",
+                        "USERNAME_TAKEN",
+                        "INVALID_CREDENTIALS",
+                        "INVALID_CODE",
+                        "WEAK_PASSWORD",
+                        "STEP_UP_REQUIRED",
+                        "LAST_CREDENTIAL",
+                        "PAYLOAD_TOO_LARGE",
+                        "UNSUPPORTED_MEDIA_TYPE",
+                        "RATE_LIMITED",
+                        "SERVICE_UNAVAILABLE",
+                        "INTERNAL"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "minimum": 400,
+                      "maximum": 599
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "errorId": {
+                      "type": "string"
+                    },
+                    "retryAfterSeconds": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "fieldErrors": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "message"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "code",
+                    "title",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/calls/ice": {
+      "post": {
+        "operationId": "calls.ice",
+        "summary": "Fresh short-lived TURN credentials (for an ICE restart)",
+        "tags": [
+          "calls"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "iceServers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "urls": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "username": {
+                            "type": "string"
+                          },
+                          "credential": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "urls"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "relayAvailable": {
+                      "type": "boolean"
+                    },
+                    "ttlSeconds": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "iceServers",
+                    "relayAvailable",
+                    "ttlSeconds"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Error (RFC 9457 problem details)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "BAD_REQUEST",
+                        "VALIDATION_FAILED",
+                        "UNAUTHENTICATED",
+                        "FORBIDDEN",
+                        "CSRF_REJECTED",
+                        "NOT_FOUND",
+                        "METHOD_NOT_ALLOWED",
+                        "CONFLICT",
+                        "USERNAME_TAKEN",
+                        "INVALID_CREDENTIALS",
+                        "INVALID_CODE",
+                        "WEAK_PASSWORD",
+                        "STEP_UP_REQUIRED",
+                        "LAST_CREDENTIAL",
+                        "PAYLOAD_TOO_LARGE",
+                        "UNSUPPORTED_MEDIA_TYPE",
+                        "RATE_LIMITED",
+                        "SERVICE_UNAVAILABLE",
+                        "INTERNAL"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "minimum": 400,
+                      "maximum": 599
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "errorId": {
+                      "type": "string"
+                    },
+                    "retryAfterSeconds": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "fieldErrors": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "message"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "code",
+                    "title",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Error (RFC 9457 problem details)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "BAD_REQUEST",
+                        "VALIDATION_FAILED",
+                        "UNAUTHENTICATED",
+                        "FORBIDDEN",
+                        "CSRF_REJECTED",
+                        "NOT_FOUND",
+                        "METHOD_NOT_ALLOWED",
+                        "CONFLICT",
+                        "USERNAME_TAKEN",
+                        "INVALID_CREDENTIALS",
+                        "INVALID_CODE",
+                        "WEAK_PASSWORD",
+                        "STEP_UP_REQUIRED",
+                        "LAST_CREDENTIAL",
+                        "PAYLOAD_TOO_LARGE",
+                        "UNSUPPORTED_MEDIA_TYPE",
+                        "RATE_LIMITED",
+                        "SERVICE_UNAVAILABLE",
+                        "INTERNAL"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "minimum": 400,
+                      "maximum": 599
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "errorId": {
+                      "type": "string"
+                    },
+                    "retryAfterSeconds": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "fieldErrors": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "message"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "code",
+                    "title",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/calls": {
+      "post": {
+        "operationId": "calls.start",
+        "summary": "Start a call in a conversation (or get the one already going on)",
+        "tags": [
+          "calls"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "conversationId": {
+                    "type": "string",
+                    "minLength": 36,
+                    "maxLength": 36
+                  },
+                  "media": {
+                    "type": "string",
+                    "enum": [
+                      "audio",
+                      "video"
+                    ]
+                  },
+                  "deviceId": {
+                    "type": "string",
+                    "minLength": 36,
+                    "maxLength": 36
+                  }
+                },
+                "required": [
+                  "conversationId",
+                  "media",
+                  "deviceId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "call": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "conversationId": {
+                          "type": "string"
+                        },
+                        "mode": {
+                          "type": "string",
+                          "enum": [
+                            "p2p",
+                            "sfu"
+                          ]
+                        },
+                        "media": {
+                          "type": "string",
+                          "enum": [
+                            "audio",
+                            "video"
+                          ]
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "ringing",
+                            "active",
+                            "ended"
+                          ]
+                        },
+                        "initiatorUserId": {
+                          "type": "string"
+                        },
+                        "initiatorDeviceId": {
+                          "type": "string"
+                        },
+                        "startedAt": {
+                          "type": "string"
+                        },
+                        "answeredAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "endedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "endReason": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "hangup",
+                                "declined",
+                                "busy",
+                                "missed",
+                                "failed",
+                                "removed"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "participantCount": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "conversationId",
+                        "mode",
+                        "media",
+                        "state",
+                        "initiatorUserId",
+                        "initiatorDeviceId",
+                        "startedAt",
+                        "answeredAt",
+                        "endedAt",
+                        "endReason",
+                        "participantCount"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "created": {
+                      "type": "boolean"
+                    },
+                    "ice": {
+                      "type": "object",
+                      "properties": {
+                        "iceServers": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "urls": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "username": {
+                                "type": "string"
+                              },
+                              "credential": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "urls"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "relayAvailable": {
+                          "type": "boolean"
+                        },
+                        "ttlSeconds": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "iceServers",
+                        "relayAvailable",
+                        "ttlSeconds"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "call",
+                    "created",
+                    "ice"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Error (RFC 9457 problem details)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "BAD_REQUEST",
+                        "VALIDATION_FAILED",
+                        "UNAUTHENTICATED",
+                        "FORBIDDEN",
+                        "CSRF_REJECTED",
+                        "NOT_FOUND",
+                        "METHOD_NOT_ALLOWED",
+                        "CONFLICT",
+                        "USERNAME_TAKEN",
+                        "INVALID_CREDENTIALS",
+                        "INVALID_CODE",
+                        "WEAK_PASSWORD",
+                        "STEP_UP_REQUIRED",
+                        "LAST_CREDENTIAL",
+                        "PAYLOAD_TOO_LARGE",
+                        "UNSUPPORTED_MEDIA_TYPE",
+                        "RATE_LIMITED",
+                        "SERVICE_UNAVAILABLE",
+                        "INTERNAL"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "minimum": 400,
+                      "maximum": 599
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "errorId": {
+                      "type": "string"
+                    },
+                    "retryAfterSeconds": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "fieldErrors": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "message"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "code",
+                    "title",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Error (RFC 9457 problem details)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "BAD_REQUEST",
+                        "VALIDATION_FAILED",
+                        "UNAUTHENTICATED",
+                        "FORBIDDEN",
+                        "CSRF_REJECTED",
+                        "NOT_FOUND",
+                        "METHOD_NOT_ALLOWED",
+                        "CONFLICT",
+                        "USERNAME_TAKEN",
+                        "INVALID_CREDENTIALS",
+                        "INVALID_CODE",
+                        "WEAK_PASSWORD",
+                        "STEP_UP_REQUIRED",
+                        "LAST_CREDENTIAL",
+                        "PAYLOAD_TOO_LARGE",
+                        "UNSUPPORTED_MEDIA_TYPE",
+                        "RATE_LIMITED",
+                        "SERVICE_UNAVAILABLE",
+                        "INTERNAL"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "minimum": 400,
+                      "maximum": 599
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "errorId": {
+                      "type": "string"
+                    },
+                    "retryAfterSeconds": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "fieldErrors": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "message"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "code",
+                    "title",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/calls/{callId}": {
+      "get": {
+        "operationId": "calls.get",
+        "summary": "A call record",
+        "tags": [
+          "calls"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 36,
+              "maxLength": 36
+            },
+            "in": "path",
+            "name": "callId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "conversationId": {
+                      "type": "string"
+                    },
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "p2p",
+                        "sfu"
+                      ]
+                    },
+                    "media": {
+                      "type": "string",
+                      "enum": [
+                        "audio",
+                        "video"
+                      ]
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "ringing",
+                        "active",
+                        "ended"
+                      ]
+                    },
+                    "initiatorUserId": {
+                      "type": "string"
+                    },
+                    "initiatorDeviceId": {
+                      "type": "string"
+                    },
+                    "startedAt": {
+                      "type": "string"
+                    },
+                    "answeredAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "endedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "endReason": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "hangup",
+                            "declined",
+                            "busy",
+                            "missed",
+                            "failed",
+                            "removed"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "participantCount": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "conversationId",
+                    "mode",
+                    "media",
+                    "state",
+                    "initiatorUserId",
+                    "initiatorDeviceId",
+                    "startedAt",
+                    "answeredAt",
+                    "endedAt",
+                    "endReason",
+                    "participantCount"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Error (RFC 9457 problem details)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "BAD_REQUEST",
+                        "VALIDATION_FAILED",
+                        "UNAUTHENTICATED",
+                        "FORBIDDEN",
+                        "CSRF_REJECTED",
+                        "NOT_FOUND",
+                        "METHOD_NOT_ALLOWED",
+                        "CONFLICT",
+                        "USERNAME_TAKEN",
+                        "INVALID_CREDENTIALS",
+                        "INVALID_CODE",
+                        "WEAK_PASSWORD",
+                        "STEP_UP_REQUIRED",
+                        "LAST_CREDENTIAL",
+                        "PAYLOAD_TOO_LARGE",
+                        "UNSUPPORTED_MEDIA_TYPE",
+                        "RATE_LIMITED",
+                        "SERVICE_UNAVAILABLE",
+                        "INTERNAL"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "minimum": 400,
+                      "maximum": 599
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "errorId": {
+                      "type": "string"
+                    },
+                    "retryAfterSeconds": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "fieldErrors": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "message"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "code",
+                    "title",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Error (RFC 9457 problem details)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "BAD_REQUEST",
+                        "VALIDATION_FAILED",
+                        "UNAUTHENTICATED",
+                        "FORBIDDEN",
+                        "CSRF_REJECTED",
+                        "NOT_FOUND",
+                        "METHOD_NOT_ALLOWED",
+                        "CONFLICT",
+                        "USERNAME_TAKEN",
+                        "INVALID_CREDENTIALS",
+                        "INVALID_CODE",
+                        "WEAK_PASSWORD",
+                        "STEP_UP_REQUIRED",
+                        "LAST_CREDENTIAL",
+                        "PAYLOAD_TOO_LARGE",
+                        "UNSUPPORTED_MEDIA_TYPE",
+                        "RATE_LIMITED",
+                        "SERVICE_UNAVAILABLE",
+                        "INTERNAL"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "minimum": 400,
+                      "maximum": 599
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "errorId": {
+                      "type": "string"
+                    },
+                    "retryAfterSeconds": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "fieldErrors": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "message"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "code",
+                    "title",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/conversations/{conversationId}/call": {
+      "get": {
+        "operationId": "calls.active",
+        "summary": "The call going on in a conversation, if any",
+        "tags": [
+          "calls"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 36,
+              "maxLength": 36
+            },
+            "in": "path",
+            "name": "conversationId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "call": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "conversationId": {
+                              "type": "string"
+                            },
+                            "mode": {
+                              "type": "string",
+                              "enum": [
+                                "p2p",
+                                "sfu"
+                              ]
+                            },
+                            "media": {
+                              "type": "string",
+                              "enum": [
+                                "audio",
+                                "video"
+                              ]
+                            },
+                            "state": {
+                              "type": "string",
+                              "enum": [
+                                "ringing",
+                                "active",
+                                "ended"
+                              ]
+                            },
+                            "initiatorUserId": {
+                              "type": "string"
+                            },
+                            "initiatorDeviceId": {
+                              "type": "string"
+                            },
+                            "startedAt": {
+                              "type": "string"
+                            },
+                            "answeredAt": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "endedAt": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "endReason": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "hangup",
+                                    "declined",
+                                    "busy",
+                                    "missed",
+                                    "failed",
+                                    "removed"
+                                  ]
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "participantCount": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "conversationId",
+                            "mode",
+                            "media",
+                            "state",
+                            "initiatorUserId",
+                            "initiatorDeviceId",
+                            "startedAt",
+                            "answeredAt",
+                            "endedAt",
+                            "endReason",
+                            "participantCount"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "call"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Error (RFC 9457 problem details)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "BAD_REQUEST",
+                        "VALIDATION_FAILED",
+                        "UNAUTHENTICATED",
+                        "FORBIDDEN",
+                        "CSRF_REJECTED",
+                        "NOT_FOUND",
+                        "METHOD_NOT_ALLOWED",
+                        "CONFLICT",
+                        "USERNAME_TAKEN",
+                        "INVALID_CREDENTIALS",
+                        "INVALID_CODE",
+                        "WEAK_PASSWORD",
+                        "STEP_UP_REQUIRED",
+                        "LAST_CREDENTIAL",
+                        "PAYLOAD_TOO_LARGE",
+                        "UNSUPPORTED_MEDIA_TYPE",
+                        "RATE_LIMITED",
+                        "SERVICE_UNAVAILABLE",
+                        "INTERNAL"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "minimum": 400,
+                      "maximum": 599
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "errorId": {
+                      "type": "string"
+                    },
+                    "retryAfterSeconds": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "fieldErrors": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "message"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "code",
+                    "title",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Error (RFC 9457 problem details)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "BAD_REQUEST",
+                        "VALIDATION_FAILED",
+                        "UNAUTHENTICATED",
+                        "FORBIDDEN",
+                        "CSRF_REJECTED",
+                        "NOT_FOUND",
+                        "METHOD_NOT_ALLOWED",
+                        "CONFLICT",
+                        "USERNAME_TAKEN",
+                        "INVALID_CREDENTIALS",
+                        "INVALID_CODE",
+                        "WEAK_PASSWORD",
+                        "STEP_UP_REQUIRED",
+                        "LAST_CREDENTIAL",
+                        "PAYLOAD_TOO_LARGE",
+                        "UNSUPPORTED_MEDIA_TYPE",
+                        "RATE_LIMITED",
+                        "SERVICE_UNAVAILABLE",
+                        "INTERNAL"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "minimum": 400,
+                      "maximum": 599
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "errorId": {
+                      "type": "string"
+                    },
+                    "retryAfterSeconds": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "fieldErrors": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "message"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "code",
+                    "title",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/calls/{callId}/join": {
+      "post": {
+        "operationId": "calls.join",
+        "summary": "Answer or join a call (group calls: returns an SFU token)",
+        "tags": [
+          "calls"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "deviceId": {
+                    "type": "string",
+                    "minLength": 36,
+                    "maxLength": 36
+                  }
+                },
+                "required": [
+                  "deviceId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 36,
+              "maxLength": 36
+            },
+            "in": "path",
+            "name": "callId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "call": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "conversationId": {
+                          "type": "string"
+                        },
+                        "mode": {
+                          "type": "string",
+                          "enum": [
+                            "p2p",
+                            "sfu"
+                          ]
+                        },
+                        "media": {
+                          "type": "string",
+                          "enum": [
+                            "audio",
+                            "video"
+                          ]
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "ringing",
+                            "active",
+                            "ended"
+                          ]
+                        },
+                        "initiatorUserId": {
+                          "type": "string"
+                        },
+                        "initiatorDeviceId": {
+                          "type": "string"
+                        },
+                        "startedAt": {
+                          "type": "string"
+                        },
+                        "answeredAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "endedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "endReason": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "hangup",
+                                "declined",
+                                "busy",
+                                "missed",
+                                "failed",
+                                "removed"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "participantCount": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "conversationId",
+                        "mode",
+                        "media",
+                        "state",
+                        "initiatorUserId",
+                        "initiatorDeviceId",
+                        "startedAt",
+                        "answeredAt",
+                        "endedAt",
+                        "endReason",
+                        "participantCount"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "ice": {
+                      "type": "object",
+                      "properties": {
+                        "iceServers": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "urls": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "username": {
+                                "type": "string"
+                              },
+                              "credential": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "urls"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "relayAvailable": {
+                          "type": "boolean"
+                        },
+                        "ttlSeconds": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "iceServers",
+                        "relayAvailable",
+                        "ttlSeconds"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "sfu": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "url": {
+                              "type": "string"
+                            },
+                            "token": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "url",
+                            "token"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "call",
+                    "ice",
+                    "sfu"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Error (RFC 9457 problem details)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "BAD_REQUEST",
+                        "VALIDATION_FAILED",
+                        "UNAUTHENTICATED",
+                        "FORBIDDEN",
+                        "CSRF_REJECTED",
+                        "NOT_FOUND",
+                        "METHOD_NOT_ALLOWED",
+                        "CONFLICT",
+                        "USERNAME_TAKEN",
+                        "INVALID_CREDENTIALS",
+                        "INVALID_CODE",
+                        "WEAK_PASSWORD",
+                        "STEP_UP_REQUIRED",
+                        "LAST_CREDENTIAL",
+                        "PAYLOAD_TOO_LARGE",
+                        "UNSUPPORTED_MEDIA_TYPE",
+                        "RATE_LIMITED",
+                        "SERVICE_UNAVAILABLE",
+                        "INTERNAL"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "minimum": 400,
+                      "maximum": 599
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "errorId": {
+                      "type": "string"
+                    },
+                    "retryAfterSeconds": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "fieldErrors": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "message"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "code",
+                    "title",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Error (RFC 9457 problem details)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "BAD_REQUEST",
+                        "VALIDATION_FAILED",
+                        "UNAUTHENTICATED",
+                        "FORBIDDEN",
+                        "CSRF_REJECTED",
+                        "NOT_FOUND",
+                        "METHOD_NOT_ALLOWED",
+                        "CONFLICT",
+                        "USERNAME_TAKEN",
+                        "INVALID_CREDENTIALS",
+                        "INVALID_CODE",
+                        "WEAK_PASSWORD",
+                        "STEP_UP_REQUIRED",
+                        "LAST_CREDENTIAL",
+                        "PAYLOAD_TOO_LARGE",
+                        "UNSUPPORTED_MEDIA_TYPE",
+                        "RATE_LIMITED",
+                        "SERVICE_UNAVAILABLE",
+                        "INTERNAL"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "minimum": 400,
+                      "maximum": 599
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "errorId": {
+                      "type": "string"
+                    },
+                    "retryAfterSeconds": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "fieldErrors": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "message"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "code",
+                    "title",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/calls/{callId}/leave": {
+      "post": {
+        "operationId": "calls.leave",
+        "summary": "Hang up, decline or leave a call",
+        "tags": [
+          "calls"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "deviceId": {
+                    "type": "string",
+                    "minLength": 36,
+                    "maxLength": 36
+                  },
+                  "reason": {
+                    "default": "hangup",
+                    "type": "string",
+                    "enum": [
+                      "hangup",
+                      "declined",
+                      "busy",
+                      "missed",
+                      "failed",
+                      "removed"
+                    ]
+                  }
+                },
+                "required": [
+                  "deviceId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 36,
+              "maxLength": 36
+            },
+            "in": "path",
+            "name": "callId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "conversationId": {
+                      "type": "string"
+                    },
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "p2p",
+                        "sfu"
+                      ]
+                    },
+                    "media": {
+                      "type": "string",
+                      "enum": [
+                        "audio",
+                        "video"
+                      ]
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "ringing",
+                        "active",
+                        "ended"
+                      ]
+                    },
+                    "initiatorUserId": {
+                      "type": "string"
+                    },
+                    "initiatorDeviceId": {
+                      "type": "string"
+                    },
+                    "startedAt": {
+                      "type": "string"
+                    },
+                    "answeredAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "endedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "endReason": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "hangup",
+                            "declined",
+                            "busy",
+                            "missed",
+                            "failed",
+                            "removed"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "participantCount": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "conversationId",
+                    "mode",
+                    "media",
+                    "state",
+                    "initiatorUserId",
+                    "initiatorDeviceId",
+                    "startedAt",
+                    "answeredAt",
+                    "endedAt",
+                    "endReason",
+                    "participantCount"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "4XX": {
+            "description": "Error (RFC 9457 problem details)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "BAD_REQUEST",
+                        "VALIDATION_FAILED",
+                        "UNAUTHENTICATED",
+                        "FORBIDDEN",
+                        "CSRF_REJECTED",
+                        "NOT_FOUND",
+                        "METHOD_NOT_ALLOWED",
+                        "CONFLICT",
+                        "USERNAME_TAKEN",
+                        "INVALID_CREDENTIALS",
+                        "INVALID_CODE",
+                        "WEAK_PASSWORD",
+                        "STEP_UP_REQUIRED",
+                        "LAST_CREDENTIAL",
+                        "PAYLOAD_TOO_LARGE",
+                        "UNSUPPORTED_MEDIA_TYPE",
+                        "RATE_LIMITED",
+                        "SERVICE_UNAVAILABLE",
+                        "INTERNAL"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "minimum": 400,
+                      "maximum": 599
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "errorId": {
+                      "type": "string"
+                    },
+                    "retryAfterSeconds": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "fieldErrors": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "message"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "code",
+                    "title",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "5XX": {
+            "description": "Error (RFC 9457 problem details)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "BAD_REQUEST",
+                        "VALIDATION_FAILED",
+                        "UNAUTHENTICATED",
+                        "FORBIDDEN",
+                        "CSRF_REJECTED",
+                        "NOT_FOUND",
+                        "METHOD_NOT_ALLOWED",
+                        "CONFLICT",
+                        "USERNAME_TAKEN",
+                        "INVALID_CREDENTIALS",
+                        "INVALID_CODE",
+                        "WEAK_PASSWORD",
+                        "STEP_UP_REQUIRED",
+                        "LAST_CREDENTIAL",
+                        "PAYLOAD_TOO_LARGE",
+                        "UNSUPPORTED_MEDIA_TYPE",
+                        "RATE_LIMITED",
+                        "SERVICE_UNAVAILABLE",
+                        "INTERNAL"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer",
+                      "minimum": 400,
+                      "maximum": 599
+                    },
+                    "detail": {
+                      "type": "string"
+                    },
+                    "requestId": {
+                      "type": "string"
+                    },
+                    "errorId": {
+                      "type": "string"
+                    },
+                    "retryAfterSeconds": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "fieldErrors": {
+                      "maxItems": 50,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "message"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "code",
+                    "title",
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/calls/{callId}/heartbeat": {
+      "post": {
+        "operationId": "calls.heartbeat",
+        "summary": "Confirm this device is still in the call",
+        "tags": [
+          "calls"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "deviceId": {
+                    "type": "string",
+                    "minLength": 36,
+                    "maxLength": 36
+                  }
+                },
+                "required": [
+                  "deviceId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 36,
+              "maxLength": 36
+            },
+            "in": "path",
+            "name": "callId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ],
+                  "additionalProperties": false
                 }
               }
             }

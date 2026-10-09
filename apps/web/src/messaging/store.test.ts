@@ -421,6 +421,38 @@ describe('MessagingStore', () => {
     store.stop();
   });
 
+  it('keeps a message sent while incoming messages are being decrypted', async () => {
+    const server: MailboxMessage[] = [];
+    const api = fakeApi(server);
+    const { store, push, security } = createStore(api);
+    await store.start();
+    // Decrypting the incoming message takes a while…
+    let finish: () => void = () => undefined;
+    const ingest = security.mock.ingest.getMockImplementation()!;
+    security.mock.ingest.mockImplementationOnce(
+      (m: Conversation, message: MailboxMessage) =>
+        new Promise<IngestResult>((resolve) => {
+          finish = () => resolve(ingest(m, message));
+        }),
+    );
+    server.push(mailbox(1, PEER, { kind: 'text', text: 'theirs' }));
+    push({ type: 'message', conversationId: CONVERSATION, message: server[0]! });
+    await vi.advanceTimersByTimeAsync(0);
+    // …and meanwhile this device's own message is sent (and stored after it).
+    api.sendMessage.mockResolvedValueOnce({
+      seq: 2,
+      serverTime: new Date(2000).toISOString(),
+      duplicate: false,
+    });
+    store.sendText(CONVERSATION, 'mine', null);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.sendMessage).toHaveBeenCalledTimes(1);
+    finish();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(texts(store)).toEqual(['theirs', 'mine']);
+    store.stop();
+  });
+
   it('sends read markers only when read receipts are shared, but always tracks unread locally', async () => {
     for (const share of [true, false]) {
       const api = fakeApi([mailbox(1, PEER, { kind: 'text', text: 'ping' })]);

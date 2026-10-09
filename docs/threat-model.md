@@ -129,3 +129,21 @@ tested); instant channel takeover (24 h cooling-off, re-authentication, audit); 
 process until it is isolated behind an egress proxy; spam and abuse in public comments rely on
 rate limits, slow mode and admin moderation until Phase 11 reporting; channel content is
 server-readable by design.
+
+**Phase 9 delta (calls).** New flows: call signalling inside MLS messages, call records, TURN
+relaying with short-lived credentials, an SFU forwarding end-to-end encrypted frames. Analysis in
+[phase-reports/phase-9.md](phase-reports/phase-9.md) and ADR-047. Mitigated: a malicious server
+substituting the DTLS fingerprint (offers and answers exist only inside MLS; a spliced foreign
+offer is undecryptable; the presented certificate is checked against the MLS-delivered
+fingerprint after DTLS, fail-closed — E2E and unit tested); the SFU reading media (SFrame keyed
+from the MLS exporter; an SFU-admitted client without keys sees only ciphertext — E2E tested);
+injected or unencrypted frames (dropped before decoding); a removed member listening on (new
+epoch, new keys, dropped from the call); TURN as a path into our network (deny-list tested
+against real coturn); TURN credential theft (10-minute HMAC credentials with no identity in the
+username); IP exposure to the other person (relay unless their safety number is verified; each
+device enforces it for itself); downgrade to unencrypted group calls (refused without
+encoded-frame support). Residual: the server and SFU learn who calls whom, when, for how long and
+from which devices; the SFU sees the audio-level header extension (who speaks) and VP8 frame
+headers (key frames, sizes, resolution); TURN sees users' IP addresses; the fingerprint check is
+as strong as the MLS authentication of the caller's device (unverified safety numbers mean
+trust-on-first-use).

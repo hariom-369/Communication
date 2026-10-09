@@ -1,6 +1,34 @@
 # Voice and video calling
 
-Status: NEEDS-SECURITY-REVIEW (S-08) · Decisions: ADR-016, 017
+Status: IMPLEMENTED in Phase 9 ([report](phase-reports/phase-9.md)), NEEDS-SECURITY-REVIEW (S-08) ·
+Decisions: ADR-016, 017, **047** (implementation, keying and deviations)
+
+## 0. As built (Phase 9)
+
+- **1:1 calls** are peer to peer (or through the TURN relay). Offers, answers and ICE restarts are
+  `call` messages inside the conversation's MLS messages; each description carries all candidates.
+  After DTLS completes, the client checks the presented certificate against the fingerprint
+  received over MLS and ends the call on mismatch (`apps/web/src/calls/peer-call.ts`, `sdp.ts`).
+- **Group calls** go through LiveKit. Media frames are SFrame-encrypted (RFC 9605) on the sending
+  device with per-sender keys from the MLS exporter, exactly as RFC 9605 §5.2 describes, except
+  that the exporter context is the call ID (ADR-047). Audio is encrypted whole; VP8 keeps its
+  payload header in the clear for the SFU, authenticated as SFrame metadata.
+- **Relay policy** (`callRelay` privacy setting): always / unless the person's safety number is
+  verified (default) / never; enforced by each device for itself.
+- **Server**: `services/api/src/modules/calls` — call records, `who can call me` enforcement,
+  coturn shared-secret credentials (10 min), LiveKit join tokens (5 min, one room, publish and
+  subscribe only, no data channel), ringing/ended realtime hints, a singleton sweeper (unanswered
+  ringing after 45 s, silent or removed participants, 90-day record retention).
+- **Features**: mute, camera on/off, screen share (1:1: replaces the camera picture without
+  renegotiation; group: separate track, same encryption), microphone/camera switching without
+  renegotiation, incoming-call dialog with ring tone, group-call invitations, call history in
+  the chat, connection quality from `getStats()` (good/fair/poor, relayed/direct), ICE restart
+  with fresh relay credentials after a network change, busy handling, glare (calling someone who
+  is calling you answers their call).
+
+Deviations from the original design below are listed in ADR-047; not done yet: push "incoming
+call" for closed tabs (Phase 10), host controls beyond removal (mute requests), simulcast/SVC
+tuning, SFU session resumption, call quality telemetry (no telemetry is collected).
 
 ## 1. Components
 
@@ -90,3 +118,28 @@ Fingerprint-substitution attack by malicious signalling server fixture (call mus
 re-key on membership change; unsupported-browser refusal; TURN deny-list; network
 switch reconnect; 32-participant load test; screen share E2EE verified by SFU-side frame
 inspection (frames must be ciphertext).
+
+Where each lives (results in the [Phase 9 report](phase-reports/phase-9.md)):
+
+| Exit test | Test |
+|---|---|
+| Fingerprint substitution by a malicious server | `e2e/calls.spec.ts` — the server delivers another conversation's genuine encrypted offer (attacker's fingerprint) in place of the real one: no ring, no answer, undecryptable placeholder. Unit: `sdp.test.ts` (substituted certificate fails). |
+| Re-key on membership change | `e2e/calls.spec.ts` (epoch shown, frames switch epoch, removed member dropped); `call_tests.rs`; `frame-crypto.test.ts` |
+| Unsupported-browser refusal | `e2e/calls.spec.ts` (no encoded-frame API → refused on start and join; nothing created on the server) |
+| TURN deny-list | `services/api/src/modules/calls/turn-relay.integration.test.ts` against real coturn |
+| Network-switch reconnect | `e2e/calls.spec.ts` (relay replaced mid-call → ICE restart with fresh credentials) |
+| SFU-side frame inspection | `e2e/calls.spec.ts` (an SFU-admitted client without keys sees only SFrame ciphertext, correct epoch, no nonce reuse; an unencrypted participant is not played) |
+| 32-participant load | see the Phase 9 report |
+
+## 8. Running locally
+
+- **coturn**: `apt install coturn` (or your package manager), then
+  `turnserver -c infra/calls/turnserver.conf --static-auth-secret="$TURN_SHARED_SECRET"
+  --listening-ip=127.0.0.1 --relay-ip=127.0.0.1 --allow-loopback-peers --allowed-peer-ip=127.0.0.1`.
+  The last two flags are for local testing only (both browsers are on 127.0.0.1); never in a
+  deployment.
+- **LiveKit**: build `github.com/livekit/livekit-server` (v1.13.9, as CI does) or install a
+  release, then `LIVEKIT_KEYS="tessera-dev: $LIVEKIT_API_SECRET" livekit-server --config
+  infra/calls/livekit.dev.yaml`. The web dev server proxies `/sfu` to it (`TESSERA_SFU_URL`).
+- API settings: `services/api/.env.example` (`TURN_*`, `LIVEKIT_*`). Without them, calls still
+  work directly between peers (no relay), and group calls are unavailable (the buttons explain).

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { MessageBody } from './content.js';
 import {
   addPending,
+  callEntryId,
   applyIncoming,
   deliveryState,
   DELETE_WINDOW_MS,
@@ -228,5 +229,63 @@ describe('attachments', () => {
       content: { v: 1, id: 'd1', sentAt: 2, body: { kind: 'delete', target: 'm1' } },
     });
     expect(state.byId['m1']).toMatchObject({ deleted: true, attachment: null, text: '' });
+  });
+});
+
+describe('call history (docs/calling.md §2)', () => {
+  const CALL = '0192f0c1-7a3b-7c4d-8e5f-0000000ca110';
+  const call = (
+    signal: 'offer' | 'answer' | 'end' | 'update' | 'group',
+    extra = {},
+  ): MessageBody => ({
+    kind: 'call',
+    callId: CALL,
+    signal,
+    media: 'video',
+    sdp: signal === 'offer' || signal === 'answer' ? 'v=0' : undefined,
+    ...extra,
+  });
+
+  it('shows one entry per call, answered and ended from its own signalling', () => {
+    seq = 0;
+    let state = incoming(emptyTimeline, 'alice', 'o1', call('offer'), T0);
+    state = incoming(state, 'bob', 'a1', call('answer'), T0 + 2_000);
+    state = incoming(state, 'alice', 'u1', call('update'), T0 + 5_000);
+    state = incoming(state, 'bob', 'e1', call('end', { reason: 'hangup' }), T0 + 65_000);
+    expect(state.order).toEqual([callEntryId(CALL)]);
+    const entry = state.byId[callEntryId(CALL)]!;
+    expect(entry.senderId).toBe('alice');
+    expect(entry.call).toMatchObject({
+      media: 'video',
+      group: false,
+      answeredAt: T0 + 2_000,
+      endedAt: T0 + 65_000,
+      endReason: 'hangup',
+    });
+    // A late or replayed signal changes nothing once the call ended.
+    const after = incoming(state, 'bob', 'a2', call('answer'), T0 + 70_000);
+    expect(after.byId[callEntryId(CALL)]).toEqual(entry);
+  });
+
+  it('records a missed call, and the caller cannot mark its own call answered', () => {
+    seq = 0;
+    let state = incoming(emptyTimeline, 'alice', 'o1', call('offer'), T0);
+    state = incoming(state, 'alice', 'a1', call('answer'), T0 + 1_000);
+    expect(state.byId[callEntryId(CALL)]!.call!.answeredAt).toBeNull();
+    state = incoming(state, 'alice', 'e1', call('end', { reason: 'missed' }), T0 + 30_000);
+    expect(state.byId[callEntryId(CALL)]!.call).toMatchObject({
+      answeredAt: null,
+      endReason: 'missed',
+    });
+    // A second offer with the same call id (from someone else) cannot take over the entry.
+    const hijack = incoming(state, 'mallory', 'o2', call('offer'), T0 + 31_000);
+    expect(hijack.byId[callEntryId(CALL)]!.senderId).toBe('alice');
+  });
+
+  it('announces group calls without ending them on one person leaving', () => {
+    seq = 0;
+    let state = incoming(emptyTimeline, 'ana', 'g1', call('group'), T0);
+    state = incoming(state, 'raj', 'e1', call('end'), T0 + 10_000);
+    expect(state.byId[callEntryId(CALL)]!.call).toMatchObject({ group: true, endedAt: null });
   });
 });

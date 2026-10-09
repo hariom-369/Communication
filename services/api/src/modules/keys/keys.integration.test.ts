@@ -276,6 +276,30 @@ describe("'keys.claim', 'keys.upload_key_packages' and 'keys.key_package_count'"
     expect(count.json()).toEqual({ oneTime: 0, lastResort: true });
   });
 
+  it('lets one person add a 40-member group at once (claims are not throttled at group size)', async () => {
+    const owner = await user();
+    const people: User[] = [];
+    for (let i = 0; i < 40; i += 1) {
+      const person = await user();
+      const privacy = (await person.client.get('/api/v1/accounts/me/privacy')).json<object>();
+      await person.client.put('/api/v1/accounts/me/privacy', {
+        ...privacy,
+        groupInvites: 'everyone',
+      });
+      people.push(person);
+    }
+    const created = await owner.client.post('/api/v1/groups', {
+      ciphersuite: 1,
+      usernames: people.map((p) => p.username),
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    // One claim per person added: twice the old burst of 20 goes through without 429s.
+    for (const person of people) {
+      const claim = await owner.client.post('/api/v1/keys/claim', { userId: person.id });
+      expect(claim.statusCode, claim.body).toBe(200);
+    }
+  });
+
   it('refuses claims for non-contacts', async () => {
     const alice = await user();
     const stranger = await user();

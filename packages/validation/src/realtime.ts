@@ -60,6 +60,14 @@ export const serverFrameSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('group_requests'), conversationId: z.string() }),
   /** Something about a community this user belongs to changed (roles, spaces, membership). */
   z.object({ type: z.literal('community'), communityId: z.string() }),
+  /** A call in a conversation started, was answered or ended (docs/calling.md §2). */
+  z.object({
+    type: z.literal('call'),
+    conversationId: z.string(),
+    callId: z.string(),
+    state: z.enum(['ringing', 'active', 'ended']),
+    mode: z.enum(['p2p', 'sfu']),
+  }),
   z.object({ type: z.literal('reconnect'), afterMs: z.number() }),
 ]);
 export type ServerFrame = z.infer<typeof serverFrameSchema>;
@@ -93,6 +101,14 @@ export const realtimeEventSchema = z.discriminatedUnion('type', [
   /** Someone asked to join a group this user administers. */
   z.object({ type: z.literal('group_requests'), conversationId: z.string() }),
   z.object({ type: z.literal('community'), communityId: z.string() }),
+  /** A call in a conversation started, was answered or ended (docs/calling.md §2). */
+  z.object({
+    type: z.literal('call'),
+    conversationId: z.string(),
+    callId: z.string(),
+    state: z.enum(['ringing', 'active', 'ended']),
+    mode: z.enum(['p2p', 'sfu']),
+  }),
   /** Sessions of this user were revoked or rotated; realtime re-validates open connections. */
   z.object({ type: z.literal('sessions_changed') }),
 ]);

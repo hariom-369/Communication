@@ -1,7 +1,13 @@
-# gitleaks configuration: the default rules, plus one narrowly scoped exception.
+# gitleaks configuration: the default rules, plus narrowly scoped exceptions.
 [extend]
 useDefault = true
 
 [allowlist]
-description = "Cargo lockfiles contain only crate names, versions and registry checksums (e.g. the crate name 'libcrux-secrets' matches the generic-api-key rule)."
-paths = ['''(^|/)Cargo\.lock$''']
+description = """
+Cargo lockfiles contain only crate names, versions and registry checksums (e.g. the crate name
+'libcrux-secrets' matches the generic-api-key rule). The SFrame test vectors are the public
+RFC 9605 Appendix C test keys (fixed, published values used only to check the implementation)."""
+paths = [
+  '''(^|/)Cargo\.lock$''',
+  '''^apps/web/src/calls/sframe-vectors\.json$''',
+]

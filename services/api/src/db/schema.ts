@@ -393,6 +393,28 @@ export interface ChannelLinksTable {
   revoked_at: NullableTimestamp;
 }
 
+export interface CallsTable {
+  id: string;
+  conversation_id: string;
+  mode: 'p2p' | 'sfu';
+  media: 'audio' | 'video';
+  initiator_user_id: string;
+  initiator_device_id: string;
+  started_at: Timestamp;
+  answered_at: NullableTimestamp;
+  ended_at: NullableTimestamp;
+  end_reason: 'hangup' | 'declined' | 'busy' | 'missed' | 'failed' | 'removed' | null;
+  peak_participants: Generated<number>;
+}
+
+export interface CallParticipantsTable {
+  call_id: string;
+  device_id: string;
+  user_id: string;
+  joined_at: Timestamp;
+  last_seen_at: Timestamp;
+}
+
 export interface DirectPairsTable {
   user_low: string;
   user_high: string;
@@ -562,6 +584,8 @@ export interface Database {
   channel_comments: ChannelCommentsTable;
   channel_post_views: ChannelPostViewsTable;
   channel_links: ChannelLinksTable;
+  calls: CallsTable;
+  call_participants: CallParticipantsTable;
 }
 
 /** Owning module of every table ('platform' = infrastructure code outside modules/). */
@@ -619,4 +643,6 @@ export const TABLE_OWNERS: Readonly<Record<keyof Database, string>> = {
   channel_comments: 'channels',
   channel_post_views: 'channels',
   channel_links: 'channels',
+  calls: 'calls',
+  call_participants: 'calls',
 };

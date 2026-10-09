@@ -14,6 +14,7 @@ import type { endpoints as Endpoints } from '../api/endpoints.js';
 import type { AsyncCryptoApi } from '../crypto/client.js';
 import { WorkerCryptoError } from '../crypto/client.js';
 import type {
+  CallSecret,
   CommitOutput,
   GroupPolicy,
   GroupRole,
@@ -1254,6 +1255,13 @@ export class E2eeSession {
 
   cursor(conversationId: string): Promise<number> {
     return this.#crypto.cursor(conversationId);
+  }
+
+  // ---- calls (ADR-047) ------------------------------------------------------------------------
+
+  /** Group-call media key material for the conversation's current epoch. */
+  callSecret(conversationId: string, callId: string): Promise<CallSecret> {
+    return this.#crypto.callSecret(conversationId, callId, 16);
   }
 
   // ---- attachments (worker crypto; see media-transfer.ts) ------------------------------------

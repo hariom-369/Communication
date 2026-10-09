@@ -27,7 +27,7 @@ backup orchestration), `apps/web/src/lib/webauthn.ts` (PRF); `services/api/src/m
 | **S-05** | Media encryption construction and metadata (secretstream, hashes, blob↔conversation linking) — **ready for review (Phase 6)**: `packages/crypto-core/src/media.rs`, fuzz target `media`, `apps/web/src/crypto/engine.ts` (slicing), `apps/web/src/messaging/{attachments,media-transfer}.ts`, `apps/web/src/pages/chats/AttachmentView.tsx` (display allow-list), `services/api/src/modules/media`; deviations in ADR-043 | ADR-013, ADR-043 | Construction review |
 | **S-06** | Backup key hierarchy, passkey PRF wrapping, rollback detection | ADR-014 | Recovery/security trade-off |
 | **S-07** | Key transparency design (e.g., AKD-style auditable directory) | Post-GA | Complex, research-grade |
-| **S-08** | Group-call E2EE (SFrame keying from MLS exporter, audio-level header leakage, re-key timing) | ADR-017 | Media E2EE subtleties |
+| **S-08** | Group-call E2EE (SFrame keying from MLS exporter, audio-level header leakage, re-key timing). **Implemented in Phase 9 (ADR-047) — for review:** RFC 9605 §5.2 keying with the call ID as exporter context; VP8 payload header left in the clear as authenticated metadata; one counter per device across tracks; 3-epoch receive window; SFrame plugged in through the SFU client's custom E2EE-manager hook (insertable streams in Chromium); audio-level extension still visible to the SFU | ADR-017, ADR-047 | Media E2EE subtleties |
 | **S-09** | Metadata protection (sealed-sender-like delivery) | Post-GA | Research |
 | **S-10** | Message franking for verifiable E2EE abuse reports | ADR-021 | Cryptographic commitment design |
 | **S-11** | Private contact discovery (if phone numbers enabled) | ADR-031 | Enumeration/privacy |

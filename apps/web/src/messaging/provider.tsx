@@ -9,6 +9,7 @@ import {
 } from 'react';
 
 import { endpoints } from '../api/endpoints.js';
+import { CallManager, IDLE_CALL, type CallSnapshot } from '../calls/manager.js';
 import { startCryptoWorker } from '../crypto/client.js';
 import { useSession } from '../state/session.js';
 
@@ -19,6 +20,7 @@ import { MessagingStore, type MessagingSnapshot } from './store.js';
 const StoreContext = createContext<MessagingStore | null>(null);
 const E2eeContext = createContext<E2eeSession | null>(null);
 const MediaContext = createContext<MediaTransfer | null>(null);
+const CallsContext = createContext<CallManager | null>(null);
 
 /**
  * Runs end-to-end encryption (a dedicated crypto worker) and the messaging store for the
@@ -27,19 +29,21 @@ const MediaContext = createContext<MediaTransfer | null>(null);
 export function MessagingProvider({ children }: { children: ReactNode }): ReactNode {
   const { me } = useSession();
   const userId = me?.id;
-  const { store, e2ee, media } = useMemo(() => {
-    if (userId === undefined) return { store: null, e2ee: null, media: null };
+  const { store, e2ee, media, calls } = useMemo(() => {
+    if (userId === undefined) return { store: null, e2ee: null, media: null, calls: null };
     const session = new E2eeSession(startCryptoWorker, endpoints, userId);
     const transfer = new MediaTransfer(endpoints, session);
+    const messaging = new MessagingStore({
+      api: endpoints,
+      security: session,
+      me: { id: userId },
+      media: transfer,
+    });
     return {
       e2ee: session,
       media: transfer,
-      store: new MessagingStore({
-        api: endpoints,
-        security: session,
-        me: { id: userId },
-        media: transfer,
-      }),
+      store: messaging,
+      calls: new CallManager({ api: endpoints, store: messaging, security: session, me: userId }),
     };
   }, [userId]);
 
@@ -72,13 +76,27 @@ export function MessagingProvider({ children }: { children: ReactNode }): ReactN
     };
   }, [store]);
 
+  useEffect(() => () => calls?.dispose(), [calls]);
+
   return (
     <E2eeContext.Provider value={e2ee}>
       <MediaContext.Provider value={media}>
-        <StoreContext.Provider value={store}>{children}</StoreContext.Provider>
+        <StoreContext.Provider value={store}>
+          <CallsContext.Provider value={calls}>{children}</CallsContext.Provider>
+        </StoreContext.Provider>
       </MediaContext.Provider>
     </E2eeContext.Provider>
   );
+}
+
+/** Calls on this device (docs/calling.md) and their current state. */
+export function useCalls(): { manager: CallManager | null; call: CallSnapshot } {
+  const manager = useContext(CallsContext);
+  const call = useSyncExternalStore(
+    manager?.subscribe ?? noop,
+    manager?.getSnapshot ?? (() => IDLE_CALL),
+  );
+  return { manager, call };
 }
 
 /** Encrypted attachment transfer (download and decrypt for display). */

@@ -340,6 +340,27 @@ impl CryptoClient {
         )
     }
 
+    /// Group-call media key material as JSON (`CallSecret`; ADR-047).
+    #[wasm_bindgen(js_name = callSecret)]
+    pub fn call_secret(
+        &self,
+        conversation_id: &str,
+        call_id: &str,
+        key_length: u32,
+    ) -> Result<String, JsError> {
+        let secret = self
+            .inner
+            .call_secret(conversation_id, call_id, key_length as usize)
+            .map_err(js)?;
+        Ok(json!({
+            "epoch": secret.epoch,
+            "secret": B64.encode(&secret.secret),
+            "ownIndex": secret.own_index,
+            "members": secret.members,
+        })
+        .to_string())
+    }
+
     #[wasm_bindgen(js_name = createGroup)]
     pub fn create_group(
         &mut self,

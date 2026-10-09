@@ -51,12 +51,16 @@ const limits = {
     burst: 10,
     onStoreFailure: 'open',
   },
-  /** Anti-exhaustion (crypto-design §4): per claimer … */
+  /**
+   * Anti-exhaustion (crypto-design §4): per claimer … Creating a group claims one package per
+   * person added, so the burst covers a 100-person group at once (larger groups complete as the
+   * client retries); the per-target limit below is what protects any one account.
+   */
   claim: {
     name: 'keys.claim',
-    limit: 50,
+    limit: 300,
     periodMs: 3_600_000,
-    burst: 20,
+    burst: 100,
     onStoreFailure: 'closed',
   },
 } satisfies Record<string, RateLimitPolicy>;

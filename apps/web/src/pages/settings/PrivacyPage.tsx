@@ -113,10 +113,27 @@ export function PrivacyPage(): ReactNode {
           />
           <VisibilityField
             label="Calls"
-            hint="Who can call you."
+            hint="Who can call you. Contacts are people you have a direct chat with."
             value={settings.calls}
             onChange={(v) => update('calls', v)}
           />
+          <label className="t-field">
+            <span className="t-field__label">Relay calls through Tessera</span>
+            <select
+              className="t-field__input"
+              value={settings.callRelay}
+              onChange={(e) => update('callRelay', e.target.value as PrivacySettings['callRelay'])}
+            >
+              <option value="always">Always</option>
+              <option value="unverified">Unless I verified the person’s safety number</option>
+              <option value="never">Never</option>
+            </select>
+            <span className="t-field__hint">
+              A relayed call hides your IP address from the person you call. Tessera’s relay sees
+              your address but not the call, which stays end-to-end encrypted. Direct calls can have
+              better quality.
+            </span>
+          </label>
           <label className="checkbox">
             <input
               type="checkbox"

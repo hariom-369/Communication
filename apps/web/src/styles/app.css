@@ -577,8 +577,9 @@ code {
 }
 .conversation__header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--t-space-3);
+  gap: var(--t-space-2) var(--t-space-3);
   padding: var(--t-space-3) var(--t-space-4);
   border-bottom: 1px solid var(--t-color-border);
   background: var(--t-color-surface);
@@ -588,11 +589,13 @@ code {
   text-decoration: none;
 }
 .conversation__title {
-  flex: 1;
+  /* On a phone the call and details buttons wrap below the title. */
+  flex: 1 1 10rem;
   min-width: 0;
 }
 .conversation__title h2 {
   margin: 0;
+  overflow-wrap: anywhere;
   font-size: var(--t-text-md);
 }
 .conversation__presence {
@@ -1305,4 +1308,148 @@ audio {
 }
 .data-table td {
   font-variant-numeric: tabular-nums;
+}
+
+/* ---- calls (docs/calling.md) ---- */
+.call-layer {
+  display: grid;
+  gap: var(--t-space-2);
+}
+.call-layer:empty {
+  display: none;
+}
+.call-invite,
+.call-incoming,
+.call-ended {
+  display: grid;
+  gap: var(--t-space-2);
+  margin: 0;
+  padding: var(--t-space-3);
+  border: 1px solid var(--t-color-border);
+  border-radius: var(--t-radius-md);
+  background: var(--t-color-surface-raised);
+  color: var(--t-color-text);
+}
+.call-incoming {
+  border-left: 4px solid var(--t-color-accent);
+}
+.call-incoming p {
+  margin: 0;
+}
+.call {
+  display: grid;
+  gap: var(--t-space-3);
+  padding: var(--t-space-3);
+  border: 1px solid var(--t-color-border);
+  border-radius: var(--t-radius-lg);
+  background: var(--t-color-surface);
+}
+.call__header {
+  display: grid;
+  gap: var(--t-space-1);
+}
+.call__title {
+  margin: 0;
+  font-size: var(--t-text-lg);
+}
+.call__status,
+.call__security {
+  margin: 0;
+  color: var(--t-color-text-muted);
+  font-size: var(--t-text-sm);
+}
+.call__stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 12rem;
+  border-radius: var(--t-radius-md);
+  background: var(--t-color-bg);
+  overflow: hidden;
+}
+.call__remote {
+  width: 100%;
+  max-height: 60vh;
+  object-fit: contain;
+}
+.call__self {
+  position: absolute;
+  right: var(--t-space-2);
+  bottom: var(--t-space-2);
+  width: min(30%, 10rem);
+  border: 2px solid var(--t-color-surface);
+  border-radius: var(--t-radius-sm);
+}
+.call__avatar {
+  display: grid;
+  place-items: center;
+  width: 4rem;
+  height: 4rem;
+  margin: var(--t-space-3) auto;
+  border-radius: var(--t-radius-pill);
+  background: var(--t-color-accent-subtle);
+  color: var(--t-color-on-accent-subtle);
+  font-size: var(--t-text-xl);
+}
+.call__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 12rem), 1fr));
+  gap: var(--t-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.call__tile {
+  display: grid;
+  gap: var(--t-space-1);
+  padding: var(--t-space-1);
+  border: 2px solid transparent;
+  border-radius: var(--t-radius-md);
+  background: var(--t-color-bg);
+}
+.call__tile video {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: var(--t-radius-sm);
+}
+.call__tile--speaking {
+  border-color: var(--t-color-accent);
+}
+.call__tile-label {
+  margin: 0;
+  font-size: var(--t-text-xs);
+  overflow-wrap: anywhere;
+}
+.call__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--t-space-2);
+}
+.call__devices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--t-space-2);
+}
+.call__device {
+  min-width: min(100%, 14rem);
+}
+.call-entry {
+  justify-self: center;
+  margin: var(--t-space-1) 0;
+  padding: var(--t-space-1) var(--t-space-3);
+  border-radius: var(--t-radius-pill);
+  background: var(--t-color-surface);
+  color: var(--t-color-text-muted);
+  font-size: var(--t-text-sm);
+  list-style: none;
+}
+.call-entry__time {
+  margin-left: var(--t-space-1);
+  font-size: var(--t-text-xs);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .call__tile {
+    transition: border-color 150ms ease;
+  }
 }

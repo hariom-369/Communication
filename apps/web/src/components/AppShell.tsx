@@ -4,6 +4,7 @@ import { NavLink, Outlet, useLocation } from 'react-router';
 
 import { errorMessage } from '../api/client.js';
 import { endpoints } from '../api/endpoints.js';
+import { CallOverlay } from '../pages/calls/CallOverlay.js';
 import { useSession } from '../state/session.js';
 
 import { Brand } from './Brand.js';
@@ -87,6 +88,7 @@ export function AppShell(): ReactNode {
         }
         id="main"
       >
+        <CallOverlay />
         <Outlet />
       </main>
     </div>

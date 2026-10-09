@@ -91,4 +91,39 @@ describe('api config', () => {
       'WEBAUTHN_RP_ID',
     ]);
   });
+
+  it('configures calls only completely: TURN and the SFU are all-or-nothing', () => {
+    const secret = 's'.repeat(40);
+    const config = loadApiConfig({
+      ...base,
+      TURN_URLS: 'turn:turn.example:3478?transport=udp, turns:turn.example:443?transport=tcp',
+      TURN_SHARED_SECRET: secret,
+      LIVEKIT_URL: '/sfu',
+      LIVEKIT_API_URL: 'http://livekit.internal:7880',
+      LIVEKIT_API_KEY: 'tessera',
+      LIVEKIT_API_SECRET: secret,
+    });
+    expect(config.TURN_URLS).toEqual([
+      'turn:turn.example:3478?transport=udp',
+      'turns:turn.example:443?transport=tcp',
+    ]);
+    expect(config.TURN_TTL_SECONDS).toBe(600);
+    expect(issueKeys({ ...base, TURN_URLS: 'turn:turn.example:3478' })).toEqual(['TURN_URLS']);
+    expect(
+      issueKeys({ ...base, TURN_URLS: 'https://turn.example', TURN_SHARED_SECRET: secret }),
+    ).toEqual(['TURN_URLS.0']);
+    expect(issueKeys({ ...base, TURN_URLS: 'turn:x', TURN_SHARED_SECRET: 'short' })).toEqual([
+      'TURN_SHARED_SECRET',
+    ]);
+    expect(issueKeys({ ...base, LIVEKIT_URL: '/sfu' })).toEqual(['LIVEKIT_URL']);
+    expect(
+      issueKeys({
+        ...production,
+        LIVEKIT_URL: 'ws://sfu.tessera.example',
+        LIVEKIT_API_URL: 'http://livekit.internal:7880',
+        LIVEKIT_API_KEY: 'tessera',
+        LIVEKIT_API_SECRET: secret,
+      }),
+    ).toEqual(['LIVEKIT_URL']);
+  });
 });

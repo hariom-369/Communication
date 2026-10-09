@@ -1,4 +1,10 @@
 import {
+  activeCallSchema,
+  callCapabilitiesSchema,
+  callSchema,
+  iceConfigSchema,
+  joinedCallSchema,
+  startedCallSchema,
   channelAdminListSchema,
   channelAnalyticsSchema,
   channelInvitePreviewSchema,
@@ -318,6 +324,24 @@ export const endpoints = {
     api('GET', `/channels/${encodeURIComponent(id)}/analytics`, channelAnalyticsSchema),
   linkPreview: (url: string) =>
     api('POST', '/link-previews', linkPreviewSchema.nullable(), { url }),
+
+  // ---- calls (docs/calling.md): the server never sees signalling or media ----
+  callCapabilities: () => api('GET', '/calls/capabilities', callCapabilitiesSchema),
+  iceServers: () => api('POST', '/calls/ice', iceConfigSchema, {}),
+  startCall: (conversationId: string, media: 'audio' | 'video', deviceId: string) =>
+    api('POST', '/calls', startedCallSchema, { conversationId, media, deviceId }),
+  call: (callId: string) => api('GET', `/calls/${encodeURIComponent(callId)}`, callSchema),
+  activeCall: (conversationId: string) =>
+    api('GET', `/conversations/${encodeURIComponent(conversationId)}/call`, activeCallSchema),
+  joinCall: (callId: string, deviceId: string) =>
+    api('POST', `/calls/${encodeURIComponent(callId)}/join`, joinedCallSchema, { deviceId }),
+  leaveCall: (
+    callId: string,
+    deviceId: string,
+    reason: 'hangup' | 'declined' | 'busy' | 'failed' | 'missed',
+  ) => api('POST', `/calls/${encodeURIComponent(callId)}/leave`, callSchema, { deviceId, reason }),
+  callHeartbeat: (callId: string, deviceId: string) =>
+    api('POST', `/calls/${encodeURIComponent(callId)}/heartbeat`, okResponseSchema, { deviceId }),
 
   // ---- communities (docs/groups.md §5) ----
   myCommunities: () => api('GET', '/communities', communityListSchema),

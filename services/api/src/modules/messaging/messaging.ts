@@ -620,6 +620,20 @@ export class MessagingService {
     return rows.map((row) => row.conversation_id);
   }
 
+  /** Kind and current members of a live conversation (calls module), or null if there is none. */
+  async callContext(
+    conversationId: string,
+  ): Promise<{ kind: 'direct' | 'group'; memberIds: string[] } | null> {
+    const conversation = await this.#db
+      .selectFrom('conversations')
+      .select('kind')
+      .where('id', '=', conversationId)
+      .where('deleted_at', 'is', null)
+      .executeTakeFirst();
+    if (conversation === undefined) return null;
+    return { kind: conversation.kind, memberIds: await this.#memberIds(this.#db, conversationId) };
+  }
+
   async isMember(userId: string, conversationId: string): Promise<boolean> {
     const row = await this.#db
       .selectFrom('conversation_members')

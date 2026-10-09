@@ -40,6 +40,22 @@ export interface GroupInfo {
   readonly pins: readonly string[];
 }
 
+/**
+ * A call in the conversation's history (docs/calling.md §2: stored only on devices, end-to-end
+ * encrypted like any message). Built from the call's signalling messages.
+ */
+export interface CallEntry {
+  readonly callId: string;
+  readonly media: 'audio' | 'video';
+  readonly group: boolean;
+  readonly answeredAt: number | null;
+  readonly endedAt: number | null;
+  readonly endReason: 'hangup' | 'declined' | 'busy' | 'failed' | 'missed' | null;
+}
+
+/** Timeline id of a call's history entry. */
+export const callEntryId = (callId: string): string => `call:${callId}`;
+
 export interface TimelineMessage {
   readonly id: string;
   readonly seq: number | null;
@@ -57,6 +73,7 @@ export interface TimelineMessage {
   /** Users mentioned in the message. */
   readonly mentions: readonly string[];
   readonly poll: Poll | null;
+  readonly call: CallEntry | null;
   /** The sender's group role when it was sent (groups only). */
   readonly authorRole: GroupRole | null;
   /** Only for the local user's messages. */
@@ -136,6 +153,7 @@ export function addPending(
     attachment: message.attachment ?? null,
     mentions: message.mentions ?? [],
     poll: message.poll ?? null,
+    call: null,
     authorRole: null,
     seq: null,
     serverTime: null,
@@ -175,6 +193,7 @@ export function applyIncoming(state: TimelineState, envelope: IncomingEnvelope):
       reactions: {},
       mentions: [],
       poll: null,
+      call: null,
       authorRole: envelope.authority?.role ?? null,
       status: null,
       undecodable: true,
@@ -220,10 +239,62 @@ export function applyIncoming(state: TimelineState, envelope: IncomingEnvelope):
                 votes: existing?.poll?.votes ?? {},
               }
             : null,
+        call: null,
         authorRole: authority?.role ?? null,
         status: null,
         undecodable: false,
       });
+    }
+    case 'call': {
+      const id = callEntryId(body.callId);
+      const existing = base.byId[id];
+      if (body.signal === 'offer' || body.signal === 'group') {
+        // The first announcement creates the entry; only its sender owns it.
+        if (existing !== undefined) return base;
+        return withMessage(base, {
+          id,
+          seq: envelope.seq,
+          senderId: envelope.senderId,
+          sentAt: content.sentAt,
+          serverTime: envelope.serverTime,
+          text: '',
+          attachment: null,
+          replyTo: null,
+          edited: false,
+          deleted: false,
+          reactions: {},
+          mentions: [],
+          poll: null,
+          call: {
+            callId: body.callId,
+            media: body.media,
+            group: body.signal === 'group',
+            answeredAt: null,
+            endedAt: null,
+            endReason: null,
+          },
+          authorRole: authority?.role ?? null,
+          status: null,
+          undecodable: false,
+        });
+      }
+      const call = existing?.call;
+      if (existing === undefined || call?.endedAt !== null) return base;
+      if (
+        body.signal === 'answer' &&
+        call.answeredAt === null &&
+        envelope.senderId !== existing.senderId
+      )
+        return withMessage(base, {
+          ...existing,
+          call: { ...call, answeredAt: envelope.serverTime },
+        });
+      if (body.signal === 'end' && !call.group)
+        return withMessage(base, {
+          ...existing,
+          call: { ...call, endedAt: envelope.serverTime, endReason: body.reason ?? 'hangup' },
+        });
+      return base;
     }
     case 'edit': {
       const target = base.byId[body.target];

@@ -4,11 +4,13 @@ import { Link, useLocation } from 'react-router';
 
 import { endpoints } from '../../api/endpoints.js';
 import { errorMessage } from '../../api/client.js';
-import { useMessaging, useMessagingStore } from '../../messaging/provider.js';
+import { callErrorMessage } from '../../calls/manager.js';
+import { useCalls, useMessaging, useMessagingStore } from '../../messaging/provider.js';
 import { roleIn } from '../../messaging/e2ee.js';
 import type { ConversationView as ConversationState } from '../../messaging/store.js';
 import { useSession } from '../../state/session.js';
 
+import { CallEntry } from './CallEntry.js';
 import { Composer } from './Composer.js';
 import { peerOf } from './ConversationList.js';
 import { lastSeen } from './format.js';
@@ -60,6 +62,30 @@ function usePresence(userId: string | null): Presence | null {
   return presence;
 }
 
+/** The group call going on in a conversation (refreshed while open), as its call id. */
+function useActiveGroupCall(conversationId: string | null, phase: string): string | null {
+  const [callId, setCallId] = useState<string | null>(null);
+  useEffect(() => {
+    if (conversationId === null) return;
+    let cancelled = false;
+    const load = () => {
+      endpoints.activeCall(conversationId).then(
+        ({ call }) => {
+          if (!cancelled) setCallId(call?.mode === 'sfu' ? call.id : null);
+        },
+        () => undefined,
+      );
+    };
+    load();
+    const timer = setInterval(load, 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [conversationId, phase]);
+  return conversationId === null ? null : callId;
+}
+
 export function ConversationView({ conversation }: { conversation: ConversationState }): ReactNode {
   const store = useMessagingStore();
   const { uploads, spaces } = useMessaging();
@@ -80,6 +106,10 @@ export function ConversationView({ conversation }: { conversation: ConversationS
   const bottom = useRef<HTMLDivElement>(null);
   const { timeline, meta } = conversation;
   const conversationId = meta.id;
+  const { manager: calls, call } = useCalls();
+  const groupCall = useActiveGroupCall(isGroup ? conversationId : null, call.phase);
+  const inThisCall =
+    call.conversationId === conversationId && call.phase !== 'idle' && call.phase !== 'ended';
   const messageCount = timeline.order.length;
 
   // Keep the newest message in view and mark the conversation read while it is visible.
@@ -118,6 +148,15 @@ export function ConversationView({ conversation }: { conversation: ConversationS
     .map((id) => timeline.byId[id])
     .filter((message): message is NonNullable<typeof message> => message?.deleted === false);
 
+  function startCall(media: 'audio' | 'video') {
+    setError(undefined);
+    const work =
+      isGroup && groupCall !== null
+        ? calls?.join(conversationId, groupCall)
+        : calls?.start(conversationId, media);
+    work?.catch((caught: unknown) => setError(callErrorMessage(caught)));
+  }
+
   async function setTimer(seconds: 0 | 86400 | 604800 | 7776000) {
     setError(undefined);
     try {
@@ -153,6 +192,21 @@ export function ConversationView({ conversation }: { conversation: ConversationS
                       : ''}
             </p>
           </div>
+          {calls === null || inThisCall || conversation.removed ? null : isGroup &&
+            groupCall !== null ? (
+            <Button size="sm" onClick={() => startCall('video')}>
+              Join call
+            </Button>
+          ) : (
+            <>
+              <Button variant="ghost" size="sm" onClick={() => startCall('audio')}>
+                Voice call
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => startCall('video')}>
+                Video call
+              </Button>
+            </>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -207,6 +261,15 @@ export function ConversationView({ conversation }: { conversation: ConversationS
               {timeline.order.map((id) => {
                 const message = timeline.byId[id];
                 if (message === undefined) return null;
+                if (message.call !== null)
+                  return (
+                    <CallEntry
+                      key={id}
+                      message={message}
+                      mine={message.senderId === myId}
+                      author={author(message.senderId)}
+                    />
+                  );
                 const quoted =
                   message.replyTo === null ? undefined : timeline.byId[message.replyTo];
                 return (

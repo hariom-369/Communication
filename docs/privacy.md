@@ -23,7 +23,7 @@ no advertising profiling at launch.
 | Discoverable by username | yes/no | yes | server |
 | Discoverable by phone | yes/no (if phone enabled) | no | server |
 | Channel/community discovery of my memberships | hidden always | — | server |
-| Relay calls (hide IP) | always / non-contacts / never | non-contacts | client + TURN |
+| Relay calls (hide IP) | always / unless the safety number is verified / never | unless verified | client + TURN |
 | Link previews (sender generates) | on/off | on | client |
 | Blocked users | list | — | server |
 | Linked devices | list, revoke | — | server + client |
@@ -65,7 +65,7 @@ no advertising profiling at launch.
 | Presence / last seen | Yes | last value only | visibility per settings |
 | IP addresses | Yes | 180 days in ICT logs (CERT-In), coarse prefix on sessions | |
 | Contacts / address book | No (not uploaded) | — | ADR-031 |
-| Call occurrence, participants, duration | Yes | 180 days | media E2EE |
+| Call occurrence (conversation, initiator user and device, start/answer/end, end reason, peak participant count) | Yes | 90 days (`CALL_RECORD_RETENTION_DAYS`); live participant rows only during the call | media and signalling E2EE |
 | Call media | No | — | |
 | Attachment existence, ciphertext size, uploader, blob↔conversation link, upload/download times | Yes | Until the referencing message expires (≤ 30 days); unsent uploads 1 day | [media.md](media.md), ADR-043. File names, types, dimensions, durations, previews and keys are **inside** the encrypted message only |
 | Group membership, roles (owner/admin/member), who added whom, the two settings "members can add" and "announcements only", invitations, join requests, bans | Yes | while the group exists (rows deleted with it) | needed to route and enforce the API; the authoritative roles are also end-to-end in the group (ADR-044) |

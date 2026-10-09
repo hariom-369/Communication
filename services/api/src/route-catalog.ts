@@ -32,6 +32,8 @@ export function routeCatalog(): { routes: RouteDefinition[]; close(): Promise<vo
       VALKEY_KEY_PREFIX: 'catalog',
       MAILBOX_RETENTION_DAYS: 30,
       REALTIME_WS_PATH: '/rt/v1/ws',
+      TURN_TTL_SECONDS: 600,
+      CALL_RECORD_RETENTION_DAYS: 90,
     },
     {
       db: new Kysely<Database>({ dialect: new PostgresDialect({ pool }) }),

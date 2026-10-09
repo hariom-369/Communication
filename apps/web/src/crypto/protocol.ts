@@ -122,6 +122,15 @@ export type IngestResult =
   /** No group yet (waiting for a Welcome): nothing was processed or stored. */
   | { readonly status: 'no-group' };
 
+/** `MLS-Exporter("SFrame 1.0 Base Key", callId, keyLength)` plus who sends under which index. */
+export interface CallSecret {
+  readonly epoch: number;
+  /** Base64. */
+  readonly secret: string;
+  readonly ownIndex: number;
+  readonly members: readonly (DeviceRef & { readonly index: number })[];
+}
+
 export interface SafetyNumber {
   readonly digits: string;
   readonly qr: string;
@@ -141,6 +150,8 @@ export interface CryptoApi {
   safetyNumber(userId: string): SafetyNumber;
   qrMatches(userId: string, scanned: string): boolean;
   group(conversationId: string): { exists: boolean; epoch: number; members: DeviceRef[] };
+  /** Group-call media key material for the current epoch (ADR-047, RFC 9605 §5.2). */
+  callSecret(conversationId: string, callId: string, keyLength: 16 | 32): CallSecret;
   createGroup(
     conversationId: string,
     keyPackages: string[],

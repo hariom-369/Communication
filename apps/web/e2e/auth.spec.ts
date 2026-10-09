@@ -257,7 +257,11 @@ test.describe('accessibility', () => {
     await page.getByRole('button', { name: 'Start' }).click();
     await page.getByLabel('Message', { exact: true }).fill('Accessible?');
     await page.keyboard.press('Enter');
-    await page.getByText('Sent', { exact: false }).first().waitFor();
+    // Accepted by the server (it may already read Delivered).
+    await page
+      .getByText(/· (Sent|Delivered|Read)/)
+      .first()
+      .waitFor();
     await audit();
     const screenshots = process.env['E2E_SCREENSHOTS'];
     if (screenshots !== undefined)

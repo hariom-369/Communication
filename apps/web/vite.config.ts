@@ -11,6 +11,8 @@ import { defineConfig } from 'vite';
  */
 const API_TARGET = process.env['TESSERA_API_URL'] ?? 'http://127.0.0.1:8080';
 const REALTIME_TARGET = process.env['TESSERA_REALTIME_URL'] ?? 'ws://127.0.0.1:8081';
+/** Group-call SFU (LiveKit, ADR-017), reached under `/sfu` on the web origin. */
+const SFU_TARGET = process.env['TESSERA_SFU_URL'] ?? 'ws://127.0.0.1:7880';
 /**
  * Object storage origin for encrypted attachments (presigned uploads and downloads go straight
  * from the browser to storage; docs/media.md §2). Deployments set it to the bucket's origin.
@@ -45,14 +47,23 @@ const productionHeaders = {
   'Referrer-Policy': 'no-referrer',
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
-  // Microphone for voice messages, from this origin only (asked when the user starts recording).
-  'Permissions-Policy': 'camera=(), microphone=(self), geolocation=(), payment=(), usb=()',
+  // Microphone (voice messages, calls), camera and screen capture (calls), from this origin only;
+  // each is asked for when the user starts recording or calling.
+  'Permissions-Policy':
+    'camera=(self), microphone=(self), display-capture=(self), geolocation=(), payment=(), usb=()',
 };
 
-// Mirrors production routing: one origin, `/api` → API service, `/rt` → realtime service.
+// Mirrors production routing: one origin, `/api` → API service, `/rt` → realtime service,
+// `/sfu` → the SFU's signalling (media itself flows over UDP/TCP directly to the SFU).
 const proxy = {
   '/api': { target: API_TARGET, changeOrigin: false, xfwd: true },
   '/rt': { target: REALTIME_TARGET, ws: true, changeOrigin: false },
+  '/sfu': {
+    target: SFU_TARGET,
+    ws: true,
+    changeOrigin: true,
+    rewrite: (path: string) => path.replace(/^\/sfu/, ''),
+  },
 };
 
 export default defineConfig({

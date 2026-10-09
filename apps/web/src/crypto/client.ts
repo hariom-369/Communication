@@ -1,3 +1,5 @@
+import { startWorker } from '../lib/worker-policy.js';
+
 import type { CryptoApi, Method, RpcRequest, RpcResponse } from './protocol.js';
 import workerUrl from './worker.ts?worker&url';
 
@@ -59,32 +61,7 @@ export function createCryptoClient(port: Port): AsyncCryptoApi & { close(): void
   });
 }
 
-interface TrustedTypePolicyFactory {
-  createPolicy(
-    name: string,
-    rules: { createScriptURL: (input: string) => string },
-    // Returns a TrustedScriptURL; typed as string because that is what `new Worker` is declared
-    // to accept, and it stringifies to the checked URL.
-  ): { createScriptURL(input: string): string };
-}
-
-/**
- * The app enforces Trusted Types (docs/security.md §3). This is the only policy: it produces
- * script URLs for the crypto worker, and only for scripts on our own origin.
- */
-const workerPolicy = (
-  globalThis as { trustedTypes?: TrustedTypePolicyFactory }
-).trustedTypes?.createPolicy('tessera-worker', {
-  createScriptURL: (input) => {
-    const url = new URL(input, window.location.href);
-    if (url.origin !== window.location.origin) throw new TypeError('Cross-origin worker refused');
-    return url.href;
-  },
-});
-
 /** Starts the dedicated crypto worker. */
 export function startCryptoWorker(): AsyncCryptoApi & { close(): void } {
-  const url = workerPolicy?.createScriptURL(workerUrl) ?? workerUrl;
-  const worker = new Worker(url, { type: 'module', name: 'tessera-crypto' });
-  return createCryptoClient(worker);
+  return createCryptoClient(startWorker(workerUrl, 'tessera-crypto'));
 }

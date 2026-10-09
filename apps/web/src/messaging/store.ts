@@ -189,6 +189,20 @@ export interface MessagingSnapshot {
   readonly communityVersion: number;
 }
 
+/** Server hint that a call started, was answered or ended (no content; docs/calling.md §2). */
+export type CallFrame = Extract<ServerFrame, { type: 'call' }>;
+
+export type CallSignalBody = Extract<MessageBody, { kind: 'call' }>;
+
+/** An end-to-end encrypted call signal from another device (docs/calling.md §2). */
+export interface CallSignalEvent {
+  readonly conversationId: string;
+  readonly senderUserId: string;
+  readonly senderDeviceId: string;
+  readonly serverTime: number;
+  readonly body: CallSignalBody;
+}
+
 interface OutboxEntry {
   readonly conversationId: string;
   readonly id: string;
@@ -215,6 +229,8 @@ interface MutableConversation {
 
 const TYPING_TTL_MS = 6000;
 const OUTBOX_GIVE_UP_MS = 24 * 60 * 60_000;
+/** A call signal that cannot be sent quickly is useless: the call has moved on. */
+const CALL_SIGNAL_GIVE_UP_MS = 30_000;
 const ACK_DELAY_MS = 150;
 const MAX_CONFLICT_RETRIES = 3;
 
@@ -286,6 +302,11 @@ export class MessagingStore {
   readonly #approving = new Set<string>();
   /** Membership intents being awaited until they are sent and applied. */
   readonly #applied = new Map<string, () => void>();
+  readonly #callListeners = new Set<(event: CallSignalEvent) => void>();
+  readonly #commitListeners = new Set<(conversationId: string) => void>();
+  readonly #callFrameListeners = new Set<(frame: CallFrame) => void>();
+  /** Call signals waiting to be sent, by message id. */
+  readonly #signals = new Map<string, { resolve: () => void; reject: (error: unknown) => void }>();
 
   constructor(options: StoreOptions) {
     this.#options = options;
@@ -562,9 +583,10 @@ export class MessagingStore {
     conversation: MutableConversation,
     messages: readonly MailboxMessage[],
   ): Promise<boolean> {
-    let timeline = conversation.timeline;
     let changed = false;
     let complete = true;
+    let committed = false;
+    const signals: CallSignalEvent[] = [];
     for (const message of [...messages].sort((a, b) => a.seq - b.seq)) {
       if (message.seq <= conversation.processedSeq) continue;
       const result = await this.#options.security.ingest(conversation.meta, message);
@@ -578,14 +600,30 @@ export class MessagingStore {
         result.status === 'application' ||
         (result.status === 'undecryptable' && message.kind === 'application')
       ) {
-        timeline = applyIncoming(timeline, envelope(result.record));
+        const incoming = envelope(result.record);
+        // Applied to the current timeline: the outbox may have added our own messages while
+        // this message was being decrypted.
+        conversation.timeline = applyIncoming(conversation.timeline, incoming);
         conversation.typing.delete(result.record.senderUserId);
+        const body = incoming.content?.body;
+        if (
+          result.status === 'application' &&
+          body?.kind === 'call' &&
+          result.record.senderDeviceId !== this.#options.security.deviceId
+        )
+          signals.push({
+            conversationId: conversation.meta.id,
+            senderUserId: result.record.senderUserId,
+            senderDeviceId: result.record.senderDeviceId,
+            serverTime: incoming.serverTime,
+            body,
+          });
       }
+      if (result.status === 'commit') committed = true;
       this.#outbox.delete(message.clientMessageId);
     }
     if (!changed) return complete;
-    conversation.timeline = timeline;
-    const mine = timeline.readBy[this.#options.me.id];
+    const mine = conversation.timeline.readBy[this.#options.me.id];
     if (mine !== undefined && mine > conversation.readUpTo) conversation.readUpTo = mine;
     const last = messages.at(-1);
     conversation.meta = {
@@ -595,6 +633,8 @@ export class MessagingStore {
     };
     this.#scheduleAck(conversation, conversation.processedSeq);
     this.#emit();
+    if (committed) for (const listener of this.#commitListeners) listener(conversation.meta.id);
+    for (const signal of signals) for (const listener of this.#callListeners) listener(signal);
     return complete;
   }
 
@@ -710,6 +750,9 @@ export class MessagingStore {
         this.#emit();
         return;
       }
+      case 'call':
+        for (const listener of this.#callFrameListeners) listener(frame);
+        return;
       case 'link_approved':
         // For the device being linked, which polls (it has no realtime connection yet).
         return;
@@ -1365,6 +1408,45 @@ export class MessagingStore {
     this.#control(conversationId, { kind: 'vote', target, choices });
   }
 
+  // ---- calls (docs/calling.md) -------------------------------------------------------------------
+
+  /** Call signals from other devices, in conversation order. */
+  onCallSignal(listener: (event: CallSignalEvent) => void): () => void {
+    this.#callListeners.add(listener);
+    return () => this.#callListeners.delete(listener);
+  }
+
+  /** Call state hints from the server (ringing, answered, ended). */
+  onCallFrame(listener: (frame: CallFrame) => void): () => void {
+    this.#callFrameListeners.add(listener);
+    return () => this.#callFrameListeners.delete(listener);
+  }
+
+  /** A commit changed a conversation's encryption epoch (group calls re-key). */
+  onCommit(listener: (conversationId: string) => void): () => void {
+    this.#commitListeners.add(listener);
+    return () => this.#commitListeners.delete(listener);
+  }
+
+  /** Sends a call signal end-to-end encrypted; settles when the server accepted it (or gave up). */
+  sendCallSignal(conversationId: string, body: CallSignalBody): Promise<void> {
+    const conversation = this.#conversations.get(conversationId);
+    if (conversation === undefined || !this.#maySend(conversation))
+      return Promise.reject(new Error('You cannot send to this conversation.'));
+    const id = newId();
+    const sent = new Promise<void>((resolve, reject) => {
+      this.#signals.set(id, { resolve, reject });
+    });
+    this.#enqueue(conversationId, { v: 1, id, sentAt: Date.now(), body });
+    return sent;
+  }
+
+  #giveUpSignal(entry: OutboxEntry, error: unknown): void {
+    this.#outbox.delete(entry.id);
+    this.#signals.get(entry.id)?.reject(error);
+    this.#signals.delete(entry.id);
+  }
+
   // ---- outbox ------------------------------------------------------------------------------------
 
   #enqueue(conversationId: string, content: MessageContent): void {
@@ -1391,6 +1473,11 @@ export class MessagingStore {
   async #attempt(entry: OutboxEntry, conflicts = 0): Promise<void> {
     const conversation = this.#conversations.get(entry.conversationId);
     if (conversation === undefined || !this.#outbox.has(entry.id)) return;
+    const signal = entry.content.body.kind === 'call';
+    if (signal && Date.now() - entry.createdAt > CALL_SIGNAL_GIVE_UP_MS) {
+      this.#giveUpSignal(entry, new Error('The call signal could not be sent in time.'));
+      return;
+    }
     entry.attempts += 1;
     try {
       const json = JSON.stringify(entry.content);
@@ -1414,6 +1501,8 @@ export class MessagingStore {
       };
       const stored = await this.#options.security.recordOwn(entry.conversationId, record);
       this.#outbox.delete(entry.id);
+      this.#signals.get(entry.id)?.resolve();
+      this.#signals.delete(entry.id);
       conversation.timeline = applyIncoming(conversation.timeline, envelope(stored));
       conversation.meta = {
         ...conversation.meta,
@@ -1427,6 +1516,10 @@ export class MessagingStore {
         this.#applied.get(entry.id)?.();
       }
     } catch (error) {
+      if (signal && error instanceof SecurityBlocked && error.reason === 'key-changed') {
+        this.#giveUpSignal(entry, error);
+        return;
+      }
       if (error instanceof SecurityBlocked) {
         // Waits for the user (key change) or for the other side (setup / Welcome).
         conversation.blocked = error.reason;
@@ -1453,7 +1546,12 @@ export class MessagingStore {
         error.problem.status === 429 ||
         error.problem.status === 408 ||
         error.problem.status === 409;
-      const expired = Date.now() - entry.createdAt > OUTBOX_GIVE_UP_MS;
+      const expired =
+        Date.now() - entry.createdAt > (signal ? CALL_SIGNAL_GIVE_UP_MS : OUTBOX_GIVE_UP_MS);
+      if (signal && (!retryable || expired)) {
+        this.#giveUpSignal(entry, error);
+        return;
+      }
       if (!retryable || expired) {
         this.#outbox.delete(entry.id);
         conversation.timeline = setStatus(conversation.timeline, entry.id, 'failed');

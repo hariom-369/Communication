@@ -20,7 +20,16 @@ export default defineConfig({
   use: {
     baseURL: WEB_URL,
     trace: 'retain-on-failure',
-    ...(executablePath === undefined ? {} : { launchOptions: { executablePath } }),
+    launchOptions: {
+      ...(executablePath === undefined ? {} : { executablePath }),
+      // Calls: synthetic camera and microphone, permission prompts and the screen picker
+      // answered automatically (docs/testing.md).
+      args: [
+        '--use-fake-device-for-media-stream',
+        '--use-fake-ui-for-media-stream',
+        '--auto-select-desktop-capture-source=Entire screen',
+      ],
+    },
   },
   projects: [
     { name: 'desktop-chromium', use: { ...devices['Desktop Chrome'] } },

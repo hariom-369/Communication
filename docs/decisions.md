@@ -241,7 +241,7 @@ revocation complexity). BFF — equivalent to what we are building (the API is t
 server cannot MITM. TURN (coturn) with short-lived HMAC credentials; `iceTransportPolicy:
 relay` option in privacy settings to hide IP from peers.
 
-**Status.** PROPOSED.
+**Status.** ACCEPTED — implemented in Phase 9; details and deviations in ADR-047.
 
 ## ADR-017 — Group calls
 
@@ -254,7 +254,8 @@ on membership change. SFU sees only encrypted frames plus RTP headers/metadata.
 Browser support gaps for encoded transforms → calls without E2EE are **not** silently
 allowed; unsupported browsers are blocked from E2EE calls with an explanation.
 
-**Status.** NEEDS-SECURITY-REVIEW (S-08).
+**Status.** IMPLEMENTED in Phase 9, NEEDS-SECURITY-REVIEW (S-08). The keying was changed to
+RFC 9605 §5.2 (ADR-047) instead of the construction sketched above.
 
 ## ADR-018 — Web client architecture
 
@@ -840,3 +841,68 @@ reports and takedown workflows (Phase 11); subscriber notifications (Phase 10); 
 checks (Phase 11 blocklist); realtime "channel updated" hints.
 
 **Status.** PROPOSED — implemented.
+
+## ADR-047 — Calls implementation: MLS-authenticated 1:1 calls, SFrame keyed per RFC 9605 §5.2 (Phase 9)
+
+**Context.** ADR-016/017 fixed the architecture (browser WebRTC; signalling inside MLS; coturn;
+LiveKit with frame encryption). Implementing them raised questions the ADRs left open: how group
+media keys are derived without inventing a construction, how frames reach the SFU without
+plaintext ever slipping through, what "relay for non-contacts" means when every 1:1 call is
+between people who already have a direct chat, and what the server may know.
+
+**Decision.**
+- **1:1 signalling.** A `call` message kind inside the conversation's MLS messages carries
+  `offer`, `answer`, `update`/`update_answer` (ICE restart) and `end`. Session descriptions carry
+  every candidate (no trickle), so a call costs two encrypted messages. Receivers accept an
+  answer only from the device the offer went to; the timeline builds call history from these
+  messages, so history lives only on devices.
+- **Fingerprint check.** The browser enforces the DTLS fingerprint of the description it was
+  given; in addition, after the DTLS transport (not merely ICE) reports connected, the client
+  compares SHA-256 of the certificate actually presented with the fingerprint received over MLS
+  and ends the call on any mismatch, missing certificate or timeout (fail closed). A changed
+  fingerprint during renegotiation is refused.
+- **Relay policy.** Privacy setting `callRelay`: `always`, `unverified` (default: relay unless you
+  verified the other person's safety number) or `never`. It is enforced by each device for
+  itself (`iceTransportPolicy: relay` offers only relayed candidates, so the peer never learns the
+  device's address). "Contacts" in the ADR-016 sense is replaced by *verified*, because every 1:1
+  call already has a direct chat. The existing `calls` setting (who may call me) is enforced by the
+  server.
+- **TURN.** coturn's shared-secret scheme: `username = expiry:random label` (no user or device
+  ID — TURN servers log usernames), `password = base64(HMAC-SHA1(secret, username))`, 10-minute
+  TTL. Baseline config `infra/calls/turnserver.conf` refuses relaying to private, loopback,
+  link-local/metadata, CGNAT, documentation, multicast, NAT64 and IPv4-mapped ranges (tested
+  against real coturn). coturn 4.6.1 quirk: an entry `::` or a range starting at `::` also matches
+  every IPv4 peer, so the IPv6 unspecified address is covered by test rather than by an entry.
+- **Group-call keys: RFC 9605 §5.2, not a new construction.** Per-sender keys
+  `base_key = HKDF-Expand(MLS-Exporter("SFrame 1.0 Base Key", context, 16), index, 16)` with the
+  member's MLS leaf index as sender index and `KID = index << 4 | epoch mod 16`. One deliberate
+  parameter choice: the exporter **context is the call ID** instead of the RFC's empty context, so
+  two calls in the same epoch never share keys (and therefore never share nonces). Cipher suite
+  AES_128_GCM_SHA256_128 through WebCrypto; the implementation passes the RFC's test vectors.
+  Each device keeps one frame counter for all its tracks (one worker), so `(key, counter)` never
+  repeats; receivers keep the last 3 epochs for the re-key overlap.
+- **What stays in the clear.** Audio frames are encrypted whole. For VP8 the payload header
+  (10 bytes on key frames, 3 on delta frames: frame type, version, first-partition size,
+  dimensions) stays in the clear, because the SFU needs it to forward and switch layers; it is
+  authenticated as SFrame metadata. Tracks are published as VP8 without RED (RED would wrap
+  encrypted audio in a format the SFU parses).
+- **No plaintext path.** The SFrame pipeline is plugged into the SFU client as its end-to-end
+  encryption manager. In Chromium the client then creates its connections with
+  `encodedInsertableStreams`, so the browser holds every frame until the pipeline is attached
+  (insertable streams); elsewhere `RTCRtpScriptTransform` is used. Without either API, group calls
+  are refused with an explanation. Frames that do not authenticate — including any unencrypted
+  frame — are dropped, never decoded.
+- **Re-key.** A commit (membership change) moves the MLS epoch; clients re-derive and switch
+  immediately (commit listener plus a 5-second check). Removed members cannot derive the new
+  epoch; the server also drops them from the call (sweeper → SFU `RemoveParticipant`).
+- **Server knowledge.** `calls`: conversation, mode, media, initiator user and device, start,
+  answer, end, end reason, peak participant count; kept 90 days
+  (`CALL_RECORD_RETENTION_DAYS`). `call_participants` exists only while someone is in the call.
+  The SFU sees device IDs, timing, sizes, VP8 headers and the audio-level header extension (who
+  is speaking) — see S-08.
+
+**Consequences.** SFU feature parity with LiveKit's own E2EE is not needed; we depend on the SFU
+client's custom-manager hook (a documented option) and on its VP8 forwarding using only the clear
+header. The audio-level extension remains visible to the SFU. The 32-participant target is a
+capacity statement still to be measured with real browsers on production-like hardware.
+

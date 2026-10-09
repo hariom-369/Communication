@@ -32,6 +32,13 @@ Status: PROPOSED · Testing is part of the Definition of Done for every feature.
 | Abuse / rate limit | per-key limits, bypass via IP rotation / IPv6 /64 / multiple devices, new-account throttles |
 | Failure recovery | DB failover mid-send (idempotent retry → exactly one message), Valkey loss degraded mode, realtime pod kill → reconnect + resync, S3 outage |
 | Migration | forward-compat with previous app version (expand/contract) |
+| Calls | fingerprint substitution by a malicious server → call fails; SFU-side frames are SFrame ciphertext (no nonce reuse; unencrypted frames not played); re-key on removal; unsupported browser refused; TURN deny-list against real coturn; ICE restart after the relay is replaced; RFC 9605 test vectors; opt-in 32-participant load (`TESSERA_LOAD_TESTS=1`, `e2e/calls-load.spec.ts`) |
+
+The end-to-end suite starts real call infrastructure (`e2e/global-setup.ts`): coturn
+(`turnserver`, from the system package) with `infra/calls/turnserver.conf` plus loopback peers
+allowed, and a LiveKit server (`livekit-server`, `~/.local/bin` or `LIVEKIT_SERVER_BIN`; CI
+builds the pinned Go module). Chromium runs with synthetic camera and microphone and with the
+permission prompts and screen picker answered automatically.
 
 ## 3. Security test catalogue (mandatory)
 

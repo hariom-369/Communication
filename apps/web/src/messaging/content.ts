@@ -52,6 +52,11 @@ export const MAX_POLL_OPTIONS = 12;
 export const MAX_MENTIONS = 50;
 const userRef = z.uuid();
 
+/** Session descriptions carry every network candidate (no trickle), so they can be several KB. */
+export const MAX_SDP_LENGTH = 24_000;
+export const CALL_SIGNALS = ['offer', 'answer', 'update', 'update_answer', 'end', 'group'] as const;
+export type CallSignalKind = (typeof CALL_SIGNALS)[number];
+
 export const contentSchema = z.object({
   v: z.literal(1),
   /** Equals the transport clientMessageId, so retries and echoes are recognisable. */
@@ -126,6 +131,22 @@ export const contentSchema = z.object({
             .max(MAX_POLL_OPTIONS - 1),
         )
         .max(MAX_POLL_OPTIONS),
+    }),
+    /**
+     * Call signalling (docs/calling.md §2, ADR-016). Offers and answers travel only inside
+     * end-to-end encrypted messages, so their DTLS fingerprints are authenticated by MLS and a
+     * malicious server cannot substitute its own. `update`/`update_answer` renegotiate (ICE
+     * restart); `group` announces a group call (media goes through the SFU, ADR-047).
+     */
+    z.object({
+      kind: z.literal('call'),
+      callId: z.uuid(),
+      signal: z.enum(CALL_SIGNALS),
+      media: z.enum(['audio', 'video']),
+      sdp: z.string().min(1).max(MAX_SDP_LENGTH).optional(),
+      /** The one device an answer or renegotiation is meant for. */
+      toDevice: z.uuid().optional(),
+      reason: z.enum(['hangup', 'declined', 'busy', 'failed', 'missed']).optional(),
     }),
   ]),
 });

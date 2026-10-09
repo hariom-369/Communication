@@ -23,6 +23,8 @@ import { createValkey } from '../platform/valkey.js';
 import { requireEnv } from './integration-env.js';
 
 export const ORIGIN = 'https://app.tessera.test';
+export const TEST_TURN_SECRET = 'turn-secret-for-integration-tests-only-0123456789';
+export const TEST_LIVEKIT_SECRET = 'livekit-secret-for-integration-tests-only-0123456789';
 export const RP_ID = 'app.tessera.test';
 
 /** Captures outgoing email in memory (the SMTP transport itself is tested separately). */
@@ -118,6 +120,19 @@ export async function startIntegrationApp(): Promise<IntegrationApp> {
       VALKEY_KEY_PREFIX: keyPrefix,
       MAILBOX_RETENTION_DAYS: 30,
       REALTIME_WS_PATH: '/rt/v1/ws',
+      TURN_URLS: [
+        'turn:turn.tessera.test:3478?transport=udp',
+        'turns:turn.tessera.test:443?transport=tcp',
+      ],
+      TURN_SHARED_SECRET: TEST_TURN_SECRET,
+      TURN_TTL_SECONDS: 600,
+      STUN_URLS: undefined,
+      // No SFU runs in integration tests: room control calls fail fast and are best effort.
+      LIVEKIT_URL: '/sfu',
+      LIVEKIT_API_URL: 'http://127.0.0.1:9',
+      LIVEKIT_API_KEY: 'tessera-it',
+      LIVEKIT_API_SECRET: TEST_LIVEKIT_SECRET,
+      CALL_RECORD_RETENTION_DAYS: 90,
     },
     { db, valkey, mailer, logger, media },
   );

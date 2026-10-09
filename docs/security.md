@@ -95,7 +95,9 @@ Fetcher runs as an isolated service with egress through a proxy that: resolves D
 and blocks private, loopback, link-local, CGNAT, multicast and cloud-metadata ranges (IPv4
 and IPv6, including IPv4-mapped IPv6); re-validates after redirects (max 3); allows only
 `https` on 443; 5 s timeout; 2 MiB response cap; parses only HTML `<head>` metadata; no
-cookies; fixed User-Agent. Same deny-list on TURN relays.
+cookies; fixed User-Agent. Same deny-list on TURN relays — **implemented in Phase 9** as
+`infra/calls/turnserver.conf` (`denied-peer-ip`), verified against real coturn by
+`turn-relay.integration.test.ts`; deployments add their own VPC and public service ranges.
 
 ## 7. Rate limiting and abuse throttling
 

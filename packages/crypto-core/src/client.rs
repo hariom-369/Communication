@@ -181,6 +181,31 @@ pub struct DeviceRef {
     pub device_id: String,
 }
 
+/// MLS exporter label for group-call media keys (RFC 9605 §5.2, docs/calling.md §3).
+pub const CALL_EXPORTER_LABEL: &str = "SFrame 1.0 Base Key";
+
+/// Media key material for one group call in the group's current epoch (ADR-047).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CallSecret {
+    pub epoch: u64,
+    /// `MLS-Exporter("SFrame 1.0 Base Key", call_id, key_length)`. RFC 9605 §5.2 uses an empty
+    /// context; the call ID is bound in so two calls in one epoch never share keys (and nonces).
+    pub secret: Vec<u8>,
+    /// This device's leaf index: its SFrame sender index.
+    pub own_index: u32,
+    /// Sender index → device, so a received key ID can be attributed to a member.
+    pub members: Vec<CallMember>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CallMember {
+    pub index: u32,
+    pub user_id: String,
+    pub device_id: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommitOutput {
@@ -1768,6 +1793,46 @@ impl Client {
         })
     }
 
+    /// Group-call key material for the current epoch (RFC 9605 §5.2 keying, ADR-047). Only
+    /// current members can derive it; a membership change moves the epoch and changes it.
+    pub fn call_secret(
+        &self,
+        conversation_id: &str,
+        call_id: &str,
+        key_length: usize,
+    ) -> Result<CallSecret> {
+        if key_length != 16 && key_length != 32 {
+            return Err(CoreError::Malformed("call key length"));
+        }
+        let call = parse_id(call_id)?;
+        let group = self.load_group(&parse_id(conversation_id)?)?;
+        let secret = group
+            .export_secret(
+                self.provider.crypto(),
+                CALL_EXPORTER_LABEL,
+                &call,
+                key_length,
+            )
+            .map_err(mls("export call secret"))?;
+        let members = group
+            .members()
+            .map(|member| {
+                let (user, device) = split_identity(&member.credential)?;
+                Ok(CallMember {
+                    index: member.index.u32(),
+                    user_id: format_id(&user),
+                    device_id: format_id(&device),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(CallSecret {
+            epoch: group.epoch().as_u64(),
+            secret,
+            own_index: group.own_leaf_index().u32(),
+            members,
+        })
+    }
+
     /// Commit refreshing this device's leaf (path update): post-compromise security.
     pub fn self_update(&mut self, conversation_id: &str) -> Result<CommitOutput> {
         let conversation = parse_id(conversation_id)?;
@@ -1784,3 +1849,6 @@ mod multidevice_tests;
 
 #[cfg(test)]
 mod group_tests;
+
+#[cfg(test)]
+mod call_tests;

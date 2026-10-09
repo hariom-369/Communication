@@ -134,6 +134,19 @@ async function main(): Promise<void> {
   });
   lifecycle.onShutdown({ name: 'channel_scheduler', run: () => channelScheduler.stop() });
 
+  // Calls: stop unanswered ringing, drop silent or removed participants, delete old records.
+  const callSweeper = startSingletonTask({
+    name: 'call_sweeper',
+    lockKey: 0x63616c6c, // "call"
+    intervalMs: config.CALL_SWEEP_INTERVAL_MS,
+    pool: database.pool,
+    logger,
+    task: async () => {
+      await modules.calls.sweep();
+    },
+  });
+  lifecycle.onShutdown({ name: 'call_sweeper', run: () => callSweeper.stop() });
+
   const app = await buildApp({
     logger,
     rateLimiter,

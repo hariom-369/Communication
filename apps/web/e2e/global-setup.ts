@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { createWriteStream, existsSync, readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,7 +10,8 @@ import { SMTPServer } from 'smtp-server';
 /**
  * Starts the full stack for E2E tests:
  *   PostgreSQL database `tessera_e2e` (fresh, migrated) · Valkey (existing) · SMTP capture on
- *   127.0.0.1:58025 with an HTTP inbox on :58026 · API on :58080 · web preview on :4173.
+ *   127.0.0.1:58025 with an HTTP inbox on :58026 · API on :58080 · web preview on :4173 ·
+ *   coturn on :53478 (infra/calls/turnserver.conf) · LiveKit SFU on :57880.
  * Requires TEST_DATABASE_URL, TEST_VALKEY_URL and TEST_S3_URL (S3-compatible store for encrypted
  * attachments), like the integration tests (never skipped).
  */
@@ -19,6 +20,47 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../.
 export const SMTP_PORT = 58025;
 export const INBOX_PORT = 58026;
 const API_PORT = 58080;
+export const TURN_PORT = 53478;
+const SFU_PORT = 57880;
+
+/** coturn and LiveKit binaries (CI installs both; locally they may live elsewhere). */
+function binary(name: string, envName: string): string {
+  const configured = process.env[envName];
+  if (configured !== undefined && configured !== '') return configured;
+  const local = path.join(process.env['HOME'] ?? '', '.local/bin', name);
+  return existsSync(local) ? local : name;
+}
+
+/** SIGTERM, then SIGKILL if it has not exited within 10 s. */
+function stop(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => child.kill('SIGKILL'), 10_000);
+    child.once('exit', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    child.kill('SIGTERM');
+  });
+}
+
+async function waitForPort(port: number, timeoutMs = 20_000): Promise<void> {
+  const { connect } = await import('node:net');
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const up = await new Promise<boolean>((resolve) => {
+      const socket = connect(port, '127.0.0.1');
+      socket.once('connect', () => {
+        socket.destroy();
+        resolve(true);
+      });
+      socket.once('error', () => resolve(false));
+    });
+    if (up) return;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw new Error(`Timed out waiting for port ${port}`);
+}
 
 function required(name: string): string {
   const value = process.env[name];
@@ -56,13 +98,26 @@ async function waitFor(url: string, timeoutMs = 30_000): Promise<void> {
   throw new Error(`Timed out waiting for ${url}`);
 }
 
-function start(command: string, args: string[], env: NodeJS.ProcessEnv, cwd: string): ChildProcess {
+function start(
+  command: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+  logFile?: string,
+): ChildProcess {
   const child = spawn(command, args, {
     cwd,
     env: { ...process.env, ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   child.stderr.on('data', (chunk: Buffer) => process.stderr.write(chunk));
+  // Always drain stdout: a full pipe would stall the process.
+  if (logFile === undefined) child.stdout.resume();
+  else child.stdout.pipe(createWriteStream(logFile));
+  child.on('exit', (code, signal) => {
+    if (code !== 0 && signal === null)
+      process.stderr.write(`[e2e] ${path.basename(command)} exited with code ${code}\n`);
+  });
   return child;
 }
 
@@ -116,6 +171,74 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   if (!corsSet.ok) throw new Error(`Could not configure E2E bucket CORS (${corsSet.status})`);
 
   const key = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64');
+
+  // TURN relay: the production baseline, except that loopback peers are allowed — every browser
+  // in this suite runs on 127.0.0.1. The deny-list itself is tested against the baseline in
+  // services/api (turn-relay.integration.test.ts).
+  const turnSecret = key();
+  const turnPidFile = path.join(
+    process.env['TMPDIR'] ?? '/tmp',
+    `tessera-e2e-turn-${process.pid}.pid`,
+  );
+  const turnCommand = [
+    binary('turnserver', 'TURNSERVER_BIN'),
+    '-c',
+    path.join(ROOT, 'infra/calls/turnserver.conf'),
+    `--static-auth-secret=${turnSecret}`,
+    `--listening-port=${TURN_PORT}`,
+    '--listening-ip=127.0.0.1',
+    '--relay-ip=127.0.0.1',
+    '--allow-loopback-peers',
+    '--allowed-peer-ip=127.0.0.1',
+    '--no-tls',
+    '--no-dtls',
+    '--log-file=stdout',
+    `--pidfile=${turnPidFile}`,
+  ];
+  const logs = process.env['TMPDIR'] ?? '/tmp';
+  const turn = start(
+    turnCommand[0] ?? 'turnserver',
+    turnCommand.slice(1),
+    {},
+    ROOT,
+    path.join(logs, 'tessera-e2e-turn.log'),
+  );
+  // The reconnect test replaces the relay mid-call (a network change for the call): it needs
+  // the command line, and the pid file names whichever relay is running at teardown.
+  process.env['E2E_TURN_COMMAND'] = JSON.stringify(turnCommand);
+  process.env['E2E_TURN_PIDFILE'] = turnPidFile;
+  // LiveKit SFU for group calls (dev settings; keys only for this run).
+  const sfuKey = 'e2e';
+  const sfuSecret = key();
+  const sfu = start(
+    binary('livekit-server', 'LIVEKIT_SERVER_BIN'),
+    [
+      '--config-body',
+      [
+        `port: ${SFU_PORT}`,
+        'bind_addresses: ["127.0.0.1"]',
+        'rtc:',
+        `  tcp_port: ${SFU_PORT + 1}`,
+        '  port_range_start: 50000',
+        '  port_range_end: 50200',
+        '  use_external_ip: false',
+        '  node_ip: 127.0.0.1',
+        'room:',
+        '  empty_timeout: 30',
+        'logging:',
+        '  level: warn',
+      ].join('\n'),
+    ],
+    { LIVEKIT_KEYS: `${sfuKey}: ${sfuSecret}` },
+    ROOT,
+    path.join(logs, 'tessera-e2e-sfu.log'),
+  );
+  await waitForPort(SFU_PORT);
+  // Tests that inspect the SFU's view of a call mint their own tokens (calls.spec.ts).
+  process.env['E2E_SFU_KEY'] = sfuKey;
+  process.env['E2E_SFU_SECRET'] = sfuSecret;
+  process.env['E2E_SFU_URL'] = `ws://127.0.0.1:${SFU_PORT}`;
+
   const apiEnv = {
     NODE_ENV: 'development',
     PORT: String(API_PORT),
@@ -144,6 +267,13 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     MEDIA_S3_FORCE_PATH_STYLE: 'true',
     MEDIA_S3_ACCESS_KEY_ID: 'e2e',
     MEDIA_S3_SECRET_ACCESS_KEY: 'e2e',
+    TURN_URLS: `turn:127.0.0.1:${TURN_PORT}?transport=udp`,
+    TURN_SHARED_SECRET: turnSecret,
+    LIVEKIT_URL: '/sfu',
+    LIVEKIT_API_URL: `http://127.0.0.1:${SFU_PORT}`,
+    LIVEKIT_API_KEY: sfuKey,
+    LIVEKIT_API_SECRET: sfuSecret,
+    CALL_SWEEP_INTERVAL_MS: '2000',
   };
   // Test workers use it to reset the per-IP sign-up limit between spec files (support.ts).
   process.env['E2E_VALKEY_KEY_PREFIX'] = apiEnv.VALKEY_KEY_PREFIX;
@@ -186,6 +316,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       TESSERA_API_URL: `http://127.0.0.1:${API_PORT}`,
       TESSERA_REALTIME_URL: 'ws://127.0.0.1:58081',
       TESSERA_MEDIA_ORIGIN: s3.origin,
+      TESSERA_SFU_URL: `ws://127.0.0.1:${SFU_PORT}`,
     },
     webDir,
   );
@@ -195,6 +326,13 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     web.kill('SIGTERM');
     realtime.kill('SIGTERM');
     api.kill('SIGTERM');
+    // The next run binds the same ports: wait until the SFU and relay are really gone.
+    await Promise.all([stop(sfu), stop(turn)]);
+    try {
+      process.kill(Number(readFileSync(turnPidFile, 'utf8').trim()), 'SIGTERM');
+    } catch {
+      // already stopped
+    }
     await new Promise<void>((resolve) => inboxServer.close(() => resolve()));
     await new Promise<void>((resolve) => smtp.close(() => resolve()));
   };

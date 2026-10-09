@@ -1,6 +1,29 @@
 import { env, loadConfig } from '@tessera/platform';
 import { z } from 'zod';
 
+/** Comma-separated ICE server URLs with the given schemes (RFC 7064/7065). */
+const iceUrlList = (schemes: readonly string[]) =>
+  z
+    .string()
+    .transform((value) =>
+      value
+        .split(',')
+        .map((item) => item.trim())
+        .filter((item) => item !== ''),
+    )
+    .pipe(
+      z
+        .array(
+          z
+            .string()
+            .max(200)
+            .refine((url) => schemes.some((scheme) => url.startsWith(scheme)), {
+              message: `Must start with ${schemes.join(' or ')}`,
+            }),
+        )
+        .min(1),
+    );
+
 const schema = z
   .object({
     NODE_ENV: env.nodeEnv(),
@@ -61,13 +84,61 @@ const schema = z
     MEDIA_S3_ACCESS_KEY_ID: z.string().min(1).optional(),
     MEDIA_S3_SECRET_ACCESS_KEY: z.string().min(1).optional(),
 
+    /**
+     * Calls (docs/calling.md). TURN relays use coturn's shared-secret scheme: comma-separated
+     * `turn:`/`turns:` URLs and the `static-auth-secret` shared with coturn.
+     */
+    TURN_URLS: iceUrlList(['turn:', 'turns:']).optional(),
+    TURN_SHARED_SECRET: z.string().min(32).optional(),
+    TURN_TTL_SECONDS: env.positiveInt(600),
+    STUN_URLS: iceUrlList(['stun:', 'stuns:']).optional(),
+    /** Group calls: LiveKit SFU. `LIVEKIT_URL` is given to browsers (a path on the web origin or wss://). */
+    LIVEKIT_URL: z
+      .string()
+      .regex(/^(\/[a-z0-9/_-]*|wss?:\/\/[^\s]+)$/i)
+      .optional(),
+    LIVEKIT_API_URL: env.url(['https:', 'http:']).optional(),
+    LIVEKIT_API_KEY: z.string().min(3).optional(),
+    LIVEKIT_API_SECRET: z.string().min(32).optional(),
+    CALL_RECORD_RETENTION_DAYS: env.positiveInt(90),
+    CALL_SWEEP_INTERVAL_MS: env.positiveInt(15_000),
+
     BUILD_VERSION: z.string().min(1).default('0.0.0-dev'),
     BUILD_COMMIT: z.string().min(1).default('unknown'),
     SHUTDOWN_DRAIN_MS: env.nonNegativeInt(5000),
     SHUTDOWN_TIMEOUT_MS: env.positiveInt(25_000),
   })
   .superRefine((config, ctx) => {
+    const turn = [config.TURN_URLS, config.TURN_SHARED_SECRET];
+    if (turn.some((v) => v !== undefined) && turn.some((v) => v === undefined)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['TURN_URLS'],
+        message: 'Set TURN_URLS and TURN_SHARED_SECRET together',
+      });
+    }
+    const sfu = [
+      config.LIVEKIT_URL,
+      config.LIVEKIT_API_URL,
+      config.LIVEKIT_API_KEY,
+      config.LIVEKIT_API_SECRET,
+    ];
+    if (sfu.some((v) => v !== undefined) && sfu.some((v) => v === undefined)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['LIVEKIT_URL'],
+        message:
+          'Set LIVEKIT_URL, LIVEKIT_API_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET together',
+      });
+    }
     if (config.NODE_ENV !== 'production') return;
+    if (config.LIVEKIT_URL?.startsWith('ws://') === true) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['LIVEKIT_URL'],
+        message: 'Must be wss:// or a path on the web origin in production',
+      });
+    }
     if (config.ALLOWED_ORIGINS.some((origin) => !origin.startsWith('https://'))) {
       ctx.addIssue({
         code: 'custom',

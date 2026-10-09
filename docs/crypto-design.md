@@ -15,7 +15,7 @@ Implemented in `packages/crypto-core` (Rust, compiled to WebAssembly for the web
 | §3.1 ASK | Implemented; version assigned by the server; reset = new key, version + 1 (ADR-040). |
 | §3.2 Device certificate | Implemented with a fixed binary layout instead of Protobuf (ADR-039); leaf extension `0xF0A1`; validated by every client on KeyPackages, Welcomes, Add/Update proposals and commit paths; also verified by the server (defence in depth). |
 | §3.3 Revocation | Per-device revocation on the server (step-up, audited, emailed); other members remove the device from groups via directory reconciliation. **Not yet:** signed `DeviceRevocation`, ASK rotation keeping other devices (ADR-042). |
-| §4 KeyPackages | 100 one-time + 1 last-resort per device, 30-day lifetime, atomic claim (`FOR UPDATE SKIP LOCKED`), claim limits 50/h per claimer and 500/day per target, top-up below 25. **Not yet:** automatic 7-day rotation of the last-resort package. |
+| §4 KeyPackages | 100 one-time + 1 last-resort per device, 30-day lifetime, atomic claim (`FOR UPDATE SKIP LOCKED`), claim limits 300/h (burst 100) per claimer and 500/day per target, top-up below 25. **Not yet:** automatic 7-day rotation of the last-resort package. |
 | §5 Delivery service | Rules 1, 3, 4, 5 implemented. Rule 2 (server verifies commit signatures) **deferred** — clients verify (ADR-041). |
 | §6 FS/PCS | Sender-ratchet window 200 / forward distance 1000, `max_past_epochs = 2`, self-update after 7 days or 100 sent messages. Device-removal and compromise-signal triggers arrive with multi-device. |
 | §7 Replay/dedupe | OpenMLS reuse guard (tested), server idempotency, client cursor per conversation. |
@@ -96,7 +96,9 @@ messages from revoked devices after the revocation's epoch.
 - Claim is atomic (`FOR UPDATE SKIP LOCKED`) and rate-limited per claimer (anti-exhaustion);
   when only the last-resort remains, the server returns it (not consumed).
 - **Exhaustion attack** (attacker drains one-time packages): bounded by per-account claim
-  limits (e.g. 50 claims/hour per claimer, 500/day per target), and falling back to the
+  limits (300 claims/hour per claimer with a burst of 100 — enough to create a 100-person group
+  at once; Phase 9 raised it from 50/h, which stalled group creation beyond 20 people — and
+  500/day per target), and falling back to the
   last-resort package keeps delivery working with slightly weaker FS for the first epoch.
 
 ## 5. Delivery Service rules (server, RFC 9750 roles)
