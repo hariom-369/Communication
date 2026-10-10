@@ -4,6 +4,7 @@ import {
   CreateMultipartUploadCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
+  HeadBucketCommand,
   HeadObjectCommand,
   NotFound,
   S3Client,
@@ -33,6 +34,8 @@ export interface ObjectStore {
     parts: readonly { partNumber: number; etag: string }[],
   ): Promise<void>;
   abort(key: string, uploadId: string): Promise<void>;
+  /** Reachability of the bucket (admin health view). */
+  ping(): Promise<void>;
   /** Size in bytes, or null if the object does not exist. */
   size(key: string): Promise<number | null>;
   presignGet(key: string, expiresInSeconds: number): Promise<string>;
@@ -125,6 +128,10 @@ export class S3ObjectStore implements ObjectStore {
     await this.#client.send(
       new AbortMultipartUploadCommand({ Bucket: this.#bucket, Key: key, UploadId: uploadId }),
     );
+  }
+
+  async ping(): Promise<void> {
+    await this.#client.send(new HeadBucketCommand({ Bucket: this.#bucket }));
   }
 
   async size(key: string): Promise<number | null> {

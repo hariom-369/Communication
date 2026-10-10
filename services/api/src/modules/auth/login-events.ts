@@ -54,6 +54,54 @@ export class LoginEvents {
     return { unfamiliar: Number(history.total) > 0 && Number(history.familiar) === 0 };
   }
 
+  /** A person's recent sign-in attempts (admin console, purpose-bound). */
+  async recent(
+    userId: string,
+    limit = 50,
+  ): Promise<
+    { kind: string; method: string; ipPrefix: string; userAgent: string; createdAt: Date }[]
+  > {
+    const rows = await this.#db
+      .selectFrom('login_events')
+      .select(['kind', 'method', 'ip_prefix', 'user_agent_summary', 'created_at'])
+      .where('user_id', '=', userId)
+      .orderBy('created_at', 'desc')
+      .limit(limit)
+      .execute();
+    return rows.map((row) => ({
+      kind: row.kind,
+      method: row.method,
+      ipPrefix: row.ip_prefix,
+      userAgent: row.user_agent_summary,
+      createdAt: row.created_at,
+    }));
+  }
+
+  /** Networks with the most failed sign-ins since `since` (credential-stuffing hot spots). */
+  async failureHotspots(
+    since: Date,
+    limit = 20,
+  ): Promise<{ ipPrefix: string; failures: number; accounts: number }[]> {
+    const rows = await this.#db
+      .selectFrom('login_events')
+      .select([
+        'ip_prefix',
+        sql<string>`count(*)`.as('failures'),
+        sql<string>`count(DISTINCT user_id)`.as('accounts'),
+      ])
+      .where('kind', 'in', ['failure', 'mfa_failure'])
+      .where('created_at', '>', since)
+      .groupBy('ip_prefix')
+      .orderBy(sql`count(*)`, 'desc')
+      .limit(limit)
+      .execute();
+    return rows.map((row) => ({
+      ipPrefix: row.ip_prefix,
+      failures: Number(row.failures),
+      accounts: Number(row.accounts),
+    }));
+  }
+
   async #insert(
     userId: string | null,
     kind: 'success' | 'failure' | 'mfa_failure',

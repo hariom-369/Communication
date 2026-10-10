@@ -714,6 +714,95 @@ export interface CsamHashesTable {
   added_at: Timestamp;
 }
 
+export type AdminRole =
+  'super_admin' | 'security_admin' | 'moderator' | 'support_agent' | 'analyst';
+
+export interface AdminUsersTable {
+  id: string;
+  email: string;
+  display_name: string;
+  oidc_issuer: string | null;
+  oidc_subject: string | null;
+  status: 'active' | 'disabled';
+  eligible_roles: ColumnType<AdminRole[], AdminRole[] | undefined, AdminRole[]>;
+  created_by: string;
+  created_at: Timestamp;
+  disabled_at: NullableTimestamp;
+}
+
+export interface AdminCredentialsTable {
+  id: string;
+  admin_id: string;
+  credential_id: Buffer;
+  public_key: Buffer;
+  sign_count: ColumnType<string, number | undefined, number>;
+  transports: ColumnType<string[], string[] | undefined, string[]>;
+  aaguid: string;
+  name: string;
+  created_at: Timestamp;
+  last_used_at: NullableTimestamp;
+}
+
+export interface AdminSessionsTable {
+  id: string;
+  admin_id: string;
+  token_digest: Buffer;
+  stage: 'key' | 'active';
+  created_at: Timestamp;
+  last_seen_at: Timestamp;
+  expires_at: Date;
+  reauthenticated_at: NullableTimestamp;
+  revoked_at: NullableTimestamp;
+  ip_prefix: string;
+  user_agent_summary: string;
+}
+
+export interface AdminRoleGrantsTable {
+  id: string;
+  admin_id: string;
+  role: AdminRole;
+  starts_at: Timestamp;
+  expires_at: Date;
+  approval_id: string | null;
+  granted_by: string;
+  revoked_at: NullableTimestamp;
+}
+
+export interface AdminApprovalsTable {
+  id: string;
+  kind: 'role_grant' | 'eligibility' | 'admin_create' | 'feature_flag' | 'staff_role';
+  payload: ColumnType<Record<string, unknown>, string, string>;
+  reason: string;
+  requested_by: string;
+  requested_at: Timestamp;
+  expires_at: Date;
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  decided_by: string | null;
+  decided_at: NullableTimestamp;
+  decision_note: ColumnType<string, string | undefined, string>;
+}
+
+export interface SupportTicketsTable {
+  id: string;
+  reference: string;
+  subject_user_id: string;
+  reason: string;
+  status: 'open' | 'closed';
+  created_by: string;
+  created_at: Timestamp;
+  closed_at: NullableTimestamp;
+}
+
+export interface FeatureFlagsTable {
+  key: string;
+  description: string;
+  kind: 'product' | 'security';
+  enabled: boolean;
+  rollout_percent: number;
+  updated_by: string | null;
+  updated_at: Timestamp;
+}
+
 export interface Database {
   schema_migrations: SchemaMigrationsTable;
   users: UsersTable;
@@ -785,6 +874,13 @@ export interface Database {
   moderation_grievances: ModerationGrievancesTable;
   link_blocklist: LinkBlocklistTable;
   csam_hashes: CsamHashesTable;
+  admin_users: AdminUsersTable;
+  admin_credentials: AdminCredentialsTable;
+  admin_sessions: AdminSessionsTable;
+  admin_role_grants: AdminRoleGrantsTable;
+  admin_approvals: AdminApprovalsTable;
+  support_tickets: SupportTicketsTable;
+  feature_flags: FeatureFlagsTable;
 }
 
 /** Owning module of every table ('platform' = infrastructure code outside modules/). */
@@ -859,4 +955,11 @@ export const TABLE_OWNERS: Readonly<Record<keyof Database, string>> = {
   moderation_grievances: 'moderation',
   link_blocklist: 'moderation',
   csam_hashes: 'moderation',
+  admin_users: 'admin',
+  admin_credentials: 'admin',
+  admin_sessions: 'admin',
+  admin_role_grants: 'admin',
+  admin_approvals: 'admin',
+  support_tickets: 'admin',
+  feature_flags: 'flags',
 };

@@ -84,7 +84,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['packages/ui/**/*.{ts,tsx}', 'apps/web/**/*.{ts,tsx}'],
+    files: ['packages/ui/**/*.{ts,tsx}', 'apps/web/**/*.{ts,tsx}', 'apps/admin/**/*.{ts,tsx}'],
     languageOptions: { globals: { ...globals.browser } },
     plugins: { 'react-hooks': reactHooks },
     rules: {
@@ -96,7 +96,11 @@ export default tseslint.config(
   {
     // Return types are inferred from the shared Zod response schemas, which is more precise
     // than restating them by hand.
-    files: ['apps/web/src/api/endpoints.ts', 'apps/web/src/api/moderation-endpoints.ts'],
+    files: [
+      'apps/web/src/api/endpoints.ts',
+      'apps/web/src/api/moderation-endpoints.ts',
+      'apps/admin/src/endpoints.ts',
+    ],
     rules: { '@typescript-eslint/explicit-module-boundary-types': 'off' },
   },
   {

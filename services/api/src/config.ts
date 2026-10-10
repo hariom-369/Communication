@@ -151,6 +151,51 @@ const schema = z
     EVIDENCE_RETENTION_DAYS: env.positiveInt(365),
     SECURITY_ALERT_RETENTION_DAYS: env.positiveInt(180),
 
+    /**
+     * Admin console (docs/admin.md, ADR-050): served by a separate process (`admin-server`) on
+     * its own port and origin, reachable only through the identity-aware proxy. Staff sign in with
+     * the corporate identity provider (OIDC) and then a hardware-bound security key.
+     */
+    ADMIN_PORT: env.port(8082),
+    ADMIN_HEALTH_PORT: env.port(9092),
+    ADMIN_ORIGINS: env.originList().optional(),
+    /** Where the admin SPA is served (OIDC redirect target: `<url>/auth/callback`). */
+    ADMIN_PUBLIC_URL: env.url(['https:', 'http:']).optional(),
+    ADMIN_OIDC_ISSUER: env.url(['https:', 'http:']).optional(),
+    ADMIN_OIDC_CLIENT_ID: z.string().min(1).max(200).optional(),
+    ADMIN_OIDC_CLIENT_SECRET: z.string().min(16).max(500).optional(),
+    /** Email domains whose staff may sign in (comma-separated); others are refused. */
+    ADMIN_EMAIL_DOMAINS: z
+      .string()
+      .min(1)
+      .transform((value) =>
+        value
+          .split(',')
+          .map((item) => item.trim().toLowerCase())
+          .filter((item) => item !== ''),
+      )
+      .optional(),
+    /** Local and E2E testing only: talk to the identity provider over plain HTTP. */
+    ADMIN_OIDC_ALLOW_INSECURE: env.boolean(false),
+    ADMIN_WEBAUTHN_RP_ID: z.string().min(1).max(253).optional(),
+    /**
+     * Allowed security-key models (AAGUIDs, comma-separated); empty = any hardware-bound key. With
+     * a list, keys must present a `packed` attestation certificate chaining to one of the vendor
+     * roots in ADMIN_ATTESTATION_ROOTS_FILE (a PEM bundle), so the model claim is verifiable.
+     */
+    ADMIN_ATTESTATION_ROOTS_FILE: z.string().min(1).max(1024).optional(),
+    ADMIN_AUTHENTICATOR_AAGUIDS: z
+      .string()
+      .default('')
+      .transform((value) =>
+        value
+          .split(',')
+          .map((item) => item.trim().toLowerCase())
+          .filter((item) => item !== ''),
+      ),
+    ADMIN_SESSION_IDLE_MINUTES: env.positiveInt(30),
+    ADMIN_SESSION_ABSOLUTE_HOURS: env.positiveInt(8),
+
     BUILD_VERSION: z.string().min(1).default('0.0.0-dev'),
     BUILD_COMMIT: z.string().min(1).default('unknown'),
     SHUTDOWN_DRAIN_MS: env.nonNegativeInt(5000),
@@ -195,6 +240,36 @@ const schema = z
         message: 'Set MODERATION_HPKE_PUBLIC_KEY and MODERATION_HPKE_PRIVATE_KEY together',
       });
     }
+    const oidc = [
+      config.ADMIN_OIDC_ISSUER,
+      config.ADMIN_OIDC_CLIENT_ID,
+      config.ADMIN_OIDC_CLIENT_SECRET,
+    ];
+    if (oidc.some((v) => v !== undefined) && oidc.some((v) => v === undefined)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['ADMIN_OIDC_ISSUER'],
+        message:
+          'Set ADMIN_OIDC_ISSUER, ADMIN_OIDC_CLIENT_ID and ADMIN_OIDC_CLIENT_SECRET together',
+      });
+    }
+    if (
+      config.ADMIN_AUTHENTICATOR_AAGUIDS.length > 0 &&
+      config.ADMIN_ATTESTATION_ROOTS_FILE === undefined
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['ADMIN_ATTESTATION_ROOTS_FILE'],
+        message: 'A security-key allow-list needs the vendor attestation roots to check it against',
+      });
+    }
+    if (config.ADMIN_SESSION_ABSOLUTE_HOURS > 8 || config.ADMIN_SESSION_IDLE_MINUTES > 30) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['ADMIN_SESSION_ABSOLUTE_HOURS'],
+        message: 'Admin sessions last at most 8 hours, idle at most 30 minutes (docs/admin.md §1)',
+      });
+    }
     if (config.NODE_ENV !== 'production') return;
     for (const required of ['FRANKING_KEYS', 'MODERATION_HPKE_PUBLIC_KEY'] as const) {
       if (config[required] === undefined)
@@ -204,6 +279,24 @@ const schema = z
           message: 'Required in production (abuse reports must be verifiable and encrypted)',
         });
     }
+    if (config.ADMIN_OIDC_ALLOW_INSECURE) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['ADMIN_OIDC_ALLOW_INSECURE'],
+        message: 'Not allowed in production',
+      });
+    }
+    for (const key of ['ADMIN_PUBLIC_URL', 'ADMIN_OIDC_ISSUER'] as const) {
+      const value = config[key];
+      if (value !== undefined && !value.startsWith('https:'))
+        ctx.addIssue({ code: 'custom', path: [key], message: 'Must use https in production' });
+    }
+    if (config.ADMIN_ORIGINS?.some((origin) => !origin.startsWith('https:')) === true)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['ADMIN_ORIGINS'],
+        message: 'Must use https in production',
+      });
     if (config.PUSH_TEST_ENDPOINT_ORIGIN !== undefined) {
       ctx.addIssue({
         code: 'custom',

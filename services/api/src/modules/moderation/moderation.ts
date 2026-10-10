@@ -1051,6 +1051,80 @@ export class ModerationService {
 
   // ---- staff ----------------------------------------------------------------------------------------
 
+  // ---- admin console ports (docs/admin.md) -------------------------------------------------
+
+  /** Whether a case is open and about this person (purpose binding for moderators). */
+  async caseConcerns(caseId: string, userId: string): Promise<boolean> {
+    const row = await this.#d.db
+      .selectFrom('moderation_cases')
+      .select(['status', 'subject_user_id'])
+      .where('id', '=', caseId)
+      .executeTakeFirst();
+    return row?.status === 'open' && row.subject_user_id === userId;
+  }
+
+  async metrics(now = new Date()): Promise<{ openCases: number; missedDeadlines: number }> {
+    const row = await this.#d.db
+      .selectFrom('moderation_cases')
+      .select([
+        sql<string>`count(*)`.as('open'),
+        sql<string>`count(*) FILTER (WHERE breached_at IS NOT NULL OR due_at < ${now})`.as(
+          'missed',
+        ),
+      ])
+      .where('status', '=', 'open')
+      .executeTakeFirstOrThrow();
+    return { openCases: Number(row.open), missedDeadlines: Number(row.missed) };
+  }
+
+  async staffList(): Promise<
+    { userId: string; role: StaffRole; expiresAt: Date; grantedBy: string }[]
+  > {
+    const rows = await this.#d.db
+      .selectFrom('staff_roles')
+      .selectAll()
+      .where('expires_at', '>', new Date())
+      .orderBy('expires_at')
+      .execute();
+    return rows.map((row) => ({
+      userId: row.user_id,
+      role: row.role,
+      expiresAt: row.expires_at,
+      grantedBy: row.granted_by,
+    }));
+  }
+
+  /** Grants a moderation role to a user account (after four-eyes approval in the admin console). */
+  async grantStaff(
+    userId: string,
+    role: StaffRole,
+    days: number,
+    grantedBy: string,
+  ): Promise<Date> {
+    const expiresAt = new Date(Date.now() + days * DAY_MS);
+    await this.#d.db
+      .insertInto('staff_roles')
+      .values({ user_id: userId, role, granted_by: grantedBy, expires_at: expiresAt })
+      .onConflict((oc) =>
+        oc
+          .columns(['user_id', 'role'])
+          .doUpdateSet({ granted_by: grantedBy, expires_at: expiresAt, granted_at: new Date() }),
+      )
+      .execute();
+    this.#staffCache.delete(userId);
+    return expiresAt;
+  }
+
+  async revokeStaff(userId: string, role: StaffRole): Promise<boolean> {
+    const result = await this.#d.db
+      .deleteFrom('staff_roles')
+      .where('user_id', '=', userId)
+      .where('role', '=', role)
+      .executeTakeFirst();
+    this.#staffCache.delete(userId);
+    return Number(result.numDeletedRows) > 0;
+  }
+
   async staffRoles(userId: string): Promise<StaffRole[]> {
     const cached = this.#staffCache.get(userId);
     if (cached !== undefined && Date.now() - cached.at < STAFF_CACHE_MS) return cached.roles;

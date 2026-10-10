@@ -95,6 +95,48 @@ export class AuditLog {
   }
 
   /** Recomputes the chain; returns the seq of the first broken row, or null if intact. */
+  /** Newest first, filtered (admin audit viewer). */
+  async page(filter: {
+    action?: string | undefined;
+    actorId?: string | undefined;
+    targetId?: string | undefined;
+    before?: number | undefined;
+    limit: number;
+  }): Promise<
+    {
+      seq: number;
+      at: Date;
+      actorKind: string;
+      actorId: string | null;
+      action: string;
+      targetKind: string | null;
+      targetId: string | null;
+      details: Record<string, unknown>;
+    }[]
+  > {
+    let query = this.#db
+      .selectFrom('audit_log')
+      .selectAll()
+      .orderBy('seq', 'desc')
+      .limit(filter.limit);
+    if (filter.action !== undefined)
+      query = query.where('action', 'like', `${filter.action.replaceAll('%', '')}%`);
+    if (filter.actorId !== undefined) query = query.where('actor_id', '=', filter.actorId);
+    if (filter.targetId !== undefined) query = query.where('target_id', '=', filter.targetId);
+    if (filter.before !== undefined) query = query.where('seq', '<', String(filter.before));
+    const rows = await query.execute();
+    return rows.map((row) => ({
+      seq: Number(row.seq),
+      at: row.at,
+      actorKind: row.actor_kind,
+      actorId: row.actor_id,
+      action: row.action,
+      targetKind: row.target_kind,
+      targetId: row.target_id,
+      details: (row.details ?? {}) as Record<string, unknown>,
+    }));
+  }
+
   async verifyChain(): Promise<string | null> {
     const rows = await this.#db.selectFrom('audit_log').selectAll().orderBy('seq').execute();
     let prev: Buffer = GENESIS;

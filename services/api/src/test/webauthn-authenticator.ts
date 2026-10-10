@@ -1,7 +1,8 @@
 import { createHash, generateKeyPairSync, randomBytes, sign, type KeyObject } from 'node:crypto';
 
 /**
- * Software WebAuthn authenticator for tests: produces genuine attestation (`none` format) and
+ * Software WebAuthn authenticator for tests: produces genuine attestation (`none`, or `packed`
+ * with a test vendor certificate) and
  * assertion structures signed with a real P-256 key, so the server-side library performs its
  * full verification. Test-only — never shipped.
  */
@@ -15,7 +16,7 @@ function cborHead(major: number, length: number): Buffer {
   return head;
 }
 
-type Cbor = number | string | Buffer | Map<number | string, Cbor>;
+type Cbor = number | string | Buffer | Cbor[] | Map<number | string, Cbor>;
 
 function cbor(value: Cbor): Buffer {
   if (typeof value === 'number') return value >= 0 ? cborHead(0, value) : cborHead(1, -1 - value);
@@ -24,6 +25,7 @@ function cbor(value: Cbor): Buffer {
     return Buffer.concat([cborHead(3, bytes.length), bytes]);
   }
   if (Buffer.isBuffer(value)) return Buffer.concat([cborHead(2, value.length), value]);
+  if (Array.isArray(value)) return Buffer.concat([cborHead(4, value.length), ...value.map(cbor)]);
   const parts = [cborHead(5, value.size)];
   for (const [key, item] of value) parts.push(cbor(key), cbor(item));
   return Buffer.concat(parts);
@@ -35,6 +37,14 @@ export interface SoftwareAuthenticatorOptions {
   readonly rpId: string;
   readonly origin: string;
   readonly userVerified?: boolean;
+  /** A security key: single-device (no backup flags), with this model id (AAGUID). */
+  readonly hardwareBound?: { readonly aaguid: Buffer };
+  /**
+   * A `packed` attestation signed by this certificate's key (leaf first, DER), as a vendor's
+   * security key makes it; otherwise the attestation format is `none`.
+   */
+  readonly attestation?:
+    { readonly certificates: readonly Buffer[]; readonly key: KeyObject } | 'self';
 }
 
 export class SoftwareAuthenticator {
@@ -51,8 +61,9 @@ export class SoftwareAuthenticator {
   }
 
   #flags(attested: boolean, userVerified = this.options.userVerified !== false): number {
-    // UP | (UV) | BE | BS | (AT)
-    return 0x01 | (userVerified ? 0x04 : 0) | 0x08 | 0x10 | (attested ? 0x40 : 0);
+    // UP | (UV) | BE | BS | (AT); security keys are not backup-eligible.
+    const backup = this.options.hardwareBound === undefined ? 0x08 | 0x10 : 0;
+    return 0x01 | (userVerified ? 0x04 : 0) | backup | (attested ? 0x40 : 0);
   }
 
   #clientData(type: string, challenge: string, origin = this.options.origin): Buffer {
@@ -82,19 +93,39 @@ export class SoftwareAuthenticator {
       sha256(this.options.rpId),
       Buffer.from([this.#flags(true)]),
       counter,
-      Buffer.alloc(16), // AAGUID
+      this.options.hardwareBound?.aaguid ?? Buffer.alloc(16), // AAGUID
       idLength,
       this.credentialId,
       cbor(coseKey),
     ]);
+    const clientDataJSON = this.#clientData('webauthn.create', challenge, overrides.origin);
+    const attestation = this.options.attestation;
     const attestationObject = cbor(
       new Map<string, Cbor>([
-        ['fmt', 'none'],
-        ['attStmt', new Map()],
+        ['fmt', attestation === undefined ? 'none' : 'packed'],
+        [
+          'attStmt',
+          attestation === undefined
+            ? new Map()
+            : new Map<string, Cbor>([
+                ['alg', -7],
+                [
+                  'sig',
+                  sign(
+                    'sha256',
+                    Buffer.concat([authData, sha256(clientDataJSON)]),
+                    attestation === 'self' ? this.#privateKey : attestation.key,
+                  ),
+                ],
+                // Self attestation: signed by the credential key itself, no certificate.
+                ...(attestation === 'self'
+                  ? []
+                  : ([['x5c', [...attestation.certificates]]] as [string, Cbor][])),
+              ]),
+        ],
         ['authData', authData],
       ]),
     );
-    const clientDataJSON = this.#clientData('webauthn.create', challenge, overrides.origin);
     return {
       id: this.credentialId.toString('base64url'),
       rawId: this.credentialId.toString('base64url'),

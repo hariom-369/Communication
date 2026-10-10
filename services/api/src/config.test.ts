@@ -147,6 +147,68 @@ describe('api config', () => {
   });
 });
 
+describe('admin console settings', () => {
+  const oidc = {
+    ADMIN_OIDC_ISSUER: 'https://login.tessera.example',
+    ADMIN_OIDC_CLIENT_ID: 'tessera-admin',
+    ADMIN_OIDC_CLIENT_SECRET: 'a-client-secret-of-some-length',
+  };
+
+  it('defaults to short sessions and accepts a complete production setup', () => {
+    const config = loadApiConfig(base);
+    expect(config.ADMIN_SESSION_IDLE_MINUTES).toBe(30);
+    expect(config.ADMIN_SESSION_ABSOLUTE_HOURS).toBe(8);
+    expect(config.ADMIN_OIDC_ALLOW_INSECURE).toBe(false);
+    expect(
+      issueKeys({
+        ...production,
+        ...oidc,
+        ADMIN_ORIGINS: 'https://admin.tessera.example',
+        ADMIN_PUBLIC_URL: 'https://admin.tessera.example',
+        ADMIN_EMAIL_DOMAINS: 'tessera.example',
+        ADMIN_AUTHENTICATOR_AAGUIDS: '00000000-0000-0000-0000-000000000001',
+        ADMIN_ATTESTATION_ROOTS_FILE: '/etc/tessera/security-key-roots.pem',
+      }),
+    ).toEqual([]);
+  });
+
+  it('refuses longer sessions, half an identity provider and an unverifiable allow-list', () => {
+    expect(issueKeys({ ...base, ADMIN_SESSION_ABSOLUTE_HOURS: '12' })).toEqual([
+      'ADMIN_SESSION_ABSOLUTE_HOURS',
+    ]);
+    expect(issueKeys({ ...base, ADMIN_SESSION_IDLE_MINUTES: '60' })).toEqual([
+      'ADMIN_SESSION_ABSOLUTE_HOURS',
+    ]);
+    expect(issueKeys({ ...base, ADMIN_OIDC_ISSUER: oidc.ADMIN_OIDC_ISSUER })).toEqual([
+      'ADMIN_OIDC_ISSUER',
+    ]);
+    expect(issueKeys({ ...base, ...oidc, ADMIN_OIDC_CLIENT_SECRET: 'short' })).toEqual([
+      'ADMIN_OIDC_CLIENT_SECRET',
+    ]);
+    expect(
+      issueKeys({ ...base, ADMIN_AUTHENTICATOR_AAGUIDS: '00000000-0000-0000-0000-000000000001' }),
+    ).toEqual(['ADMIN_ATTESTATION_ROOTS_FILE']);
+  });
+
+  it('refuses plain http and the insecure identity-provider switch in production', () => {
+    expect(
+      issueKeys({
+        ...production,
+        ...oidc,
+        ADMIN_OIDC_ISSUER: 'http://login.tessera.example',
+        ADMIN_ORIGINS: 'http://admin.tessera.example',
+        ADMIN_PUBLIC_URL: 'http://admin.tessera.example',
+        ADMIN_OIDC_ALLOW_INSECURE: 'true',
+      }).sort(),
+    ).toEqual([
+      'ADMIN_OIDC_ALLOW_INSECURE',
+      'ADMIN_OIDC_ISSUER',
+      'ADMIN_ORIGINS',
+      'ADMIN_PUBLIC_URL',
+    ]);
+  });
+});
+
 describe('push notification settings', () => {
   const vapid = {
     VAPID_PUBLIC_KEY: Buffer.alloc(65, 4).toString('base64url'),

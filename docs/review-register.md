@@ -33,6 +33,7 @@ backup orchestration), `apps/web/src/lib/webauthn.ts` (PRF); `services/api/src/m
 | **S-11** | Private contact discovery (if phone numbers enabled) | ADR-031 | Enumeration/privacy |
 | **S-12** | Group policy in the MLS group context (`0xF0A2`) and client-side commit authorisation; intent-gated adds; community space eligibility and auto-approve; MLS external commits for open community spaces | ADR-044, ADR-045, groups.md §0/§5 | Authorization rules, ghost-member resistance, owner-left takeover, membership without an online admin |
 | **S-13** | External penetration test + cryptographic audit of implementation | Public beta | Independent assurance |
+| **S-14** | Admin plane. **Implemented in Phase 12 (ADR-050) — for review:** OIDC client (`services/api/src/modules/admin/oidc.ts`: PKCE, state, nonce, flow storage, email/domain checks, subject binding in `admins.ts`); WebAuthn policy (`keys.ts`: single-device flags, UV, `packed` attestation chain to configured vendor roots, AAGUID extension; revocation via FIDO MDS not consulted); session handling (`sessions.ts`); the authorization matrix (`rbac.ts`, enforced in `platform/http/admin-routes.ts` before body parsing; matrix test in `admin.integration.test.ts`); four-eyes races (`approvals.ts` atomic claim, DB check); purpose binding (`service.ts`) | ADR-050 | Privileged access is the highest-impact insider and takeover path |
 
 ## 2. Legal review (L-items) — qualified Indian counsel
 

@@ -76,3 +76,7 @@ no advertising profiling at launch.
 | Reported messages and files | Only as reported: sealed to the moderation key, opened for verification and for recorded moderator views | 1 year after the case closes (legal hold: longer) | only what the reporter selected ([moderation.md](moderation.md) §3) |
 | Moderation cases, actions, notices, appeals, grievances (with the complainant's email), legal orders | Yes | case lifetime + 1 year; audit log entries per audit policy | needed for due process and legal duties |
 | Link checks in chats | Only a 4-byte hash prefix shared by many hosts, when one matches | not stored | the link itself never leaves the device |
+| Admin console views of an account (who looked, when, for which ticket, case or investigation reason) | Yes | per audit policy (hash-chained audit log) | purpose-bound and audited (ADR-050); the person's data shown is metadata only — never message content, password hashes, tokens or recovery codes |
+| Support tickets (help-desk reference, the person, what they asked for) | Yes | while open + per audit policy | the purpose under which support staff may look at an account |
+| Feature-flag rollout bucket | Derived (SHA-256 of flag and account id), not stored | — | the same person always gets the same answer for a staged rollout |
+| Staff identities (admins: work email, name, identity-provider subject, security-key public keys, sessions with full client address) | Yes | while employed + audit policy | staff, not users; full addresses for accountability of privileged access |

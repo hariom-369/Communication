@@ -91,6 +91,15 @@ export class NotifyQueue {
   }
 
   /** Removes and returns entries that are due. */
+  /** Pending (coalesced) pushes and channel fan-out jobs (admin health view). */
+  async depth(): Promise<number> {
+    const [queued, fanout] = await Promise.all([
+      this.#valkey.zcard(this.#queue),
+      this.#valkey.llen(this.#fanout),
+    ]);
+    return queued + fanout;
+  }
+
   async claimDue(now: number, limit: number): Promise<QueueEntry[]> {
     const keys = (await this.#valkey.eval(CLAIM, 1, this.#queue, String(now), String(limit))) as
       string[] | null;

@@ -77,6 +77,7 @@ export class CallsService {
   readonly #config: CallsConfig;
   readonly #logger: Logger;
   #notifier: CallNotifier | null = null;
+  #groupCallsSwitch: ((userId: string) => Promise<boolean>) | null = null;
   #blocks: CallBlocks | null = null;
 
   constructor(options: {
@@ -107,10 +108,22 @@ export class CallsService {
     this.#notifier = notifier;
   }
 
-  capabilities(): { relayAvailable: boolean; groupCallsAvailable: boolean } {
+  /** Kill switch for group calls (feature flag `group_calls`, admin console). */
+  useSwitch(groupCalls: (userId: string) => Promise<boolean>): void {
+    this.#groupCallsSwitch = groupCalls;
+  }
+
+  async capabilities(
+    userId?: string,
+  ): Promise<{ relayAvailable: boolean; groupCallsAvailable: boolean }> {
+    const configured = this.#sfu !== null && this.#config.sfu !== null;
     return {
       relayAvailable: this.#config.turn !== null,
-      groupCallsAvailable: this.#sfu !== null && this.#config.sfu !== null,
+      groupCallsAvailable:
+        configured &&
+        (this.#groupCallsSwitch === null ||
+          userId === undefined ||
+          (await this.#groupCallsSwitch(userId))),
     };
   }
 
@@ -128,7 +141,7 @@ export class CallsService {
     await this.#requireDevice(userId, input.deviceId);
     const context = await this.#context(userId, input.conversationId);
     const mode = context.kind === 'direct' ? 'p2p' : 'sfu';
-    if (mode === 'sfu' && !this.capabilities().groupCallsAvailable)
+    if (mode === 'sfu' && !(await this.capabilities(userId)).groupCallsAvailable)
       throw new AppError('SERVICE_UNAVAILABLE', {
         detail: 'Group calls are not available on this server.',
       });

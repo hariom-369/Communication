@@ -194,6 +194,17 @@ export class SessionService implements SessionAuthenticator {
     }));
   }
 
+  /** People with a signed-in session used since `since` (admin dashboard aggregate). */
+  async activeUsersSince(since: Date): Promise<number> {
+    const row = await this.#db
+      .selectFrom('sessions')
+      .select((eb) => eb.fn.count<string>('user_id').distinct().as('n'))
+      .where('last_seen_at', '>', since)
+      .where('revoked_at', 'is', null)
+      .executeTakeFirstOrThrow();
+    return Number(row.n);
+  }
+
   /** The ids among `sessionIds` that are signed in (used by notifications, before every push). */
   async activeSessionIds(sessionIds: readonly string[]): Promise<Set<string>> {
     const ids = [...new Set(sessionIds)];

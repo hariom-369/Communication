@@ -6,7 +6,7 @@ import {
   type PrivacySettings,
   type SignupRequest,
 } from '@tessera/validation';
-import type { Kysely, Transaction } from 'kysely';
+import { sql, type Kysely, type Transaction } from 'kysely';
 
 import type { Database } from '../../db/schema.js';
 import type { Mailer } from '../../platform/email.js';
@@ -256,6 +256,29 @@ export class AccountService {
   async byId(userId: string, executor: Executor = this.#db): Promise<Account | null> {
     const row = await this.#select(executor).where('users.id', '=', userId).executeTakeFirst();
     return row === undefined ? null : toAccount(row);
+  }
+
+  /** Aggregates for the admin dashboard (no per-person data). */
+  async stats(now = new Date()): Promise<{ total: number; newLast24h: number }> {
+    const since = new Date(now.getTime() - 24 * 3_600_000);
+    const row = await this.#db
+      .selectFrom('users')
+      .select([
+        sql<string>`count(*)`.as('total'),
+        sql<string>`count(*) FILTER (WHERE created_at > ${since})`.as('recent'),
+      ])
+      .executeTakeFirstOrThrow();
+    return { total: Number(row.total), newLast24h: Number(row.recent) };
+  }
+
+  /** Sign-ups per UTC day for the last `days` days (oldest first). */
+  async signupsPerDay(days: number): Promise<{ date: string; count: number }[]> {
+    const rows = await sql<{ day: string; n: string }>`
+      SELECT to_char(d, 'YYYY-MM-DD') AS day, count(u.id)::text AS n
+        FROM generate_series((now() AT TIME ZONE 'UTC')::date - (${days - 1})::int, (now() AT TIME ZONE 'UTC')::date, interval '1 day') AS d
+        LEFT JOIN users u ON (u.created_at AT TIME ZONE 'UTC')::date = d::date
+       GROUP BY d ORDER BY d`.execute(this.#db);
+    return rows.rows.map((row) => ({ date: row.day, count: Number(row.n) }));
   }
 
   /** Looks up an account by email address or username (login identifier). */

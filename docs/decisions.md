@@ -1045,3 +1045,95 @@ limited to a 24 h new-chat restriction and human review.
 **Status.** PROPOSED — implemented; NEEDS-SECURITY-REVIEW S-10 (franking and report
 verification); legal confirmation L-04, L-05, L-12, L-13.
 
+
+## ADR-050 — Admin console: separate process, OIDC plus hardware-bound keys, RBAC with JIT elevation, four eyes, purpose binding, every call audited (Phase 12)
+
+**Context.** docs/admin.md fixed the principles: a separate origin reachable only through the
+access proxy, corporate single sign-on with hardware-backed WebAuthn, short sessions, roles with
+just-in-time elevation and four-eyes approval, every data view bound to a case or ticket, no
+impersonation, no secrets, no end-to-end encrypted content, and every admin call audited.
+Implementing it raised: how far the admin plane is separated from the user API; how "hardware
+backed" can be checked; what exactly the roles allow; how a purpose is proven; how "every call
+audited" is guaranteed rather than hoped for.
+
+**Decision.**
+- **Separate process and origin.** `services/api/src/admin-server.ts` composes the same modules
+  as the user API but serves only `/admin/v1/*` on its own port (`ADMIN_PORT`, default 8082;
+  health on 9092), with its own origin allow-list (`ADMIN_ORIGINS`), its own CORS and CSRF
+  checks, and its own session cookie (`__Host-tadm`, SameSite=Strict, HttpOnly, Secure). The
+  user API serves no admin route, the admin process no user route (tested). The SPA
+  (`apps/admin`) is a separate bundle with a stricter CSP than the user app (no WebAssembly,
+  workers, blob: or data:, and `trusted-types 'none'`). Network reachability only through the
+  identity-aware proxy is a deployment control (docs/deployment.md, Phase 15).
+- **Sign-in: identity provider, then security key.** OpenID Connect authorization code with
+  PKCE (S256), `state` and `nonce` (`openid-client` 6; discovery from `ADMIN_OIDC_ISSUER`); the
+  flow lives server-side in Valkey under a single-use id carried by a strict cookie; the ID token
+  must carry a verified email on an allowed domain (`ADMIN_EMAIL_DOMAINS`). Staff are their own
+  identities (`admin_users`), not Tessera user accounts; the first sign-in binds the identity
+  provider's issuer and subject to the account created for that email, and afterwards only that
+  subject matches. Then a WebAuthn security key (`@simplewebauthn/server`): user verification
+  required, **single-device credentials only** (the backup-eligible and backed-up flags refuse
+  synced passkeys), at most five keys. With a key-model allow-list (`ADMIN_AUTHENTICATOR_AAGUIDS`)
+  the key must present a `packed` attestation whose certificate chains to a configured vendor
+  root (`ADMIN_ATTESTATION_ROOTS_FILE`) and names the model in its id-fido-gen-ce-aaguid
+  extension; self attestation and `none` are refused. The session token is replaced when the key
+  step completes. There are no admin passwords.
+- **Sessions.** 8 hours absolute, 30 minutes idle (configurable only downwards); roles are read
+  on every request, so expiry, revocation and disabling apply at once. Sensitive actions
+  (signing a person out, approving a request, disabling an admin, removing a staff role) need a
+  security-key confirmation within the last 5 minutes.
+- **Roles and capabilities** (`modules/admin/rbac.ts`, table in docs/admin.md §2):
+  `super_admin`, `security_admin`, `moderator`, `support_agent`, `analyst`. Every route names one
+  capability; deny by default; authorization runs before the request body is parsed. Roles are
+  always time-bound grants: elevated roles (super, security) at most 8 hours, others at most 90
+  days. **Just-in-time elevation:** an admin made eligible (itself a four-eyes change) requests an
+  elevated role for themselves; it starts when another admin approves.
+- **Four eyes** (`admin_approvals`): role grants, eligibility, new admins, feature-flag changes
+  and moderation staff roles are requests that a different admin with the right role approves
+  within 24 hours; the person a role is for cannot approve it; the database refuses
+  `decided_by = requested_by`; approval is claimed atomically, and a change that fails to apply
+  returns the request to pending. Disabling an admin and removing roles take effect at once (the
+  safe direction needs no second person). A break-glass operator command (`pnpm admin`)
+  bootstraps the first admins; it requires the operator's name and is audited.
+- **Purpose binding.** A person's account is reached only by exact email, username or id, and
+  only with a purpose: `ticket:<id>` (support; an open ticket about that person), `case:<id>`
+  (moderators and security; an open moderation case about that person) or
+  `investigation:<reason>` (security staff and super admins; at least 10 characters). A purpose
+  that does not fit both the viewer and the person answers "not found". The purpose is recorded
+  with every look. What can be seen is metadata only: account status and standing, sign-in
+  methods (counts and flags), devices, sessions, recent sign-ins — never message content (the
+  server has none), password hashes, tokens, authenticator secrets or recovery codes. There is no
+  impersonation route.
+- **Every call audited.** The admin pipeline (`platform/http/admin-routes.ts`) writes an audit
+  entry for every call before the response is sent — "no audit, no answer" — with the route id
+  as the action, the admin, their roles, the client address, the outcome and route details
+  (target, purpose); refusals (unauthenticated, forbidden, invalid, rate-limited) are audited by
+  an error hook, with the caller identified before anything is refused. Alerts are logged for
+  bulk lookups (more than 20 in 10 minutes), role grants, eligibility changes and disabled
+  admins. The audit viewer shows security staff everything plus the hash-chain check; everyone
+  else sees only their own actions.
+- **Feature flags** (`modules/flags`): kill switches and staged rollouts evaluated by the user API
+  (stable SHA-256 buckets per flag and person; a 15-second cache; an unknown flag is "on", so a
+  flag can only switch an existing feature off or roll it out). Shipped: `link_previews`
+  (security) and `group_calls` (product), wired to the link-preview fetcher and the calls
+  capability. Clients read `GET /api/v1/features`.
+- **Aggregates** (dashboard, sign-ups per day, failed-sign-in hotspots by network prefix) never
+  name a person; daily sign-up counts below 5 are suppressed.
+- **Deviation from docs/admin.md (recorded):** moderation work stays in the in-app moderation
+  console for user accounts with staff roles (ADR-049); the admin console manages those staff
+  roles (grant by four eyes, immediate removal) and shows moderation metrics. A billing role and
+  payment tools are not built (no payments exist yet); embedded Grafana panels are replaced by
+  the health checks until Phase 16 (observability).
+
+**Consequences.** An attacker needs the corporate identity *and* the staff member's physical key,
+on the admin origin; a stolen admin session expires within 30 idle minutes and cannot approve
+anything without the key. A single admin cannot grant themselves power, add an admin, or flip a
+flag. Support staff cannot browse: each look needs an open ticket about that person, and leaves
+a trail. Without an allow-list, "single-device" is the authenticator's own claim (flags); with
+one, it rests on vendor attestation, but revocation of vendor certificates (FIDO Metadata
+Service) is not consulted yet. Off-hours elevated access and repeated evidence views are not yet
+alerting rules (Phase 16 observability). The admin audit trail records the full client address
+of staff (accountability), unlike user-facing records (prefixes).
+
+**Status.** PROPOSED — implemented; NEEDS-SECURITY-REVIEW S-14 (admin plane: OIDC client,
+WebAuthn policy and attestation checks, authorization matrix, approval races).

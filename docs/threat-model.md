@@ -183,3 +183,28 @@ include (selection bias); exact hashing misses altered media; coordinated report
 24 h restriction on a target; staff roles are granted by database operators until the admin
 console (Phase 12); old messages without franking stay unverifiable.
 
+**Phase 12 delta (admin plane).** New: a separate admin process and origin; staff identities
+signing in through the corporate identity provider and a hardware security key; RBAC with
+just-in-time elevation; four-eyes approvals; purpose-bound account views; feature flags that
+switch features off; an operator command. Analysis in
+[phase-reports/phase-12.md](phase-reports/phase-12.md) and ADR-050. Mitigated (TB6, T-05):
+admin account takeover (identity provider plus physical key; synced passkeys refused; optional
+model allow-list proven by vendor attestation; token replaced after the key step; 30-minute
+idle limit — tested); phishing (WebAuthn origin binding: a key answer for another origin is
+refused — tested); OIDC code or token injection (PKCE, state, nonce, issuer, audience and expiry
+checks; single-use flow — each tested against a misbehaving provider); identity confusion
+(issuer and subject bound at first sign-in; same email from another subject refused — tested);
+privilege escalation by one person (time-bound roles, elevation only by eligibility plus another
+admin's approval, self-approval refused in code and by the database, the role's subject cannot
+approve, atomic claim — tested and mutation-checked); insider browsing (exact lookup with a
+purpose that must fit both viewer and person; bulk-lookup alert; every look audited with its
+purpose — tested); unaudited actions (audit write before the response; refusals audited;
+authorization before body parsing — tested by the route × role matrix, mutation-checked);
+cross-plane confusion (admin cookie meaningless to the user API and vice versa; separate origin
+allow-lists — tested); singling people out through analytics (counts below 5 suppressed —
+tested). Residual: a super admin pair can do anything the console allows (two-person collusion);
+admins see account metadata within their role and purpose; without an allow-list the
+"single-device" property is the authenticator's claim; vendor certificate revocation (FIDO MDS)
+is not consulted; off-hours and repeated-view alerting rules are pending (Phase 16); network
+reachability through the access proxy only is a deployment control (Phase 15).
+

@@ -170,6 +170,20 @@ evidence view (`moderation.evidence_viewed`) and staff-role grants and revocatio
 also keeps its own append-only timeline. The integration suite checks that each of these is
 present and that the chain verifies.
 
+The admin console (Phase 12, ADR-050) audits **every** call by construction: the admin request
+pipeline writes the entry (action = route id; actor, roles, client address, outcome, target,
+purpose) before the response is sent and fails the call if it cannot; refusals are audited by an
+error hook. The integration suite calls every admin route as every role and without a session and
+checks one entry per request.
+
+**Admin plane (Phase 12, [admin.md](admin.md)).** Separate process, origin, CORS/CSRF allow-list
+and cookie (`__Host-tadm`, SameSite=Strict); corporate OIDC (PKCE, state, nonce) then a
+single-device security key (synced passkeys refused; optional model allow-list via vendor
+attestation); 8 h / 30 min sessions; step-up within 5 min for sensitive actions; capabilities
+checked before the body is parsed; four eyes for role, eligibility, admin, flag and staff-role
+changes; purpose binding for every account view; no impersonation route. The admin SPA's CSP
+forbids WebAssembly, workers, blob:/data: and any Trusted Types policy.
+
 ## 12. Browser storage policy
 
 | Data | Storage |

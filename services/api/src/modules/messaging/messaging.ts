@@ -731,6 +731,17 @@ export class MessagingService {
    * Deletes expired ciphertext and ciphertext every member has acknowledged, in small batches to
    * avoid long locks. Returns the number of rows deleted.
    */
+  /** Messages accepted since `since` (admin dashboard aggregate; no content exists here). */
+  async countSince(since: Date): Promise<number> {
+    const row = await this.#db
+      .selectFrom('mailbox_messages')
+      .select((eb) => eb.fn.countAll<string>().as('n'))
+      .where('created_at', '>', since)
+      .where('kind', '=', 1)
+      .executeTakeFirstOrThrow();
+    return Number(row.n);
+  }
+
   async sweep(): Promise<number> {
     let total = 0;
     for (;;) {

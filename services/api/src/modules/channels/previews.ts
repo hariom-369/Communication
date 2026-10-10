@@ -20,6 +20,8 @@ export class LinkPreviewer {
   readonly #prefix: string;
   readonly #fetch: (url: string) => Promise<LinkPreview>;
 
+  #enabled: (() => Promise<boolean>) | null = null;
+
   constructor(
     valkey: Redis,
     prefix: string,
@@ -31,7 +33,13 @@ export class LinkPreviewer {
   }
 
   /** A preview, or null when the URL is not allowed or the page cannot be previewed. */
+  /** Kill switch (feature flag `link_previews`, admin console): off → no previews fetched. */
+  useSwitch(enabled: () => Promise<boolean>): void {
+    this.#enabled = enabled;
+  }
+
   async preview(url: string): Promise<LinkPreview | null> {
+    if (this.#enabled !== null && !(await this.#enabled())) return null;
     const key = `${this.#prefix}:lp:${createHash('sha256').update(url).digest('base64url')}`;
     const cached = await this.#valkey.get(key).catch(() => null);
     if (cached !== null) return cached === '' ? null : (JSON.parse(cached) as LinkPreview);

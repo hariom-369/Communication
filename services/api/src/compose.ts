@@ -29,6 +29,7 @@ import {
   groupRoutes,
   messagingRoutes,
 } from './modules/messaging/index.js';
+import { FlagsService, flagRoutes } from './modules/flags/index.js';
 import { metaRoutes } from './modules/meta/index.js';
 import {
   ModerationService,
@@ -110,6 +111,12 @@ export interface Modules {
   readonly calls: CallsService;
   readonly notifications: NotificationsService;
   readonly moderation: ModerationService;
+  readonly accounts: AccountService;
+  readonly auth: AuthService;
+  readonly sessionService: SessionService;
+  readonly loginEvents: LoginEvents;
+  readonly flags: FlagsService;
+  readonly notifyQueue: NotifyQueue;
 }
 
 const DAY_MS = 24 * 60 * 60_000;
@@ -142,13 +149,14 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
       origins: config.ALLOWED_ORIGINS,
     },
   );
+  const loginEvents = new LoginEvents(infra.db);
   const auth = new AuthService({
     db: infra.db,
     accounts,
     sessions,
     passwords: new PasswordHasher(parsePepper(config.PASSWORD_PEPPER)),
     passkeys,
-    loginEvents: new LoginEvents(infra.db),
+    loginEvents,
     secretBox,
     audit,
     mailer: infra.mailer,
@@ -291,13 +299,14 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
             : { testOrigin: config.PUSH_TEST_ENDPOINT_ORIGIN }),
         })
       : null;
+  const notifyQueue = new NotifyQueue(infra.valkey, config.VALKEY_KEY_PREFIX, {
+    coalesceMs: PUSH_COALESCE_SECONDS * 1000,
+    minIntervalMs: PUSH_MIN_INTERVAL_SECONDS * 1000,
+  });
   const notifications = new NotificationsService({
     db: infra.db,
     valkey: infra.valkey,
-    queue: new NotifyQueue(infra.valkey, config.VALKEY_KEY_PREFIX, {
-      coalesceMs: PUSH_COALESCE_SECONDS * 1000,
-      minIntervalMs: PUSH_MIN_INTERVAL_SECONDS * 1000,
-    }),
+    queue: notifyQueue,
     push,
     publisher,
     conversations: {
@@ -315,6 +324,10 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
   messaging.useNotifier(notifications);
   calls.useNotifier(notifications);
   calls.useBlocks(moderation);
+  // Feature flags (admin console): kill switches for features with an outside dependency.
+  const flags = new FlagsService(infra.db);
+  calls.useSwitch((userId) => flags.enabled('group_calls', userId));
+  previews.useSwitch(() => flags.enabled('link_previews'));
   channels.useNotifier(notifications);
   auth.useAlerts(notifications);
   sessions.onRotated((from, to) => {
@@ -337,6 +350,7 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
       ...mediaRoutes({ media }),
       ...realtimeRoutes({ realtime, websocketPath: config.REALTIME_WS_PATH }),
       ...moderationRoutes({ moderation }),
+      ...flagRoutes({ flags }),
     ],
     sessions,
     audit,
@@ -347,5 +361,11 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
     calls,
     notifications,
     moderation,
+    accounts,
+    auth,
+    sessionService: sessions,
+    loginEvents,
+    flags,
+    notifyQueue,
   };
 }

@@ -11,6 +11,8 @@
     "openapi": "node dist/cli/openapi.js openapi.json",
     "migrate": "node dist/cli/migrate.js",
     "staff": "node dist/cli/staff.js",
+    "admin": "node dist/cli/admin.js",
+    "start:admin": "node dist/admin-server.js",
     "start": "node dist/server.js"
   },
   "dependencies": {
@@ -35,18 +37,21 @@
     "livekit-server-sdk": "2.19.1",
     "nodemailer": "10.0.11",
     "openapi-types": "12.1.3",
+    "openid-client": "6.8.8",
     "otpauth": "9.5.2",
     "pg": "8.23.0",
     "web-push": "3.6.7",
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@peculiar/x509": "2.1.0",
     "@simplewebauthn/browser": "14.0.0",
     "@types/nodemailer": "8.0.2",
     "@types/pg": "8.23.1",
     "@types/smtp-server": "3.5.13",
     "@types/web-push": "3.6.4",
     "http_ece": "1.2.0",
+    "jose": "6.2.12",
     "smtp-server": "3.19.14"
   }
 }

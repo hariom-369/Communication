@@ -32,6 +32,10 @@ cp services/realtime/.env.example services/realtime/.env   # local only
 | `cargo +nightly fuzz run <target>` (in `packages/crypto-core`) | fuzz `certificate`, `padding`, `snapshot`, `inbound`, `backup` or `media` (needs `cargo install cargo-fuzz`; CI fuzzes nightly) |
 | `pnpm --filter @tessera/web test:e2e` | end-to-end tests: starts API + realtime + SMTP capture and serves the production build (needs the `TEST_*` variables; run `pnpm build` first) |
 | `pnpm --filter @tessera/api migrate` | apply database migrations (after `pnpm build`) |
+| `pnpm --filter @tessera/api start:admin` | admin API (`/admin/v1`) on :8082, a separate process (docs/admin.md; needs the `ADMIN_*` settings) |
+| `pnpm --filter @tessera/admin dev` | admin console with hot reload on http://localhost:5174 (proxies `/admin/v1` to :8082) |
+| `pnpm --filter @tessera/api admin create <email> <name> --by <you>` | break-glass operator command: bootstrap admins, grant roles (`grant <email> <role> --hours <n>`), eligibility, disable, list — audited |
+| `pnpm --filter @tessera/admin test:e2e` | admin console end-to-end tests: starts a test identity provider, the admin API and the production build (needs the `TEST_*` variables; run `pnpm build` first) |
 
 Integration tests need these variables and **fail rather than skip** without them:
 

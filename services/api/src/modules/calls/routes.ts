@@ -63,7 +63,7 @@ export function callRoutes(deps: CallsModuleDeps): RouteDefinition[] {
       audit: readOnly,
       schema: { response: callCapabilitiesSchema },
       successStatus: 200,
-      handler: () => Promise.resolve(calls.capabilities()),
+      handler: (_request, context) => calls.capabilities(context.session.userId),
     }),
     defineRoute({
       ...common,

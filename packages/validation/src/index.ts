@@ -69,3 +69,4 @@ export * from './channels.js';
 export * from './calls.js';
 export * from './notifications.js';
 export * from './moderation.js';
+export * from './admin.js';
