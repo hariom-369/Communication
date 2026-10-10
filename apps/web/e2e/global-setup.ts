@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { createECDH } from 'node:crypto';
 import { createWriteStream, existsSync, readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import path from 'node:path';
@@ -22,6 +23,8 @@ export const INBOX_PORT = 58026;
 const API_PORT = 58080;
 export const TURN_PORT = 53478;
 const SFU_PORT = 57880;
+/** The stand-in push service the API delivers to (notifications.spec.ts runs it). */
+export const PUSH_PORT = 58998;
 
 /** coturn and LiveKit binaries (CI installs both; locally they may live elsewhere). */
 function binary(name: string, envName: string): string {
@@ -239,6 +242,15 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   process.env['E2E_SFU_SECRET'] = sfuSecret;
   process.env['E2E_SFU_URL'] = `ws://127.0.0.1:${SFU_PORT}`;
 
+  const ecdh = createECDH('prime256v1');
+  ecdh.generateKeys();
+  const vapid = {
+    publicKey: ecdh.getPublicKey().toString('base64url'),
+    // 32 bytes exactly (a leading zero byte is dropped by getPrivateKey).
+    privateKey: Buffer.concat([Buffer.alloc(32), ecdh.getPrivateKey()])
+      .subarray(-32)
+      .toString('base64url'),
+  };
   const apiEnv = {
     NODE_ENV: 'development',
     PORT: String(API_PORT),
@@ -274,7 +286,14 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     LIVEKIT_API_KEY: sfuKey,
     LIVEKIT_API_SECRET: sfuSecret,
     CALL_SWEEP_INTERVAL_MS: '2000',
+    // Web Push: a fresh VAPID key pair per run; pushes go to the test push service.
+    VAPID_PUBLIC_KEY: vapid.publicKey,
+    VAPID_PRIVATE_KEY: vapid.privateKey,
+    VAPID_SUBJECT: 'mailto:e2e@tessera.localhost',
+    PUSH_TEST_ENDPOINT_ORIGIN: `http://127.0.0.1:${PUSH_PORT}`,
+    NOTIFY_INTERVAL_MS: '250',
   };
+  process.env['E2E_VAPID_PUBLIC_KEY'] = vapid.publicKey;
   // Test workers use it to reset the per-IP sign-up limit between spec files (support.ts).
   process.env['E2E_VALKEY_KEY_PREFIX'] = apiEnv.VALKEY_KEY_PREFIX;
   const apiDir = path.join(ROOT, 'services/api');

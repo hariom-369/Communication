@@ -1,4 +1,9 @@
-export { MessagingService, type MessagingConfig, type MessagingDirectory } from './messaging.js';
+export {
+  MessagingService,
+  type MessagingConfig,
+  type MessagingDirectory,
+  type MessagingNotifier,
+} from './messaging.js';
 export { messagingRoutes, type MessagingModuleDeps } from './routes.js';
 export {
   GroupsService,

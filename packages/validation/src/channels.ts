@@ -84,6 +84,8 @@ export const channelSchema = channelSummarySchema.extend({
   createdAt: z.iso.datetime(),
   me: z.object({
     subscribed: z.boolean(),
+    /** Push notifications for new posts (subscribers only; off by default). */
+    notifications: z.boolean(),
     owner: z.boolean(),
     permissions: z.number().int(),
   }),

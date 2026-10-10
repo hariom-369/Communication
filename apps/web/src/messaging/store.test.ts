@@ -453,6 +453,42 @@ describe('MessagingStore', () => {
     store.stop();
   });
 
+  it('counts messages the service worker notified about as unread, though delivered', async () => {
+    const server = [
+      mailbox(1, PEER, { kind: 'text', text: 'seen' }),
+      mailbox(2, PEER, { kind: 'text', text: 'notified' }),
+    ];
+    const api = fakeApi(server);
+    // The server has them as delivered (the service worker acknowledged both).
+    api.conversations.mockImplementation(() =>
+      Promise.resolve({ conversations: [meta({ lastSeq: 2, ackedSeq: 2 })], nextCursor: null }),
+    );
+    const cleared: string[] = [];
+    const store = new MessagingStore({
+      api: api,
+      security: fakeSecurity().port,
+      me: { id: ME },
+      unseen: {
+        load: () => Promise.resolve({ [CONVERSATION]: 2 }),
+        clear: (id) => cleared.push(id),
+      },
+      createRealtime: () => ({
+        start: vi.fn(),
+        stop: vi.fn(),
+        sendTyping: vi.fn(),
+        reconnectNow: vi.fn(),
+        interrupt: vi.fn(),
+      }),
+    });
+    await store.start();
+    await vi.runOnlyPendingTimersAsync();
+    expect(view(store).unread).toBe(1);
+    store.markRead(CONVERSATION);
+    expect(view(store).unread).toBe(0);
+    expect(cleared).toEqual([CONVERSATION]);
+    store.stop();
+  });
+
   it('sends read markers only when read receipts are shared, but always tracks unread locally', async () => {
     for (const share of [true, false]) {
       const api = fakeApi([mailbox(1, PEER, { kind: 'text', text: 'ping' })]);

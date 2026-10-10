@@ -75,7 +75,10 @@ no advertising profiling at launch.
 | Channels: handle, title, description, visibility, posts, polls and votes, reactions, comments, admins, subscribers, invite-link usage | Yes — **not end-to-end encrypted** (labelled in the UI) | until deleted by the author/admin or the channel is deleted | ADR-012/046; public channels and their posts are visible to any signed-in user |
 | Channel views | Aggregate only: unique viewers per post per day (HyperLogLog), never who viewed | daily keys 40 days; daily totals while the post exists | owners see totals, never individuals |
 | Link previews in channel posts | The URL and the page's title/description/site name, fetched by the server | with the post; fetch cache 1 h | fetched by the SSRF-hardened fetcher, no images |
-| Push notification content | No (content-free push) | — | [notifications.md](notifications.md) |
+| Push notification content | No (content-free push: conversation, channel or call id only, padded, encrypted to the browser) | — | [notifications.md](notifications.md), ADR-048; what a notification shows is decided and decrypted on the device |
+| Push subscriptions (push service endpoint and keys, session, device), delivery successes/failures | Yes | until the session or device ends (then deleted by the hourly sweep) | the push service (Google, Mozilla, Apple, Microsoft) sees that and when a device is woken, never why |
+| Notification preferences, quiet hours (incl. time zone), muted conversations | Yes | while set; expired mutes deleted | needed to decide whether to wake a device |
+| Account security alerts (headline and details such as device type, network prefix, time) | Yes | 180 days (`SECURITY_ALERT_RETENTION_DAYS`) | shown in the app on every device; also emailed |
 | Channel posts, comments, public profiles | Yes | until deleted | not E2EE |
 | Search queries (public directory) | Yes | 30 days, not linked to profile for analytics | |
 | Reported content | Yes — only what the reporter submits | case retention | ADR-021 |

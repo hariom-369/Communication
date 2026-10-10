@@ -906,3 +906,65 @@ client's custom-manager hook (a documented option) and on its VP8 forwarding usi
 header. The audio-level extension remains visible to the SFU. The 32-participant target is a
 capacity statement still to be measured with real browsers on production-like hardware.
 
+
+## ADR-048 — Notifications: content-free Web Push, decryption in the service worker, one writer per device (Phase 10)
+
+**Context.** docs/notifications.md fixed the principle (content-free pushes, decryption on the
+device). Implementing it raised: how the server decides whom to wake without knowing content;
+what the push service may learn; how a service worker can decrypt while a tab may also be using
+the same MLS state; and how to keep user-supplied push endpoints from becoming an SSRF vector.
+
+**Decision.**
+- **Payloads.** `{t:'sync', c:<conversation>}`, `{t:'call', c, k:<call>}`, `{t:'channel', c}`,
+  `{t:'alert'}`, padded to exactly 128 bytes, encrypted to the browser (RFC 8291, `aes128gcm`)
+  and signed (RFC 8292 VAPID) by the `web-push` library. The `Topic` header (replacement of
+  undelivered pushes) is derived per subscription (`SHA-256(auth ‖ conversation)`), so the push
+  service cannot link two people's pushes about one conversation. TTL 1 h for messages, 45 s
+  for calls, 24 h for alerts; urgency high for calls and alerts.
+- **Who is woken (server rules).** Subscriptions belong to one session and one encryption
+  device; before every push the session must be signed in and the device not revoked, and the
+  sweeper deletes the rest. A session with an open realtime connection is not pushed (the gateway
+  keeps `presence:session:<id>`); the open page shows its own notifications while hidden. Per
+  person: message / call / channel-post switches, quiet hours (time zone, may cross midnight;
+  one-to-one calls may still ring), and per-conversation mutes (a muted group does not ring for
+  group calls; a one-to-one call always rings). A removed member is not woken. Channel post
+  notifications are opt-in per subscription.
+- **Coalescing.** A Valkey sorted set holds one entry per person and conversation/channel: due 5 s
+  after the first message, and never sooner than 10 s after the previous push for that entry —
+  a later message is delayed, never dropped. A singleton worker drains it; channel fan-out pages
+  through opted-in subscribers in batches of 1,000. *Deviation from notifications.md §3:*
+  mentions cannot bypass coalescing or mutes — the server does not know who was mentioned
+  (mentions are inside the encrypted content). The device marks a notification "mentioned you".
+- **Delivery and SSRF.** Endpoints must be `https` on port 443 to an allow-listed push service
+  (`PUSH_SERVICE_HOSTS`: FCM, Mozilla, Apple, Windows), checked at registration and again at
+  send through the SSRF-hardened POST (same address rules as the link-preview fetcher; no
+  redirects; 10 s). 404/410 deletes the subscription; 10 consecutive failures delete it. A test
+  origin (`PUSH_TEST_ENDPOINT_ORIGIN`) is refused in production by configuration validation.
+- **Decryption on the device.** The service worker (`/sw.js`, a classic script with the same
+  crypto engine) fetches the ciphertext and runs the same `ingest` as the app, then shows the
+  notification per this device's setting: nothing but "New message" (default, docs/privacy.md
+  §2), the conversation's name, or name and message. A
+  tab that is open handles its own; if the service worker cannot decrypt (locked, no group yet,
+  error), it shows "New message" — browsers require a notification per push. Titles for
+  notifications are kept on the device (encrypted in the local store) by the app.
+- **One writer per device.** A tab and the service worker share the device's MLS state. Only
+  the holder of the device's Web Lock (`tessera-device:<user>`) may change it: a tab holds it
+  while open (a second tab offers "Use here", which takes it over and stops the first); the
+  service worker takes it only when free and releases it when done. As a fence against a writer
+  that lost the lock mid-operation, each holder claims a new writer number in the local store and
+  every commit checks it inside its IndexedDB transaction, so a stale writer cannot overwrite
+  newer state. This also fixes a latent pre-Phase-10 risk: two tabs could previously fork the
+  MLS state.
+- **Delivered vs read.** The service worker acknowledges delivery (the sender sees "Delivered");
+  messages it notified about are recorded on the device as unseen, so the app still counts them
+  as unread and sends read receipts when they are read.
+- **Security alerts** (docs/notifications.md §4) are stored (180 days), shown in the app on every
+  device (realtime hint, Security page, navigation badge), pushed at once ignoring mutes and
+  quiet hours, and still emailed. Push subscriptions follow a session through privilege-change
+  rotation.
+
+**Consequences.** Push services learn that a device was woken, when, and for which subscription
+— not what for (fixed size), nor which conversation. The server learns notification
+preferences, mutes and quiet hours (it must, to decide), never what a notification shows.
+Delivery tests run in Chromium only here (Firefox/Safari push are untested in CI; iOS requires
+the installed app). Email change and account deletion alerts arrive with those features.

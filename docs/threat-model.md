@@ -147,3 +147,18 @@ from which devices; the SFU sees the audio-level header extension (who speaks) a
 headers (key frames, sizes, resolution); TURN sees users' IP addresses; the fingerprint check is
 as strong as the MLS authentication of the caller's device (unverified safety numbers mean
 trust-on-first-use).
+
+**Phase 10 delta (notifications).** New flows: Web Push from the API to third-party push
+services and on to browsers; a service worker that decrypts on the device; security alerts.
+Analysis in [phase-reports/phase-10.md](phase-reports/phase-10.md) and ADR-048. Mitigated:
+content leaving the server in notifications (payloads name only the conversation, are padded to
+one size and encrypted to the browser — E2E tested by decrypting real pushes); push services
+linking people through a shared conversation (per-subscription topics); SSRF through
+user-supplied push endpoints (https:443 allow-list, pinned public addresses, no redirects —
+mutation-tested); pushes to signed-out sessions, revoked devices or removed members (checked
+before every push); two contexts corrupting a device's MLS state (Web Lock plus a writer fence in
+the local store — unit and E2E tested; this also closes a latent two-tab risk); notification
+floods (coalescing and a minimum interval). Residual: push services see that and when a device
+is woken; the server knows notification preferences, mutes and quiet hours; what a notification
+shows on the lock screen is the person's choice (default: nothing but "New message"); browsers other than
+Chromium are not covered by automated push tests.

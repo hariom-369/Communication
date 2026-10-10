@@ -92,6 +92,7 @@ describe("'channels.create', 'channels.get', 'channels.by_handle', 'channels.upd
 
     expect((await view(reader, id))?.me).toEqual({
       subscribed: false,
+      notifications: false,
       owner: false,
       permissions: 0,
     });

@@ -240,7 +240,7 @@ export class RealtimeGateway {
         });
         return;
       case 'ping':
-        await this.#markOnline(connection.userId);
+        await this.#markOnline(connection.userId, connection.sessionId);
         this.#send(connection, { type: 'ack', id: value.id });
         return;
       case 'typing':
@@ -277,7 +277,7 @@ export class RealtimeGateway {
       this.#byUser.set(userId, existing);
       await this.#deps.subscriber.subscribe(userChannel(config.keyPrefix, userId));
     }
-    await this.#markOnline(userId);
+    await this.#markOnline(userId, sessionId);
     this.#send(connection, {
       type: 'ready',
       heartbeatSeconds: Math.round(config.heartbeatMs / 1000),
@@ -377,10 +377,21 @@ export class RealtimeGateway {
     return true;
   }
 
-  async #markOnline(userId: string): Promise<void> {
+  /**
+   * Presence for the user, and for the session: notifications skip pushes to sessions with an
+   * open connection (docs/notifications.md §2), since realtime already delivers to them.
+   */
+  async #markOnline(userId: string, sessionId: string | null): Promise<void> {
     const { valkey, config } = this.#deps;
-    await valkey
-      .multi()
+    const multi = valkey.multi();
+    if (sessionId !== null)
+      multi.set(
+        `${config.keyPrefix}:presence:session:${sessionId}`,
+        '1',
+        'EX',
+        PRESENCE_TTL_SECONDS,
+      );
+    await multi
       .set(`${config.keyPrefix}:presence:online:${userId}`, '1', 'EX', PRESENCE_TTL_SECONDS)
       .set(
         `${config.keyPrefix}:presence:seen:${userId}`,
@@ -393,6 +404,7 @@ export class RealtimeGateway {
 
   async #heartbeat(): Promise<void> {
     const online = new Set<string>();
+    const sessions = new Set<string>();
     for (const connection of this.#connections) {
       if (!connection.alive) {
         connection.socket.terminate();
@@ -401,12 +413,24 @@ export class RealtimeGateway {
       connection.alive = false;
       connection.socket.ping();
       if (connection.userId !== null) online.add(connection.userId);
+      if (connection.sessionId !== null) sessions.add(connection.sessionId);
     }
-    await Promise.all([...online].map((userId) => this.#markOnline(userId))).catch(
-      (error: unknown) => {
-        this.#deps.logger.warn('realtime.presence_failed', this.#deps.logger.errorFields(error));
-      },
-    );
+    const { valkey, config } = this.#deps;
+    const marks = [...online].map((userId) => this.#markOnline(userId, null));
+    if (sessions.size > 0) {
+      const multi = valkey.multi();
+      for (const sessionId of sessions)
+        multi.set(
+          `${config.keyPrefix}:presence:session:${sessionId}`,
+          '1',
+          'EX',
+          PRESENCE_TTL_SECONDS,
+        );
+      marks.push(multi.exec().then(() => undefined));
+    }
+    await Promise.all(marks).catch((error: unknown) => {
+      this.#deps.logger.warn('realtime.presence_failed', this.#deps.logger.errorFields(error));
+    });
   }
 
   async #recheckAllSessions(): Promise<void> {
@@ -453,6 +477,14 @@ export class RealtimeGateway {
     if (userId === null) return;
     const connections = this.#byUser.get(userId);
     connections?.delete(connection);
+    const sessionId = connection.sessionId;
+    if (
+      sessionId !== null &&
+      ![...(connections ?? [])].some((other) => other.sessionId === sessionId)
+    ) {
+      const { valkey, config } = this.#deps;
+      await valkey.del(`${config.keyPrefix}:presence:session:${sessionId}`).catch(() => 0);
+    }
     if (connections?.size === 0) {
       this.#byUser.delete(userId);
       const { subscriber, valkey, config } = this.#deps;

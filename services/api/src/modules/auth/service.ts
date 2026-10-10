@@ -10,7 +10,7 @@ import { constantTimeEqual, randomToken, sha256, type SecretBox } from '../../pl
 import type { AccountService, Account, RequestMeta } from '../accounts/index.js';
 import type { AuditLog } from '../audit/index.js';
 
-import { newSignInEmail, passwordResetEmail, securityNoticeEmail } from './emails.js';
+import { newSignInLines, passwordResetEmail, securityNoticeEmail } from './emails.js';
 import type { LoginEvents, LoginMethod } from './login-events.js';
 import type { PasskeyService } from './passkeys.js';
 import { assertStrongPassword, type PasswordHasher } from './passwords.js';
@@ -47,6 +47,11 @@ export interface AuthServiceDeps {
 const RESET_TTL_MS = 30 * 60_000;
 
 /** Result of a first-factor login step. */
+/** In-app security alerts on every device (the notifications module). */
+export interface SecurityAlertSink {
+  securityAlert(userId: string, headline: string, details: readonly string[]): Promise<void>;
+}
+
 export interface LoginResult {
   readonly stage: SessionStage;
   readonly session: IssuedSession;
@@ -58,9 +63,14 @@ export interface LoginResult {
  */
 export class AuthService {
   readonly #d: AuthServiceDeps;
+  #alerts: SecurityAlertSink | null = null;
 
   constructor(deps: AuthServiceDeps) {
     this.#d = deps;
+  }
+
+  useAlerts(alerts: SecurityAlertSink): void {
+    this.#alerts = alerts;
   }
 
   // ---- sessions for other modules ------------------------------------------------------------
@@ -153,8 +163,8 @@ export class AuthService {
       });
     });
     this.#d.sessions.notifyRevoked(account.id);
-    if (!firstCredential)
-      await this.#notify(securityNoticeEmail(account.email, 'Your password was changed'));
+    this.#d.sessions.notifyRotated(session.id, issued.id);
+    if (!firstCredential) await this.#alert(account, 'Your password was changed');
     return issued;
   }
 
@@ -269,10 +279,9 @@ export class AuthService {
         executor: trx,
       });
     });
+    if (issued !== null) this.#d.sessions.notifyRotated(session.id, issued.id);
     if (!firstCredential) {
-      await this.#notify(
-        securityNoticeEmail(account.email, 'A passkey was added', [`Name: ${input.name}`]),
-      );
+      await this.#alert(account, 'A passkey was added', [`Name: ${input.name}`]);
     }
     return issued;
   }
@@ -319,7 +328,7 @@ export class AuthService {
         trx,
       );
     });
-    await this.#notify(securityNoticeEmail(account.email, 'A passkey was removed'));
+    await this.#alert(account, 'A passkey was removed');
   }
 
   // ---- step-up re-authentication -------------------------------------------------------------
@@ -424,9 +433,7 @@ export class AuthService {
       );
       return this.#replaceRecoveryCodes(trx, account.id, meta);
     });
-    await this.#notify(
-      securityNoticeEmail(account.email, 'Two-factor authentication was turned on'),
-    );
+    await this.#alert(account, 'Two-factor authentication was turned on');
     return codes;
   }
 
@@ -449,9 +456,7 @@ export class AuthService {
         trx,
       );
     });
-    await this.#notify(
-      securityNoticeEmail(account.email, 'Two-factor authentication was turned off'),
-    );
+    await this.#alert(account, 'Two-factor authentication was turned off');
   }
 
   async regenerateRecoveryCodes(
@@ -465,7 +470,7 @@ export class AuthService {
       }
       return this.#replaceRecoveryCodes(trx, account.id, meta);
     });
-    await this.#notify(securityNoticeEmail(account.email, 'New recovery codes were generated'));
+    await this.#alert(account, 'New recovery codes were generated');
     return codes;
   }
 
@@ -561,11 +566,7 @@ export class AuthService {
       return owner;
     });
     this.#d.sessions.notifyRevoked(account.id);
-    await this.#notify(
-      securityNoticeEmail(account.email, 'Your password was reset', [
-        'All sessions were signed out.',
-      ]),
-    );
+    await this.#alert(account, 'Your password was reset', ['All sessions were signed out.']);
   }
 
   // ---- internals -----------------------------------------------------------------------------
@@ -580,8 +581,10 @@ export class AuthService {
     });
     const { unfamiliar } = await this.#d.loginEvents.success(account.id, method, client);
     if (unfamiliar) {
-      await this.#notify(
-        newSignInEmail(account.email, {
+      await this.#alert(
+        account,
+        'New sign-in to your account',
+        newSignInLines({
           device: userAgentSummary(client.userAgent),
           network: ipPrefix(client.ip),
           at: new Date(),
@@ -711,15 +714,27 @@ export class AuthService {
     return account;
   }
 
-  /** Security notices are best-effort: a mail outage must not block the security action itself. */
-  /** Security notice by email for events raised by other modules (e.g. new encryption device). */
+  /** Security notice for events raised by other modules (e.g. new encryption device). */
   async securityNotice(
     userId: string,
     headline: string,
     lines: readonly string[] = [],
   ): Promise<void> {
     const account = await this.#d.accounts.byId(userId);
-    if (account !== null) await this.#notify(securityNoticeEmail(account.email, headline, lines));
+    if (account !== null) await this.#alert(account, headline, lines);
+  }
+
+  /**
+   * Security notices go by email and to the app on every device (they cannot be turned off).
+   * Best-effort: a mail or alert outage must not block the security action itself.
+   */
+  async #alert(
+    account: { readonly id: string; readonly email: string },
+    headline: string,
+    lines: readonly string[] = [],
+  ): Promise<void> {
+    await this.#notify(securityNoticeEmail(account.email, headline, lines));
+    await this.#alerts?.securityAlert(account.id, headline, lines);
   }
 
   async #notify(message: EmailMessage): Promise<void> {

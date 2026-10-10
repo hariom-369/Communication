@@ -44,6 +44,11 @@ export interface MessagingAttachments {
   ): Promise<void>;
 }
 
+/** Wakes recipients' devices that are not connected (docs/notifications.md §2). */
+export interface MessagingNotifier {
+  messageStored(conversationId: string, senderUserId: string, memberIds: string[]): Promise<void>;
+}
+
 export interface MessagingDirectory {
   discoverableByUsername(username: string): Promise<{ id: string; username: string } | null>;
   usernames(userIds: readonly string[]): Promise<Map<string, string>>;
@@ -89,6 +94,7 @@ export class MessagingService {
   readonly #logger: Logger;
   #devices: MessagingDevices | null = null;
   #attachments: MessagingAttachments | null = null;
+  #notifier: MessagingNotifier | null = null;
 
   constructor(
     db: Kysely<Database>,
@@ -105,6 +111,10 @@ export class MessagingService {
   }
 
   /** Wired by the composition root (keys and messaging depend on each other's interfaces). */
+  useNotifier(notifier: MessagingNotifier): void {
+    this.#notifier = notifier;
+  }
+
   useAttachments(attachments: MessagingAttachments): void {
     this.#attachments = attachments;
   }
@@ -312,6 +322,7 @@ export class MessagingService {
     if (!result.duplicate) {
       const members = await this.#memberIds(this.#db, conversationId);
       this.#publisher.publish(members, { type: 'message', conversationId, message });
+      await this.#notifier?.messageStored(conversationId, userId, members);
     }
     return { message, duplicate: result.duplicate };
   }

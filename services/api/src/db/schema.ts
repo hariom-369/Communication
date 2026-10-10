@@ -300,6 +300,7 @@ export interface ChannelSubscribersTable {
   channel_id: string;
   user_id: string;
   created_at: Timestamp;
+  notify: ColumnType<boolean, boolean | undefined, boolean>;
 }
 
 export interface ChannelSubscriberCountsTable {
@@ -530,6 +531,46 @@ export interface MlsWelcomesTable {
   expires_at: Date;
 }
 
+export interface PushSubscriptionsTable {
+  id: string;
+  user_id: string;
+  session_id: string;
+  device_id: string;
+  endpoint: string;
+  p256dh: Buffer;
+  auth: Buffer;
+  created_at: Timestamp;
+  last_success_at: NullableTimestamp;
+  failures: ColumnType<number, number | undefined, number>;
+}
+
+export interface NotificationPreferencesTable {
+  user_id: string;
+  messages: boolean;
+  calls: boolean;
+  channel_posts: boolean;
+  quiet_start: number | null;
+  quiet_end: number | null;
+  quiet_time_zone: string | null;
+  quiet_allow_calls: ColumnType<boolean, boolean | undefined, boolean>;
+  updated_at: Timestamp;
+}
+
+export interface ConversationMutesTable {
+  user_id: string;
+  conversation_id: string;
+  muted_until: Date | null;
+}
+
+export interface SecurityAlertsTable {
+  id: string;
+  user_id: string;
+  headline: string;
+  details: ColumnType<string[], string, string>;
+  created_at: Timestamp;
+  read_at: NullableTimestamp;
+}
+
 export interface Database {
   schema_migrations: SchemaMigrationsTable;
   users: UsersTable;
@@ -586,6 +627,10 @@ export interface Database {
   channel_links: ChannelLinksTable;
   calls: CallsTable;
   call_participants: CallParticipantsTable;
+  push_subscriptions: PushSubscriptionsTable;
+  notification_preferences: NotificationPreferencesTable;
+  conversation_mutes: ConversationMutesTable;
+  security_alerts: SecurityAlertsTable;
 }
 
 /** Owning module of every table ('platform' = infrastructure code outside modules/). */
@@ -645,4 +690,8 @@ export const TABLE_OWNERS: Readonly<Record<keyof Database, string>> = {
   channel_links: 'channels',
   calls: 'calls',
   call_participants: 'calls',
+  push_subscriptions: 'notifications',
+  notification_preferences: 'notifications',
+  conversation_mutes: 'notifications',
+  security_alerts: 'notifications',
 };

@@ -439,6 +439,28 @@ describe('presence', () => {
   });
 });
 
+describe('session presence (used by notifications)', () => {
+  it('marks the session connected while any of its sockets is open', async () => {
+    const node = await startNode();
+    const user = await createUser();
+    const key = `${prefix}:presence:session:${user.sessionId}`;
+    const first = await connect(node.url, user);
+    const second = await connect(node.url, user);
+    expect(await valkey.get(key)).toBe('1');
+    first.ws.close();
+    await first.closed;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Another tab of the same session is still connected.
+    expect(await valkey.get(key)).toBe('1');
+    second.ws.close();
+    await second.closed;
+    for (let i = 0; i < 50 && (await valkey.get(key)) !== null; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(await valkey.get(key)).toBeNull();
+  });
+});
+
 describe('draining', () => {
   it('asks clients to reconnect with jitter and then closes', async () => {
     const node = await startNode();

@@ -140,6 +140,11 @@ export type IdentityObservation = 'new' | 'unchanged' | 'changed';
 
 /** Every method the worker exposes, with parameters and results. */
 export interface CryptoApi {
+  /**
+   * Takes this device's single-writer lock (ADR-048): `wait` (a starting tab), `steal` ("Use
+   * here" in another tab), `try` (the service worker). Must come before `init`.
+   */
+  acquire(userId: string, mode: 'wait' | 'steal' | 'try'): 'acquired' | 'busy';
   init(userId: string): { identity: Identity | null };
   createIdentity(userId: string, askVersion: number): Identity;
   keyPackages(count: number, lastResort: boolean): string[];
@@ -174,6 +179,9 @@ export interface CryptoApi {
   recordOwn(conversationId: string, record: HistoryRecord): HistoryRecord;
   history(conversationId: string): HistoryRecord[];
   cursor(conversationId: string): number;
+  /** Conversation titles kept on the device for notifications (the service worker reads them). */
+  labels(): Record<string, string>;
+  setLabels(labels: Record<string, string>): void;
   updateMembers(
     conversationId: string,
     keyPackages: string[],

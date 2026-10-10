@@ -147,6 +147,33 @@ async function main(): Promise<void> {
   });
   lifecycle.onShutdown({ name: 'call_sweeper', run: () => callSweeper.stop() });
 
+  // Notifications: deliver due (coalesced) pushes and channel fan-out batches.
+  const notifyWorker = startSingletonTask({
+    name: 'notify_worker',
+    lockKey: 0x6e6f7466, // "notf"
+    intervalMs: config.NOTIFY_INTERVAL_MS,
+    pool: database.pool,
+    logger,
+    task: async () => {
+      // Keep going while full batches come back, so a burst drains without waiting a tick each.
+      for (let round = 0; round < 10; round += 1) {
+        if ((await modules.notifications.drain()) < 200) break;
+      }
+    },
+  });
+  lifecycle.onShutdown({ name: 'notify_worker', run: () => notifyWorker.stop() });
+  const notifySweeper = startSingletonTask({
+    name: 'notify_sweeper',
+    lockKey: 0x6e6f7377, // "nosw"
+    intervalMs: 3_600_000,
+    pool: database.pool,
+    logger,
+    task: async () => {
+      await modules.notifications.sweep();
+    },
+  });
+  lifecycle.onShutdown({ name: 'notify_sweeper', run: () => notifySweeper.stop() });
+
   const app = await buildApp({
     logger,
     rateLimiter,

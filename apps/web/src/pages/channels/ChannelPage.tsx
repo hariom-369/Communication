@@ -62,6 +62,16 @@ function ChannelView({ channel, reload }: { channel: Channel; reload: () => void
     }
   }
 
+  async function toggleNotifications() {
+    setError(undefined);
+    try {
+      await endpoints.setChannelNotifications(channel.id, !channel.me.notifications);
+      reload();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  }
+
   const tabs: { id: Tab; label: string }[] = [
     { id: 'posts', label: 'Posts' },
     ...(canChannel(perms, 'post')
@@ -94,6 +104,15 @@ function ChannelView({ channel, reload }: { channel: Channel; reload: () => void
         >
           {channel.me.subscribed ? 'Unsubscribe' : 'Subscribe'}
         </Button>
+        {channel.me.subscribed ? (
+          <Button
+            variant="ghost"
+            aria-pressed={channel.me.notifications}
+            onClick={() => void toggleNotifications()}
+          >
+            {channel.me.notifications ? 'Turn off post notifications' : 'Notify me of new posts'}
+          </Button>
+        ) : null}
       </div>
       {tabs.length > 1 ? (
         <div className="segmented" role="tablist" aria-label="Channel sections">

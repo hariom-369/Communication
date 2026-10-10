@@ -1,4 +1,5 @@
 import type { Logger } from '@tessera/platform';
+import { PUSH_COALESCE_SECONDS, PUSH_MIN_INTERVAL_SECONDS } from '@tessera/validation';
 import type { Redis } from 'ioredis';
 import type { Kysely } from 'kysely';
 
@@ -29,6 +30,12 @@ import {
   messagingRoutes,
 } from './modules/messaging/index.js';
 import { metaRoutes } from './modules/meta/index.js';
+import {
+  NotificationsService,
+  NotifyQueue,
+  PushSender,
+  notificationRoutes,
+} from './modules/notifications/index.js';
 import { RealtimeService, realtimeRoutes } from './modules/realtime/index.js';
 import type { Mailer } from './platform/email.js';
 import type { ObjectStore } from './platform/object-store.js';
@@ -65,6 +72,12 @@ export type ModuleConfig = Pick<
   | 'LIVEKIT_API_KEY'
   | 'LIVEKIT_API_SECRET'
   | 'CALL_RECORD_RETENTION_DAYS'
+  | 'VAPID_PUBLIC_KEY'
+  | 'VAPID_PRIVATE_KEY'
+  | 'VAPID_SUBJECT'
+  | 'PUSH_SERVICE_HOSTS'
+  | 'PUSH_TEST_ENDPOINT_ORIGIN'
+  | 'SECURITY_ALERT_RETENTION_DAYS'
 >;
 
 export interface ModuleInfrastructure {
@@ -85,6 +98,7 @@ export interface Modules {
   readonly media: MediaService;
   readonly channels: ChannelsService;
   readonly calls: CallsService;
+  readonly notifications: NotificationsService;
 }
 
 const DAY_MS = 24 * 60 * 60_000;
@@ -216,6 +230,51 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
     logger: infra.logger,
   });
 
+  const push =
+    config.VAPID_PUBLIC_KEY !== undefined &&
+    config.VAPID_PRIVATE_KEY !== undefined &&
+    config.VAPID_SUBJECT !== undefined
+      ? new PushSender({
+          vapid: {
+            publicKey: config.VAPID_PUBLIC_KEY,
+            privateKey: config.VAPID_PRIVATE_KEY,
+            subject: config.VAPID_SUBJECT,
+          },
+          allowedHosts: config.PUSH_SERVICE_HOSTS,
+          ...(config.PUSH_TEST_ENDPOINT_ORIGIN === undefined
+            ? {}
+            : { testOrigin: config.PUSH_TEST_ENDPOINT_ORIGIN }),
+        })
+      : null;
+  const notifications = new NotificationsService({
+    db: infra.db,
+    valkey: infra.valkey,
+    queue: new NotifyQueue(infra.valkey, config.VALKEY_KEY_PREFIX, {
+      coalesceMs: PUSH_COALESCE_SECONDS * 1000,
+      minIntervalMs: PUSH_MIN_INTERVAL_SECONDS * 1000,
+    }),
+    push,
+    publisher,
+    conversations: {
+      isMember: (conversationId, userId) => messaging.isMember(userId, conversationId),
+    },
+    sessions,
+    devices: keys,
+    config: {
+      keyPrefix: config.VALKEY_KEY_PREFIX,
+      alertRetentionDays: config.SECURITY_ALERT_RETENTION_DAYS,
+    },
+    logger: infra.logger,
+  });
+  notifications.useChannels(channels);
+  messaging.useNotifier(notifications);
+  calls.useNotifier(notifications);
+  channels.useNotifier(notifications);
+  auth.useAlerts(notifications);
+  sessions.onRotated((from, to) => {
+    void notifications.sessionRotated(from, to);
+  });
+
   return {
     routes: [
       ...metaRoutes({ build: { version: config.BUILD_VERSION, commit: config.BUILD_COMMIT } }),
@@ -226,6 +285,7 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
       ...communityRoutes({ communities }),
       ...channelRoutes({ channels, previews }),
       ...callRoutes({ calls }),
+      ...notificationRoutes({ notifications }),
       ...keysRoutes({ keys }),
       ...backupsRoutes({ backups }),
       ...mediaRoutes({ media }),
@@ -238,5 +298,6 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
     media,
     channels,
     calls,
+    notifications,
   };
 }

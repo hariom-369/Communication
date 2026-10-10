@@ -1,6 +1,26 @@
 # Notifications
 
-Status: PROPOSED
+Status: IMPLEMENTED in Phase 10 ([report](phase-reports/phase-10.md)) · Decision: **ADR-048**
+
+## 0. As built (Phase 10)
+
+- **Server** (`services/api/src/modules/notifications`): push subscriptions bound to a session and
+  an encryption device; preferences (messages, calls, channel posts, quiet hours), muted
+  conversations, security alerts; a Valkey coalescing queue drained by a singleton worker;
+  Web Push through `web-push` (RFC 8291/8292) and the SSRF-hardened POST to allow-listed push
+  services. Hooks: new message (not commits), call ringing, channel post, security notice.
+- **Realtime gateway** marks sessions with an open connection (`presence:session:<id>`): they
+  are not pushed.
+- **Web**: Settings → Notifications (turn on for this browser, what notifications show, rules,
+  quiet hours, muted chats); mute in a chat's details; "Notify me of new posts" on channels;
+  security alerts on the Security page with a badge in the navigation. The service worker
+  (`apps/web/src/sw/sw.ts`) decrypts on the device; an open page notifies while hidden.
+- **One writer per device**: a Web Lock plus a writer fence in the local store (ADR-048); a
+  second tab shows "Tessera is open in another tab — Use here".
+
+Deviations (ADR-048): mentions do not bypass coalescing or mutes (the server cannot see them);
+quiet hours are server-side (a silent push is not allowed by browsers). Not done: native push
+(APNs/FCM apps), email digests, push in browsers other than Chromium verified by tests.
 
 ## 1. Channels
 
@@ -44,3 +64,16 @@ changed, ASK rotated, account deletion scheduled. Sent by email and in-app to al
 
 Push subscriptions bound to device; deleted on device revoke/logout; endpoints returning
 404/410 removed; VAPID key rotation plan (re-subscribe flow).
+
+## 6. Tests (Phase 10)
+
+| What | Where |
+|---|---|
+| Content-free, padded, encrypted, VAPID-signed pushes; per-subscription topic | `notifications.integration.test.ts` (decrypted with `http_ece`, signature checked), `push.test.ts` |
+| Coalescing (burst → one push; later message delayed, not dropped) | `notifications.integration.test.ts` |
+| Mutes, preferences, quiet hours (incl. across midnight / time zones), removed members | `notifications.integration.test.ts`, `push.test.ts`, `text.test.ts` |
+| No push to connected or signed-out sessions; 410 cleanup; rotation keeps the subscription | `notifications.integration.test.ts`, realtime `gateway.integration.test.ts` |
+| Endpoint allow-list and SSRF rules | `push.test.ts` (mutation-checked) |
+| Push → service worker decrypts → notification; preview setting; delivered vs read | `e2e/notifications.spec.ts` (real API pushes to a stand-in push service; delivered to the service worker through DevTools) |
+| One writer per device ("Use here") | `crypto/single-writer.test.ts`, `messaging/e2ee.test.ts`, `e2e/notifications.spec.ts` |
+| Security alerts on every device | `notifications.integration.test.ts`, `e2e/notifications.spec.ts` |

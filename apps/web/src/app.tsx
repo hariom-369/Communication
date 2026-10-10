@@ -20,6 +20,7 @@ import { NotFoundPage } from './pages/NotFoundPage.js';
 import { ResetPasswordPage } from './pages/ResetPasswordPage.js';
 import { AccountPage } from './pages/settings/AccountPage.js';
 import { DevicesPage } from './pages/settings/DevicesPage.js';
+import { NotificationsPage } from './pages/settings/NotificationsPage.js';
 import { PrivacyPage } from './pages/settings/PrivacyPage.js';
 import { SecurityPage } from './pages/settings/SecurityPage.js';
 import { SetupCredentialPage } from './pages/SetupCredentialPage.js';
@@ -138,6 +139,7 @@ const router = createBrowserRouter([
       { path: '/settings/security', element: <SecurityPage /> },
       { path: '/settings/devices', element: <DevicesPage /> },
       { path: '/settings/privacy', element: <PrivacyPage /> },
+      { path: '/settings/notifications', element: <NotificationsPage /> },
       { path: '/settings/account', element: <AccountPage /> },
       { path: '/chats', element: <ChatsPage /> },
       { path: '/chats/:conversationId', element: <ChatsPage /> },

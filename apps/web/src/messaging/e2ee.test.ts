@@ -30,6 +30,7 @@ const problem = (status: number) =>
 
 function setup(local: Identity | null) {
   const crypto = {
+    acquire: vi.fn().mockResolvedValue('acquired'),
     init: vi.fn().mockResolvedValue({ identity: local }),
     createPending: vi.fn().mockResolvedValue(identity({ pending: true, askPublicKey: null })),
     linkRequest: vi.fn().mockResolvedValue({ hpkePublic: 'H', signaturePublic: 'S' }),
@@ -73,6 +74,41 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe('one tab at a time (ADR-048)', () => {
+  it('waits for the device lock and says so when another tab has it; "Use here" takes it', async () => {
+    const { crypto, session } = setup(identity());
+    crypto.acquire.mockResolvedValueOnce('busy');
+    await session.start();
+    expect(session.status).toBe('elsewhere');
+    expect(crypto.acquire).toHaveBeenCalledWith(ME, 'wait');
+    expect(crypto.init).not.toHaveBeenCalled();
+
+    session.useHere();
+    await session.start();
+    expect(crypto.acquire).toHaveBeenLastCalledWith(ME, 'steal');
+    expect(crypto.init).toHaveBeenCalledWith(ME);
+    expect(session.status).not.toBe('elsewhere');
+  });
+
+  it('stops using the worker when another tab takes over', async () => {
+    let lost: (() => void) | undefined;
+    const { crypto, session } = setup(identity());
+    Object.assign(crypto, {
+      onLockLost: (listener: () => void) => {
+        lost = listener;
+      },
+    });
+    await session.start();
+    expect(lost).toBeDefined();
+    lost?.();
+    expect(session.status).toBe('elsewhere');
+    expect(crypto.close).toHaveBeenCalled();
+    // A stop afterwards (the store pausing) keeps the state the screen depends on.
+    session.stop();
+    expect(session.status).toBe('elsewhere');
+  });
 });
 
 describe('linking this device', () => {

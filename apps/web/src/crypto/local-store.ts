@@ -12,6 +12,11 @@
  *
  * `commit()` writes the MLS state, history records and cursors in **one** IndexedDB transaction,
  * so the ratchet state and the messages it produced are persisted together or not at all.
+ *
+ * Single writer: a tab and the service worker can both open this store, but only the holder of
+ * the device's Web Lock may change it (crypto/engine.ts). As a fence against a writer that lost
+ * the lock mid-operation, each holder claims a new writer number, and every commit checks it
+ * inside its transaction — a stale writer's commit aborts instead of overwriting newer state.
  */
 
 const DB_VERSION = 2;
@@ -72,9 +77,18 @@ function done(tx: IDBTransaction): Promise<void> {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
+/** Thrown by `commit` when another context has claimed the store since this one did. */
+export class StaleWriterError extends Error {
+  constructor() {
+    super('Another tab or the service worker took over this device’s encryption state.');
+    this.name = 'StaleWriterError';
+  }
+}
+
 export class LocalStore {
   readonly #db: IDBDatabase;
   readonly #key: CryptoKey;
+  #writer: number | null = null;
 
   private constructor(db: IDBDatabase, key: CryptoKey) {
     this.#db = db;
@@ -121,6 +135,35 @@ export class LocalStore {
 
   close(): void {
     this.#db.close();
+  }
+
+  /** Makes this connection the store's writer; earlier writers' commits fail from now on. */
+  async claimWriter(): Promise<void> {
+    const tx = this.#db.transaction('meta', 'readwrite');
+    const store = tx.objectStore('meta');
+    const current = ((await request(store.get('writer'))) as number | undefined) ?? 0;
+    const next = current + 1;
+    store.put(next, 'writer');
+    await done(tx);
+    this.#writer = next;
+  }
+
+  /** Conversation titles for the service worker's notifications (encrypted like the rest). */
+  async labels(): Promise<Record<string, string>> {
+    const tx = this.#db.transaction('meta', 'readonly');
+    const sealed = (await request(tx.objectStore('meta').get('labels'))) as Sealed | undefined;
+    if (sealed === undefined) return {};
+    return JSON.parse(decoder.decode(await this.#open(sealed, 'meta|labels'))) as Record<
+      string,
+      string
+    >;
+  }
+
+  async putLabels(labels: Record<string, string>): Promise<void> {
+    const sealed = await this.#seal(encoder.encode(JSON.stringify(labels)), 'meta|labels');
+    const tx = this.#db.transaction('meta', 'readwrite');
+    tx.objectStore('meta').put(sealed, 'labels');
+    await done(tx);
   }
 
   async #seal(plaintext: Uint8Array<ArrayBuffer>, aad: string): Promise<Sealed> {
@@ -215,12 +258,32 @@ export class LocalStore {
       })),
     );
     // Encryption is done: everything below is synchronous IndexedDB work in one transaction.
-    const tx = this.#db.transaction(['state', 'history', 'cursors'], 'readwrite');
-    if (state !== undefined) tx.objectStore('state').put(state, 'client');
-    for (const entry of history) tx.objectStore('history').put(entry.value, entry.key);
-    if (batch.clearCursors === true) tx.objectStore('cursors').clear();
-    for (const entry of cursors) tx.objectStore('cursors').put(entry.value, entry.key);
-    await done(tx);
+    const tx = this.#db.transaction(['meta', 'state', 'history', 'cursors'], 'readwrite');
+    const write = () => {
+      if (state !== undefined) tx.objectStore('state').put(state, 'client');
+      for (const entry of history) tx.objectStore('history').put(entry.value, entry.key);
+      if (batch.clearCursors === true) tx.objectStore('cursors').clear();
+      for (const entry of cursors) tx.objectStore('cursors').put(entry.value, entry.key);
+    };
+    const fence = { stale: false };
+    if (this.#writer === null) write();
+    else {
+      const mine = this.#writer;
+      const check = tx.objectStore('meta').get('writer');
+      check.onsuccess = () => {
+        if (check.result === mine) write();
+        else {
+          fence.stale = true;
+          tx.abort();
+        }
+      };
+    }
+    try {
+      await done(tx);
+    } catch (error) {
+      if (fence.stale) throw new StaleWriterError();
+      throw error;
+    }
   }
 
   /**

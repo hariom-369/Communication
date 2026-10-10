@@ -1,5 +1,8 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { build, defineConfig, type InlineConfig, type Plugin, type Rollup } from 'vite';
 
 /**
  * The web app is a static bundle; in production it is served by the CDN with the API routed
@@ -66,8 +69,79 @@ const proxy = {
   },
 };
 
+const ROOT = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * The service worker (src/sw/sw.ts, push notifications) must be one classic script at a fixed
+ * URL, `/sw.js`, so it is built separately: after the app in `vite build`, and on request (in
+ * memory) by the dev server.
+ */
+function serviceWorkerBuild(outDir: string, write: boolean): InlineConfig {
+  return {
+    configFile: false,
+    root: ROOT,
+    logLevel: 'warn',
+    // Only the wasm loader's default-path fallback reads it; the worker always passes a URL.
+    define: { 'import.meta.url': 'self.location.href' },
+    build: {
+      outDir,
+      emptyOutDir: false,
+      copyPublicDir: false,
+      write,
+      sourcemap: true,
+      assetsInlineLimit: 0,
+      modulePreload: false,
+      rollupOptions: {
+        input: path.join(ROOT, 'src/sw/sw.ts'),
+        output: { format: 'iife', entryFileNames: 'sw.js', inlineDynamicImports: true },
+      },
+    },
+  };
+}
+
+function serviceWorker(): Plugin {
+  let outDir = 'dist';
+  let isBuild = false;
+  return {
+    name: 'tessera-service-worker',
+    configResolved(config) {
+      outDir = path.resolve(config.root, config.build.outDir);
+      isBuild = config.command === 'build';
+    },
+    async closeBundle() {
+      if (isBuild) await build(serviceWorkerBuild(outDir, true));
+    },
+    configureServer(server) {
+      let files = new Map<string, Rollup.OutputAsset | Rollup.OutputChunk>();
+      server.middlewares.use((request, response, next) => {
+        const url = (request.url ?? '').split('?')[0] ?? '';
+        if (url !== '/sw.js' && !(url.startsWith('/assets/') && files.has(url.slice(1)))) {
+          next();
+          return;
+        }
+        void (async () => {
+          if (url === '/sw.js') {
+            const output = (await build(serviceWorkerBuild(outDir, false))) as Rollup.RollupOutput;
+            files = new Map(output.output.map((file) => [file.fileName, file]));
+          }
+          const file = files.get(url.slice(1));
+          if (file === undefined) {
+            next();
+            return;
+          }
+          response.setHeader(
+            'Content-Type',
+            url.endsWith('.wasm') ? 'application/wasm' : 'text/javascript',
+          );
+          response.end(file.type === 'chunk' ? file.code : file.source);
+        })().catch(next);
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), serviceWorker()],
   worker: { format: 'es' },
   build: {
     sourcemap: true,

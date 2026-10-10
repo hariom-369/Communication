@@ -20,15 +20,19 @@ export function securityNoticeEmail(
   };
 }
 
+export function newSignInLines(details: { device: string; network: string; at: Date }): string[] {
+  return [
+    `Device: ${details.device}`,
+    `Network: ${details.network}`,
+    `Time (UTC): ${details.at.toISOString().replace('T', ' ').slice(0, 19)}`,
+  ];
+}
+
 export function newSignInEmail(
   to: string,
   details: { device: string; network: string; at: Date },
 ): EmailMessage {
-  return securityNoticeEmail(to, 'New sign-in to your account', [
-    `Device: ${details.device}`,
-    `Network: ${details.network}`,
-    `Time (UTC): ${details.at.toISOString().replace('T', ' ').slice(0, 19)}`,
-  ]);
+  return securityNoticeEmail(to, 'New sign-in to your account', newSignInLines(details));
 }
 
 export function passwordResetEmail(to: string, link: string): EmailMessage {

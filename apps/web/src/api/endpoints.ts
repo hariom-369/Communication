@@ -1,4 +1,9 @@
 import {
+  conversationMutesSchema,
+  notificationConfigSchema,
+  notificationPreferencesSchema,
+  securityAlertsSchema,
+  type NotificationPreferences,
   activeCallSchema,
   callCapabilitiesSchema,
   callSchema,
@@ -342,6 +347,33 @@ export const endpoints = {
   ) => api('POST', `/calls/${encodeURIComponent(callId)}/leave`, callSchema, { deviceId, reason }),
   callHeartbeat: (callId: string, deviceId: string) =>
     api('POST', `/calls/${encodeURIComponent(callId)}/heartbeat`, okResponseSchema, { deviceId }),
+
+  // ---- notifications (docs/notifications.md) ----
+  notificationConfig: () => api('GET', '/notifications/config', notificationConfigSchema),
+  subscribePush: (subscription: {
+    endpoint: string;
+    keys: { p256dh: string; auth: string };
+    deviceId: string;
+  }) => api('PUT', '/notifications/push-subscription', okResponseSchema, subscription),
+  unsubscribePush: () => api('DELETE', '/notifications/push-subscription', okResponseSchema),
+  notificationPreferences: () =>
+    api('GET', '/notifications/preferences', notificationPreferencesSchema),
+  setNotificationPreferences: (preferences: NotificationPreferences) =>
+    api('PUT', '/notifications/preferences', notificationPreferencesSchema, preferences),
+  mutes: () => api('GET', '/notifications/mutes', conversationMutesSchema),
+  mute: (conversationId: string, until: string | null) =>
+    api('PUT', `/conversations/${encodeURIComponent(conversationId)}/mute`, okResponseSchema, {
+      until,
+    }),
+  unmute: (conversationId: string) =>
+    api('DELETE', `/conversations/${encodeURIComponent(conversationId)}/mute`, okResponseSchema),
+  securityAlerts: () => api('GET', '/security-alerts', securityAlertsSchema),
+  markAlertsRead: (upTo: string) =>
+    api('POST', '/security-alerts/read', okResponseSchema, { upTo }),
+  setChannelNotifications: (channelId: string, enabled: boolean) =>
+    api('PUT', `/channels/${encodeURIComponent(channelId)}/notifications`, okResponseSchema, {
+      enabled,
+    }),
 
   // ---- communities (docs/groups.md §5) ----
   myCommunities: () => api('GET', '/communities', communityListSchema),

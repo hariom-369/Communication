@@ -3,6 +3,7 @@ export {
   type CallConversations,
   type CallDevices,
   type CallDirectory,
+  type CallNotifier,
   type CallsConfig,
 } from './calls.js';
 export { LiveKitRooms, SFU_TOKEN_TTL_SECONDS, type LiveKitConfig, type SfuRooms } from './sfu.js';

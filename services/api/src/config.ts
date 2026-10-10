@@ -24,6 +24,22 @@ const iceUrlList = (schemes: readonly string[]) =>
         .min(1),
     );
 
+const base64urlKey = (bytes: number) =>
+  z
+    .string()
+    .regex(/^[A-Za-z0-9_-]+$/, { message: 'Must be base64url' })
+    .refine((value) => Buffer.from(value, 'base64url').length === bytes, {
+      message: `Must be ${bytes} bytes`,
+    });
+
+/** Push services pushes may be sent to (hostname or parent domain), comma-separated. */
+const DEFAULT_PUSH_HOSTS = [
+  'fcm.googleapis.com',
+  'updates.push.services.mozilla.com',
+  'push.apple.com',
+  'notify.windows.com',
+].join(',');
+
 const schema = z
   .object({
     NODE_ENV: env.nodeEnv(),
@@ -103,6 +119,27 @@ const schema = z
     CALL_RECORD_RETENTION_DAYS: env.positiveInt(90),
     CALL_SWEEP_INTERVAL_MS: env.positiveInt(15_000),
 
+    /** Web Push (RFC 8292 VAPID). Without the keys, push is unavailable (the app says so). */
+    VAPID_PUBLIC_KEY: base64urlKey(65).optional(),
+    VAPID_PRIVATE_KEY: base64urlKey(32).optional(),
+    VAPID_SUBJECT: z
+      .string()
+      .regex(/^(mailto:|https:\/\/)/, { message: 'Must be a mailto: or https:// contact' })
+      .optional(),
+    PUSH_SERVICE_HOSTS: z
+      .string()
+      .default(DEFAULT_PUSH_HOSTS)
+      .transform((value) =>
+        value
+          .split(',')
+          .map((item) => item.trim().toLowerCase())
+          .filter((item) => item !== ''),
+      ),
+    /** Local and E2E testing only: an extra push endpoint origin (may be http on loopback). */
+    PUSH_TEST_ENDPOINT_ORIGIN: env.url(['http:', 'https:']).optional(),
+    NOTIFY_INTERVAL_MS: env.positiveInt(1000),
+    SECURITY_ALERT_RETENTION_DAYS: env.positiveInt(180),
+
     BUILD_VERSION: z.string().min(1).default('0.0.0-dev'),
     BUILD_COMMIT: z.string().min(1).default('unknown'),
     SHUTDOWN_DRAIN_MS: env.nonNegativeInt(5000),
@@ -131,7 +168,22 @@ const schema = z
           'Set LIVEKIT_URL, LIVEKIT_API_URL, LIVEKIT_API_KEY and LIVEKIT_API_SECRET together',
       });
     }
+    const vapid = [config.VAPID_PUBLIC_KEY, config.VAPID_PRIVATE_KEY, config.VAPID_SUBJECT];
+    if (vapid.some((v) => v !== undefined) && vapid.some((v) => v === undefined)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['VAPID_PUBLIC_KEY'],
+        message: 'Set VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT together',
+      });
+    }
     if (config.NODE_ENV !== 'production') return;
+    if (config.PUSH_TEST_ENDPOINT_ORIGIN !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['PUSH_TEST_ENDPOINT_ORIGIN'],
+        message: 'Testing only; must not be set in production',
+      });
+    }
     if (config.LIVEKIT_URL?.startsWith('ws://') === true) {
       ctx.addIssue({
         code: 'custom',

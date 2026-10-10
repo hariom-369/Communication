@@ -67,3 +67,4 @@ export * from './groups.js';
 export * from './communities.js';
 export * from './channels.js';
 export * from './calls.js';
+export * from './notifications.js';

@@ -103,6 +103,8 @@ export type DeviceStatus =
   | 'setup-required'
   /** This device's keys were replaced (identity reset elsewhere). */
   | 'revoked'
+  /** Another tab or window of this browser is using encrypted chats ("Use here" takes over). */
+  | 'elsewhere'
   | 'error';
 
 export interface ConversationSecurity {
@@ -210,7 +212,10 @@ function isNotFound(error: unknown): boolean {
   return error instanceof ApiError && error.problem.status === 404;
 }
 
-export type CryptoConnection = AsyncCryptoApi & { close(): void };
+export type CryptoConnection = AsyncCryptoApi & {
+  close(): void;
+  onLockLost?(listener: () => void): void;
+};
 
 export class E2eeSession {
   readonly #connect: () => CryptoConnection;
@@ -239,6 +244,7 @@ export class E2eeSession {
   #backupTimer: ReturnType<typeof setInterval> | null = null;
   #backingUp: Promise<'uploaded' | 'not-owner' | 'off'> | null = null;
   readonly #prf: typeof passkeyPrf;
+  #steal = false;
 
   /**
    * `connect` starts the crypto worker; the session owns it between `start` and `stop`.
@@ -252,8 +258,23 @@ export class E2eeSession {
   }
 
   get #crypto(): AsyncCryptoApi {
-    this.#connection ??= this.#connect();
+    if (this.#connection === null) {
+      const connection = this.#connect();
+      connection.onLockLost?.(() => {
+        if (this.#connection !== connection) return;
+        this.#connection = null;
+        connection.close();
+        this.#identity = null;
+        this.#setStatus('elsewhere');
+      });
+      this.#connection = connection;
+    }
     return this.#connection;
+  }
+
+  /** Take encrypted chats over from the other tab or window on the next `start`. */
+  useHere(): void {
+    this.#steal = true;
   }
 
   /** Stops the crypto worker (keys leave memory). `start` may be called again later. */
@@ -267,7 +288,13 @@ export class E2eeSession {
     this.#connection?.close();
     this.#connection = null;
     this.#identity = null;
-    this.#status = 'starting';
+    if (this.#status !== 'elsewhere') this.#status = 'starting';
+  }
+
+  /** Conversation titles for notifications shown by the service worker (stored on the device). */
+  async setLabels(labels: Record<string, string>): Promise<void> {
+    if (this.#status !== 'ready') return;
+    await this.#crypto.setLabels(labels);
   }
 
   // ---- observation ---------------------------------------------------------------------------
@@ -323,6 +350,16 @@ export class E2eeSession {
 
   async start(): Promise<void> {
     try {
+      const steal = this.#steal;
+      this.#steal = false;
+      const lock = await this.#crypto.acquire(this.#me, steal ? 'steal' : 'wait');
+      if (lock === 'busy') {
+        this.#connection?.close();
+        this.#connection = null;
+        this.#setStatus('elsewhere');
+        return;
+      }
+      if (this.#status === 'elsewhere') this.#setStatus('starting');
       const { identity } = await this.#crypto.init(this.#me);
       const server = await this.#api.ownKeys();
       if (identity === null || identity.pending) {

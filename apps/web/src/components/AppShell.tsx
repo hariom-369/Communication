@@ -4,6 +4,8 @@ import { NavLink, Outlet, useLocation } from 'react-router';
 
 import { errorMessage } from '../api/client.js';
 import { endpoints } from '../api/endpoints.js';
+import { useMessaging, useMessagingStore } from '../messaging/provider.js';
+import { useSecurityAlerts } from '../notifications/use-alerts.js';
 import { CallOverlay } from '../pages/calls/CallOverlay.js';
 import { useSession } from '../state/session.js';
 
@@ -17,8 +19,39 @@ const NAV: readonly { to: string; label: string }[] = [
   { to: '/settings/security', label: 'Security' },
   { to: '/settings/devices', label: 'Devices' },
   { to: '/settings/privacy', label: 'Privacy' },
+  { to: '/settings/notifications', label: 'Notifications' },
   { to: '/settings/account', label: 'Account' },
 ];
+
+/**
+ * Encrypted chats can be used by one tab or window of this browser at a time (ADR-048): two
+ * would corrupt this device's encryption state.
+ */
+function OpenElsewhere(): ReactNode {
+  const store = useMessagingStore();
+  const [busy, setBusy] = useState(false);
+  return (
+    <section className="encryption-setup" aria-labelledby="elsewhere-heading">
+      <h1 id="elsewhere-heading">Tessera is open in another tab</h1>
+      <p>
+        Your encrypted chats can be open in one tab or window of this browser at a time. Use them
+        here instead, and the other tab stops.
+      </p>
+      <div>
+        <Button
+          loading={busy}
+          loadingLabel="Switching"
+          onClick={() => {
+            setBusy(true);
+            void store?.useHere().finally(() => setBusy(false));
+          }}
+        >
+          Use here
+        </Button>
+      </div>
+    </section>
+  );
+}
 
 /** Signed-in layout. Desktop: navigation rail + content. Mobile: top bar + content. */
 export function AppShell(): ReactNode {
@@ -26,10 +59,14 @@ export function AppShell(): ReactNode {
   const { pathname } = useLocation();
   const [signingOut, setSigningOut] = useState(false);
   const [error, setError] = useState<string>();
+  const { device } = useMessaging();
+  const { unread } = useSecurityAlerts();
 
   async function signOut() {
     setSigningOut(true);
     try {
+      // This session's pushes stop now (they would stop with the session anyway).
+      await endpoints.unsubscribePush().catch(() => undefined);
       await endpoints.logout();
       // The route guard redirects to /login once the session is anonymous (a second, explicit
       // navigation here was redundant).
@@ -56,6 +93,11 @@ export function AppShell(): ReactNode {
                 className={({ isActive }) => (isActive ? 'nav-link nav-link--active' : 'nav-link')}
               >
                 {item.label}
+                {item.to === '/settings/security' && unread > 0 ? (
+                  <span className="badge" aria-label={`${unread} new security alerts`}>
+                    {unread}
+                  </span>
+                ) : null}
               </NavLink>
             </li>
           ))}
@@ -88,8 +130,14 @@ export function AppShell(): ReactNode {
         }
         id="main"
       >
-        <CallOverlay />
-        <Outlet />
+        {device === 'elsewhere' ? (
+          <OpenElsewhere />
+        ) : (
+          <>
+            <CallOverlay />
+            <Outlet />
+          </>
+        )}
       </main>
     </div>
   );

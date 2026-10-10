@@ -56,6 +56,7 @@ export class SessionService implements SessionAuthenticator {
   readonly #db: Kysely<Database>;
   readonly #policy: SessionPolicy;
   readonly #onRevoked: (userId: string) => void;
+  readonly #rotationListeners: ((from: string, to: string) => void)[] = [];
 
   /**
    * @param onRevoked called after sessions of a user are revoked or rotated, so long-lived
@@ -134,6 +135,19 @@ export class SessionService implements SessionAuthenticator {
     };
   }
 
+  /**
+   * Listeners for session rotation (old id → new id), e.g. to keep a browser's push
+   * subscription when its session is replaced on a privilege change.
+   */
+  onRotated(listener: (from: string, to: string) => void): void {
+    this.#rotationListeners.push(listener);
+  }
+
+  /** For rotations made inside an external transaction: call after it committed. */
+  notifyRotated(from: string, to: string): void {
+    for (const listener of this.#rotationListeners) listener(from, to);
+  }
+
   /** Replaces a session with a new one (new token) at `stage`, revoking the old one. */
   async rotate(
     current: AuthenticatedSession,
@@ -153,7 +167,10 @@ export class SessionService implements SessionAuthenticator {
         .where('id', '=', issued.id)
         .execute();
     }
-    if (options.executor === undefined) this.#onRevoked(current.userId);
+    if (options.executor === undefined) {
+      this.#onRevoked(current.userId);
+      this.notifyRotated(current.id, issued.id);
+    }
     return issued;
   }
 
@@ -175,6 +192,23 @@ export class SessionService implements SessionAuthenticator {
       userAgent: row.user_agent_summary,
       ipPrefix: row.ip_prefix,
     }));
+  }
+
+  /** The ids among `sessionIds` that are signed in (used by notifications, before every push). */
+  async activeSessionIds(sessionIds: readonly string[]): Promise<Set<string>> {
+    const ids = [...new Set(sessionIds)];
+    if (ids.length === 0) return new Set();
+    const now = new Date();
+    const rows = await this.#db
+      .selectFrom('sessions')
+      .select('id')
+      .where('id', 'in', ids)
+      .where('stage', '=', 'active')
+      .where('revoked_at', 'is', null)
+      .where('expires_at', '>', now)
+      .where('idle_expires_at', '>', now)
+      .execute();
+    return new Set(rows.map((row) => row.id));
   }
 
   /** Revokes one of the user's sessions. Returns false if it does not exist or is not theirs. */

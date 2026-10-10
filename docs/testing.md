@@ -33,6 +33,7 @@ Status: PROPOSED · Testing is part of the Definition of Done for every feature.
 | Failure recovery | DB failover mid-send (idempotent retry → exactly one message), Valkey loss degraded mode, realtime pod kill → reconnect + resync, S3 outage |
 | Migration | forward-compat with previous app version (expand/contract) |
 | Calls | fingerprint substitution by a malicious server → call fails; SFU-side frames are SFrame ciphertext (no nonce reuse; unencrypted frames not played); re-key on removal; unsupported browser refused; TURN deny-list against real coturn; ICE restart after the relay is replaced; RFC 9605 test vectors; opt-in 32-participant load (`TESSERA_LOAD_TESTS=1`, `e2e/calls-load.spec.ts`) |
+| Notifications | real pushes from the API to a stand-in push service, decrypted with the subscription key (`http_ece`) and VAPID-verified: content-free, padded, per-subscription topic; coalescing (delayed, never dropped); mutes, preferences, quiet hours; no push to connected or signed-out sessions or removed members; endpoint allow-list (mutation-checked); end to end: push → service worker (via DevTools `deliverPushMessage`) decrypts → notification, delivered vs read, preview setting; one writer per device ("Use here") |
 
 The end-to-end suite starts real call infrastructure (`e2e/global-setup.ts`): coturn
 (`turnserver`, from the system package) with `infra/calls/turnserver.conf` plus loopback peers

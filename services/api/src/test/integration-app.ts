@@ -21,6 +21,7 @@ import { ValkeyRateLimiter } from '../platform/rate-limit.js';
 import { createValkey } from '../platform/valkey.js';
 
 import { requireEnv } from './integration-env.js';
+import webpush from 'web-push';
 
 export const ORIGIN = 'https://app.tessera.test';
 export const TEST_TURN_SECRET = 'turn-secret-for-integration-tests-only-0123456789';
@@ -68,7 +69,12 @@ export interface IntegrationApp {
 }
 
 /** Full application over a fresh, migrated database and the real Valkey. */
-export async function startIntegrationApp(): Promise<IntegrationApp> {
+/** Test VAPID keys, generated once per test process (never a real key). */
+export const TEST_VAPID = webpush.generateVAPIDKeys();
+
+export async function startIntegrationApp(
+  options: { pushTestOrigin?: string } = {},
+): Promise<IntegrationApp> {
   const adminUrl = requireEnv('TEST_DATABASE_URL');
   const name = `tessera_app_${randomBytes(6).toString('hex')}`;
   const admin = new pg.Client({ connectionString: adminUrl });
@@ -133,6 +139,12 @@ export async function startIntegrationApp(): Promise<IntegrationApp> {
       LIVEKIT_API_KEY: 'tessera-it',
       LIVEKIT_API_SECRET: TEST_LIVEKIT_SECRET,
       CALL_RECORD_RETENTION_DAYS: 90,
+      VAPID_PUBLIC_KEY: TEST_VAPID.publicKey,
+      VAPID_PRIVATE_KEY: TEST_VAPID.privateKey,
+      VAPID_SUBJECT: 'mailto:push-tests@tessera.test',
+      PUSH_SERVICE_HOSTS: ['push.tessera.test'],
+      PUSH_TEST_ENDPOINT_ORIGIN: options.pushTestOrigin,
+      SECURITY_ALERT_RETENTION_DAYS: 180,
     },
     { db, valkey, mailer, logger, media },
   );

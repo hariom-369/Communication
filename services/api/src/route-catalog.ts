@@ -34,6 +34,8 @@ export function routeCatalog(): { routes: RouteDefinition[]; close(): Promise<vo
       REALTIME_WS_PATH: '/rt/v1/ws',
       TURN_TTL_SECONDS: 600,
       CALL_RECORD_RETENTION_DAYS: 90,
+      PUSH_SERVICE_HOSTS: [],
+      SECURITY_ALERT_RETENTION_DAYS: 180,
     },
     {
       db: new Kysely<Database>({ dialect: new PostgresDialect({ pool }) }),

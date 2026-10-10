@@ -86,6 +86,13 @@ interface Standing {
   readonly owner: boolean;
   readonly permissions: number;
   readonly subscribed: boolean;
+  /** Push notifications for new posts are on (subscribers only). */
+  readonly notify: boolean;
+}
+
+/** Tells subscribers' devices about new posts (docs/notifications.md §1). */
+export interface ChannelNotifier {
+  channelPost(channelId: string): Promise<void>;
 }
 
 interface ChannelRow {
@@ -104,6 +111,7 @@ export class ChannelsService {
   readonly #previews: LinkPreviewer;
   readonly #audit: AuditLog;
   readonly #logger: Logger;
+  #notifier: ChannelNotifier | null = null;
 
   constructor(options: {
     db: Kysely<Database>;
@@ -147,7 +155,7 @@ export class ChannelsService {
         .executeTakeFirst(),
       executor
         .selectFrom('channel_subscribers')
-        .select('user_id')
+        .select(['user_id', 'notify'])
         .where('channel_id', '=', channel.id)
         .where('user_id', '=', userId)
         .executeTakeFirst(),
@@ -157,6 +165,7 @@ export class ChannelsService {
       owner,
       permissions: owner ? ALL_CHANNEL_PERMISSIONS : (admin?.permissions ?? 0),
       subscribed: subscriber !== undefined,
+      notify: subscriber?.notify ?? false,
     };
   }
 
@@ -336,7 +345,12 @@ export class ChannelsService {
       commentsEnabled: channel.comments_enabled,
       slowModeSeconds: channel.slow_mode_seconds,
       createdAt: channel.created_at.toISOString(),
-      me: { subscribed: me.subscribed, owner: me.owner, permissions: me.permissions },
+      me: {
+        subscribed: me.subscribed,
+        notifications: me.notify,
+        owner: me.owner,
+        permissions: me.permissions,
+      },
       pendingTransfer,
     };
   }
@@ -502,6 +516,51 @@ export class ChannelsService {
       await trx.deleteFrom('channel_ownership_transfers').where('channel_id', '=', id).execute();
       await this.#auditEntry(trx, actor, 'channels.deleted', id, {}, requestId);
     });
+  }
+
+  useNotifier(notifier: ChannelNotifier): void {
+    this.#notifier = notifier;
+  }
+
+  /** Turns post notifications on or off for a subscriber. */
+  async setNotifications(userId: string, id: string, enabled: boolean): Promise<void> {
+    const channel = await this.#channel(this.#db, id);
+    const me = await this.#viewer(this.#db, channel, userId);
+    if (!me.subscribed)
+      throw new AppError('CONFLICT', { detail: 'Subscribe to the channel first.' });
+    await this.#db
+      .updateTable('channel_subscribers')
+      .set({ notify: enabled })
+      .where('channel_id', '=', id)
+      .where('user_id', '=', userId)
+      .execute();
+  }
+
+  /** Subscribers with post notifications on, in user id order (notification fan-out). */
+  async notifiedSubscribers(id: string, after: string | null, limit: number): Promise<string[]> {
+    let query = this.#db
+      .selectFrom('channel_subscribers')
+      .select('user_id')
+      .where('channel_id', '=', id)
+      .where('notify', '=', true)
+      .orderBy('user_id')
+      .limit(limit);
+    if (after !== null) query = query.where('user_id', '>', after);
+    return (await query.execute()).map((row) => row.user_id);
+  }
+
+  async isNotifiedSubscriber(id: string, userId: string): Promise<boolean> {
+    const row = await this.#db
+      .selectFrom('channel_subscribers')
+      .select('notify')
+      .where('channel_id', '=', id)
+      .where('user_id', '=', userId)
+      .executeTakeFirst();
+    return row?.notify === true;
+  }
+
+  async #announcePosts(channelIds: readonly string[]): Promise<void> {
+    for (const channelId of new Set(channelIds)) await this.#notifier?.channelPost(channelId);
   }
 
   async subscribe(userId: string, id: string): Promise<void> {
@@ -893,6 +952,7 @@ export class ChannelsService {
       if (status === 'published')
         await trx.updateTable('channels').set({ last_post_at: now }).where('id', '=', id).execute();
     });
+    if (status === 'published') await this.#announcePosts([id]);
     return this.#postById(actor, postId);
   }
 
@@ -1107,7 +1167,7 @@ export class ChannelsService {
   /** Moves posts from draft/scheduled to published exactly once, and bumps their channels. */
   async #publish(postIds: readonly string[]): Promise<string[]> {
     if (postIds.length === 0) return [];
-    return this.#db.transaction().execute(async (trx) => {
+    const rows = await this.#db.transaction().execute(async (trx) => {
       const now = new Date();
       const published = await trx
         .updateTable('channel_posts')
@@ -1123,8 +1183,10 @@ export class ChannelsService {
           .set({ last_post_at: now })
           .where('id', 'in', channels)
           .execute();
-      return published.map((row) => row.id);
+      return published;
     });
+    await this.#announcePosts(rows.map((row) => row.channel_id));
+    return rows.map((row) => row.id);
   }
 
   async deletePost(actor: string, id: string, postId: string, requestId?: string): Promise<void> {

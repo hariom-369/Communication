@@ -669,6 +669,19 @@ export class KeysService {
     return row !== undefined;
   }
 
+  /** The ids among `deviceIds` that are not revoked (used by notifications). */
+  async activeDeviceIds(deviceIds: readonly string[]): Promise<Set<string>> {
+    const ids = [...new Set(deviceIds)];
+    if (ids.length === 0) return new Set();
+    const rows = await this.#db
+      .selectFrom('devices')
+      .select('id')
+      .where('id', 'in', ids)
+      .where('revoked_at', 'is', null)
+      .execute();
+    return new Set(rows.map((row) => row.id));
+  }
+
   /** Deletes expired KeyPackages and link requests. */
   async sweep(): Promise<number> {
     const now = new Date();

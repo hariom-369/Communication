@@ -1,6 +1,6 @@
 import type { CryptoClient, MediaDecryptor, MediaEncryptor } from '@tessera/crypto-core';
 
-import { LocalStore } from './local-store.js';
+import { LocalStore, StaleWriterError } from './local-store.js';
 import type {
   EncryptedBackup,
   GroupPolicy,
@@ -31,7 +31,10 @@ import type {
  *   `encrypt` persists the advanced ratchet before the ciphertext leaves the worker, so a crash
  *   can never lead to a ratchet generation being reused;
  * - processing an inbound message and storing its plaintext happen in one transaction;
- * - if the WebAssembly instance traps, it is discarded and reloaded from the last persisted state.
+ * - if the WebAssembly instance traps, it is discarded and reloaded from the last persisted state;
+ * - one context per device changes the state: the holder of the device's Web Lock (`acquire`).
+ *   A tab holds it while open; the service worker takes it only when no tab does. A context that
+ *   loses it (another tab chose "Use here") stops: every later call fails with `LOCKED`.
  */
 
 export interface CoreModule {
@@ -74,6 +77,11 @@ const MEDIA_HEADER = 23;
 /** Chunks read from the file per slice (1 MiB). */
 const MEDIA_SLICE_CHUNKS = 16;
 
+/** How long a starting tab waits for the lock (the service worker holds it only briefly). */
+const LOCK_WAIT_MS = 5000;
+
+export type LockMode = 'wait' | 'steal' | 'try';
+
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
 const now = () => Math.floor(Date.now() / 1000);
@@ -89,10 +97,74 @@ export class CryptoEngine {
   #client: CryptoClient | null = null;
   #identity: Identity | null = null;
   #queue: Promise<unknown> = Promise.resolve();
+  #locked = false;
+  #lost = false;
+  #release: (() => void) | null = null;
+  /** Called once if another context takes the device lock away. */
+  onLockLost: (() => void) | null = null;
 
   constructor(core: CoreModule, factory?: IDBFactory) {
     this.#core = core;
     this.#factory = factory;
+  }
+
+  /** Lets go of the device lock (the service worker, when it is done). */
+  releaseLock(): void {
+    this.#store?.close();
+    this.#store = null;
+    this.#client?.free();
+    this.#client = null;
+    this.#locked = false;
+    this.#release?.();
+    this.#release = null;
+  }
+
+  /**
+   * Takes this device's lock for the user (held until the context ends). `wait`: a starting tab
+   * (waits briefly); `steal`: "Use here" (the other holder stops); `try`: the service worker.
+   */
+  #acquire(userId: string, mode: LockMode): Promise<'acquired' | 'busy'> {
+    if (this.#locked) return Promise.resolve('acquired');
+    const locks = (globalThis.navigator as { locks?: LockManager } | undefined)?.locks;
+    // Without Web Locks (old browsers, unit tests) there is no second context to coordinate with
+    // beyond the writer fence in the local store.
+    if (locks === undefined) {
+      this.#locked = true;
+      return Promise.resolve('acquired');
+    }
+    const options: LockOptions =
+      mode === 'steal'
+        ? { steal: true }
+        : mode === 'try'
+          ? { ifAvailable: true }
+          : { signal: AbortSignal.timeout(LOCK_WAIT_MS) };
+    return new Promise((resolve) => {
+      let granted = false;
+      locks
+        .request(`tessera-device:${userId}`, options, (lock) => {
+          if (lock === null) {
+            resolve('busy');
+            return undefined;
+          }
+          granted = true;
+          this.#locked = true;
+          this.#lost = false;
+          resolve('acquired');
+          // Held for the life of this context (or until `releaseLock`).
+          return new Promise<void>((release) => {
+            this.#release = release;
+          });
+        })
+        .catch(() => {
+          if (!granted) {
+            resolve('busy'); // timed out waiting
+            return;
+          }
+          this.#locked = false;
+          this.#lost = true;
+          this.onLockLost?.();
+        });
+    });
   }
 
   /** Runs `method` after every earlier call has finished. */
@@ -101,11 +173,17 @@ export class CryptoEngine {
     params: Parameters<CryptoApi[M]>,
   ): Promise<ReturnType<CryptoApi[M]>> {
     const run = async (): Promise<ReturnType<CryptoApi[M]>> => {
+      if (this.#lost)
+        throw new CryptoError('LOCKED', 'Encrypted chats are open in another tab or window.');
       const handler = this.#handlers[method] as (...args: unknown[]) => unknown;
       try {
         return (await handler(...params)) as ReturnType<CryptoApi[M]>;
       } catch (error) {
         if (error instanceof CryptoError) throw error;
+        if (error instanceof StaleWriterError) {
+          this.#lost = true;
+          throw new CryptoError('LOCKED', 'Encrypted chats are open in another tab or window.');
+        }
         const typed = toCryptoError(error);
         if (typed !== null) throw typed;
         await this.#recover();
@@ -143,9 +221,12 @@ export class CryptoEngine {
   readonly #handlers: {
     [M in Method]: (...args: Parameters<CryptoApi[M]>) => Promise<ReturnType<CryptoApi[M]>>;
   } = {
+    acquire: (userId, mode) => this.#acquire(userId, mode),
+
     init: async (userId) => {
       this.#store?.close();
       this.#store = await LocalStore.open(userId, this.#factory);
+      await this.#store.claimWriter();
       const state = await this.#store.loadState();
       this.#client = state === null ? null : this.#core.CryptoClient.restore(state);
       this.#identity =
@@ -291,6 +372,10 @@ export class CryptoEngine {
     history: async (conversationId) => (await this.#s.history(conversationId)) as HistoryRecord[],
 
     cursor: (conversationId) => this.#s.cursor(conversationId),
+
+    labels: () => this.#s.labels(),
+
+    setLabels: (labels) => this.#s.putLabels(labels),
 
     updateMembers: async (conversationId, keyPackages, remove, allowed) => {
       const output = JSON.parse(

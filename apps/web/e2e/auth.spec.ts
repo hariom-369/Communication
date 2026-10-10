@@ -75,7 +75,7 @@ test.describe('sign-up, sign-in and account security', () => {
     await page.getByRole('button', { name: 'Verify email' }).click();
 
     await page.getByRole('button', { name: 'Create a passkey' }).click();
-    await expect(page.getByRole('heading', { name: 'Security' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Security', level: 1 })).toBeVisible();
     await expect(
       page.getByRole('region', { name: 'Passkeys' }).getByText(/^Chrome on /),
     ).toBeVisible();
@@ -246,6 +246,14 @@ test.describe('accessibility', () => {
     await audit();
     await page.getByRole('link', { name: 'Privacy' }).click();
     await page.getByLabel('Last seen', { exact: true }).waitFor();
+    await audit();
+    // Notifications (Phase 10): this browser, rules, quiet hours, muted chats; security alerts.
+    await page.getByRole('link', { name: 'Notifications' }).click();
+    await page.getByRole('heading', { name: 'What can notify you' }).waitFor();
+    await page.getByRole('checkbox', { name: 'Quiet hours' }).check();
+    await audit();
+    await page.getByRole('link', { name: /^Security/ }).click();
+    await page.getByRole('heading', { name: 'Security alerts' }).waitFor();
     await audit();
     // Chat list and an open conversation (development messaging build).
     const other = await browser.newContext();

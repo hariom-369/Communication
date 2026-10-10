@@ -109,7 +109,7 @@ export function parsePreviewUrl(raw: string): URL {
   return url;
 }
 
-async function pinnedAddress(url: URL, transport: SafeFetchTransport): Promise<string> {
+export async function pinnedAddress(url: URL, transport: SafeFetchTransport): Promise<string> {
   const host = url.hostname.replace(/^\[|\]$/g, '');
   let addresses: string[];
   if (isIP(host) !== 0) addresses = [host];

@@ -11,6 +11,8 @@ import {
 import { endpoints } from '../api/endpoints.js';
 import { CallManager, IDLE_CALL, type CallSnapshot } from '../calls/manager.js';
 import { startCryptoWorker } from '../crypto/client.js';
+import { startNotificationBridge } from '../notifications/bridge.js';
+import { clearUnseen, readUnseen } from '../notifications/device-prefs.js';
 import { useSession } from '../state/session.js';
 
 import { E2eeSession } from './e2ee.js';
@@ -38,6 +40,12 @@ export function MessagingProvider({ children }: { children: ReactNode }): ReactN
       security: session,
       me: { id: userId },
       media: transfer,
+      unseen: {
+        load: () => readUnseen(userId),
+        clear: (conversationId) => {
+          clearUnseen(userId, conversationId).catch(() => undefined);
+        },
+      },
     });
     return {
       e2ee: session,
@@ -77,6 +85,11 @@ export function MessagingProvider({ children }: { children: ReactNode }): ReactN
   }, [store]);
 
   useEffect(() => () => calls?.dispose(), [calls]);
+
+  useEffect(() => {
+    if (store === null || userId === undefined) return;
+    return startNotificationBridge({ store, e2ee, userId });
+  }, [store, e2ee, userId]);
 
   return (
     <E2eeContext.Provider value={e2ee}>

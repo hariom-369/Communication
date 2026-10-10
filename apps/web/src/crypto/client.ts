@@ -20,18 +20,35 @@ export type AsyncCryptoApi = {
 /** Minimal port shape, so tests can supply an in-process transport. */
 export interface Port {
   postMessage(message: RpcRequest): void;
-  onmessage: ((event: MessageEvent<RpcResponse>) => void) | null;
+  onmessage: ((event: MessageEvent<RpcResponse | WorkerEvent>) => void) | null;
   terminate?(): void;
 }
 
+/** Unsolicited messages from the worker. */
+export interface WorkerEvent {
+  readonly event: 'lock-lost';
+}
+
+export interface CryptoConnectionControls {
+  close(): void;
+  /** Another tab took over this device's encryption (the worker can no longer be used). */
+  onLockLost(listener: () => void): void;
+}
+
 /** Main-thread proxy for the crypto worker: one promise per request, matched by id. */
-export function createCryptoClient(port: Port): AsyncCryptoApi & { close(): void } {
+export function createCryptoClient(port: Port): AsyncCryptoApi & CryptoConnectionControls {
   let nextId = 1;
+  let lockLost: (() => void) | null = null;
   const pending = new Map<
     number,
     { resolve: (value: unknown) => void; reject: (error: Error) => void }
   >();
   port.onmessage = (event) => {
+    if ('event' in event.data) {
+      // The only event: another tab took this device's encryption lock.
+      lockLost?.();
+      return;
+    }
     const response = event.data;
     const entry = pending.get(response.id);
     if (entry === undefined) return;
@@ -45,8 +62,13 @@ export function createCryptoClient(port: Port): AsyncCryptoApi & { close(): void
       pending.set(id, { resolve, reject });
       port.postMessage({ id, method, params });
     });
-  return new Proxy({} as AsyncCryptoApi & { close(): void }, {
+  return new Proxy({} as AsyncCryptoApi & CryptoConnectionControls, {
     get: (_target, property) => {
+      if (property === 'onLockLost') {
+        return (listener: () => void) => {
+          lockLost = listener;
+        };
+      }
       if (property === 'close') {
         return () => {
           port.terminate?.();
@@ -62,6 +84,6 @@ export function createCryptoClient(port: Port): AsyncCryptoApi & { close(): void
 }
 
 /** Starts the dedicated crypto worker. */
-export function startCryptoWorker(): AsyncCryptoApi & { close(): void } {
+export function startCryptoWorker(): AsyncCryptoApi & CryptoConnectionControls {
   return createCryptoClient(startWorker(workerUrl, 'tessera-crypto'));
 }

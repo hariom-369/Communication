@@ -80,6 +80,7 @@ function setup(options: {
   serverEpoch?: number;
 }) {
   const crypto = {
+    acquire: vi.fn().mockResolvedValue('acquired'),
     init: vi.fn().mockResolvedValue({ identity }),
     keyPackages: vi.fn().mockResolvedValue([]),
     observeIdentity: vi.fn().mockResolvedValue('unchanged'),

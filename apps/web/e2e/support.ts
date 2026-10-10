@@ -147,6 +147,6 @@ export async function signUpWithPassword(
   await page.getByLabel('New password').fill(identity.password);
   await page.getByLabel('Repeat password').fill(identity.password);
   await page.getByRole('button', { name: 'Set password' }).click();
-  await page.getByRole('heading', { name: 'Security' }).waitFor();
+  await page.getByRole('heading', { name: 'Security', level: 1 }).waitFor();
   return identity;
 }

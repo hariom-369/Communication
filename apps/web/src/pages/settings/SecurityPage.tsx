@@ -14,6 +14,7 @@ import {
   passkeysSupported,
 } from '../../lib/webauthn.js';
 import { useResource } from '../../lib/use-resource.js';
+import { useSecurityAlerts } from '../../notifications/use-alerts.js';
 import { useSession } from '../../state/session.js';
 import { useStepUp } from '../../state/step-up.js';
 
@@ -440,6 +441,62 @@ function SessionsSection() {
   );
 }
 
+function AlertsSection() {
+  const { alerts, unread, error, markRead } = useSecurityAlerts();
+  const [actionError, setActionError] = useState<string>();
+  return (
+    <Section
+      id="security-alerts"
+      title="Security alerts"
+      description="Sign-ins from new places, new devices and changes to how you sign in. They also go to your email, and cannot be turned off."
+    >
+      {error ? <Alert tone="danger">Could not load security alerts.</Alert> : null}
+      {actionError === undefined ? null : <Alert tone="danger">{actionError}</Alert>}
+      {alerts === null ? (
+        error ? null : (
+          <div role="status" aria-busy="true" aria-label="Loading security alerts">
+            <Skeleton height="3rem" shape="tile" />
+          </div>
+        )
+      ) : alerts.length === 0 ? (
+        <p>No security alerts.</p>
+      ) : (
+        <ul className="item-list" aria-label="Security alerts">
+          {alerts.map((alert) => (
+            <li key={alert.id} className="item">
+              <div>
+                <p className="item__title">
+                  {alert.headline}
+                  {alert.read ? null : <span className="badge">New</span>}
+                </p>
+                {alert.details.map((line) => (
+                  <p key={line} className="item__meta">
+                    {line}
+                  </p>
+                ))}
+                <p className="item__meta">{dateTime.format(new Date(alert.createdAt))}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {unread > 0 ? (
+        <div>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setActionError(undefined);
+              markRead().catch((caught: unknown) => setActionError(errorMessage(caught)));
+            }}
+          >
+            Mark all as read
+          </Button>
+        </div>
+      ) : null}
+    </Section>
+  );
+}
+
 export function SecurityPage(): ReactNode {
   const welcome = (useLocation().state as { welcome?: boolean } | null)?.welcome === true;
   return (
@@ -452,6 +509,7 @@ export function SecurityPage(): ReactNode {
           Consider adding two-step verification or a second passkey below.
         </Alert>
       ) : null}
+      <AlertsSection />
       <PasskeysSection />
       <PasswordSection />
       <TwoFactorSection />

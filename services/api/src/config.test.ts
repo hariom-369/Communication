@@ -127,3 +127,32 @@ describe('api config', () => {
     ).toEqual(['LIVEKIT_URL']);
   });
 });
+
+describe('push notification settings', () => {
+  const vapid = {
+    VAPID_PUBLIC_KEY: Buffer.alloc(65, 4).toString('base64url'),
+    VAPID_PRIVATE_KEY: Buffer.alloc(32, 9).toString('base64url'),
+    VAPID_SUBJECT: 'mailto:ops@tessera.example',
+  };
+
+  it('needs all VAPID settings together, with keys of the right size', () => {
+    expect(issueKeys({ ...base, ...vapid })).toEqual([]);
+    expect(issueKeys({ ...base, VAPID_PUBLIC_KEY: vapid.VAPID_PUBLIC_KEY })).toEqual([
+      'VAPID_PUBLIC_KEY',
+    ]);
+    expect(
+      issueKeys({ ...base, ...vapid, VAPID_PRIVATE_KEY: Buffer.alloc(16).toString('base64url') }),
+    ).toEqual(['VAPID_PRIVATE_KEY']);
+    expect(issueKeys({ ...base, ...vapid, VAPID_SUBJECT: 'ops@tessera.example' })).toEqual([
+      'VAPID_SUBJECT',
+    ]);
+  });
+
+  it('defaults to the major push services and refuses the test endpoint in production', () => {
+    expect(loadApiConfig(base).PUSH_SERVICE_HOSTS).toContain('fcm.googleapis.com');
+    expect(issueKeys({ ...base, PUSH_TEST_ENDPOINT_ORIGIN: 'http://127.0.0.1:9999' })).toEqual([]);
+    expect(
+      issueKeys({ ...production, ...vapid, PUSH_TEST_ENDPOINT_ORIGIN: 'http://127.0.0.1:9999' }),
+    ).toEqual(['PUSH_TEST_ENDPOINT_ORIGIN']);
+  });
+});

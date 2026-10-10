@@ -98,6 +98,10 @@ export interface SecurityPort {
   security(conversationId: string): ConversationSecurity;
   start(): Promise<void>;
   stop(): void;
+  /** Take over from another tab using this device's encryption (next `start` steals the lock). */
+  useHere?(): void;
+  /** Titles kept on the device for notifications. */
+  setLabels?(labels: Record<string, string>): Promise<void>;
   prepare(meta: Conversation, force?: boolean): Promise<void>;
   encrypt(
     meta: Conversation,
@@ -194,6 +198,14 @@ export type CallFrame = Extract<ServerFrame, { type: 'call' }>;
 
 export type CallSignalBody = Extract<MessageBody, { kind: 'call' }>;
 
+/** A decrypted message from someone else (for notifications while the page is hidden). */
+export interface IncomingMessageEvent {
+  readonly conversationId: string;
+  readonly senderUserId: string;
+  readonly serverTime: number;
+  readonly body: MessageBody;
+}
+
 /** An end-to-end encrypted call signal from another device (docs/calling.md §2). */
 export interface CallSignalEvent {
   readonly conversationId: string;
@@ -234,12 +246,20 @@ const CALL_SIGNAL_GIVE_UP_MS = 30_000;
 const ACK_DELAY_MS = 150;
 const MAX_CONFLICT_RETRIES = 3;
 
+/** Messages decrypted and notified about while no tab was open (notifications/device-prefs). */
+export interface UnseenPort {
+  load(): Promise<Record<string, number>>;
+  clear(conversationId: string): void;
+}
+
 export interface StoreOptions {
   readonly api: Api;
   readonly security: SecurityPort;
   readonly me: { readonly id: string };
   /** Encrypted attachment upload (absent: sending attachments is unavailable). */
   readonly media?: Pick<MediaTransfer, 'upload'>;
+  /** Messages the service worker showed while no tab was open (still unread). */
+  readonly unseen?: UnseenPort;
   readonly createRealtime?: (
     options: ConstructorParameters<typeof RealtimeClient>[0],
   ) => Pick<RealtimeClient, 'start' | 'stop' | 'sendTyping' | 'reconnectNow' | 'interrupt'>;
@@ -305,6 +325,8 @@ export class MessagingStore {
   readonly #callListeners = new Set<(event: CallSignalEvent) => void>();
   readonly #commitListeners = new Set<(conversationId: string) => void>();
   readonly #callFrameListeners = new Set<(frame: CallFrame) => void>();
+  readonly #incomingListeners = new Set<(event: IncomingMessageEvent) => void>();
+  readonly #notificationListeners = new Set<(what: 'settings' | 'alerts') => void>();
   /** Call signals waiting to be sent, by message id. */
   readonly #signals = new Map<string, { resolve: () => void; reject: (error: unknown) => void }>();
 
@@ -395,6 +417,11 @@ export class MessagingStore {
       // The device finished setting up (linked, restored or new key): start messaging.
       if (this.#started && !this.#live && this.#options.security.status === 'ready')
         void this.resume();
+      // Another tab took over: stop receiving here (its own connection does that now).
+      if (this.#live && this.#options.security.status === 'elsewhere') {
+        this.#live = false;
+        this.#realtime.stop();
+      }
       this.#emit();
     });
     this.#unsubscribeMembers = this.#options.security.onMembersAdded((conversationId) => {
@@ -406,6 +433,13 @@ export class MessagingStore {
     }, 2000);
     await this.#options.security.start();
     this.#emit();
+    await this.resume();
+  }
+
+  /** "Use here": take encrypted chats over from the other tab or window. */
+  async useHere(): Promise<void> {
+    this.#options.security.useHere?.();
+    await this.#options.security.start();
     await this.resume();
   }
 
@@ -456,6 +490,14 @@ export class MessagingStore {
         for (const meta of page.conversations) this.#upsert(meta);
         cursor = page.nextCursor ?? undefined;
       } while (cursor !== undefined);
+      // The server counts messages the service worker received as delivered; they are unread.
+      const unseen: Record<string, number> =
+        (await this.#options.unseen?.load().catch(() => ({}))) ?? {};
+      for (const [conversationId, seq] of Object.entries(unseen)) {
+        const conversation = this.#conversations.get(conversationId);
+        if (conversation !== undefined)
+          conversation.readUpTo = Math.min(conversation.readUpTo, seq - 1);
+      }
       await Promise.all([...this.#conversations.values()].map((c) => this.#hydrate(c)));
       this.#loaded = true;
       this.#error = null;
@@ -587,6 +629,7 @@ export class MessagingStore {
     let complete = true;
     let committed = false;
     const signals: CallSignalEvent[] = [];
+    const incomingEvents: IncomingMessageEvent[] = [];
     for (const message of [...messages].sort((a, b) => a.seq - b.seq)) {
       if (message.seq <= conversation.processedSeq) continue;
       const result = await this.#options.security.ingest(conversation.meta, message);
@@ -606,6 +649,17 @@ export class MessagingStore {
         conversation.timeline = applyIncoming(conversation.timeline, incoming);
         conversation.typing.delete(result.record.senderUserId);
         const body = incoming.content?.body;
+        if (
+          result.status === 'application' &&
+          body !== undefined &&
+          result.record.senderUserId !== this.#options.me.id
+        )
+          incomingEvents.push({
+            conversationId: conversation.meta.id,
+            senderUserId: result.record.senderUserId,
+            serverTime: incoming.serverTime,
+            body,
+          });
         if (
           result.status === 'application' &&
           body?.kind === 'call' &&
@@ -635,6 +689,8 @@ export class MessagingStore {
     this.#emit();
     if (committed) for (const listener of this.#commitListeners) listener(conversation.meta.id);
     for (const signal of signals) for (const listener of this.#callListeners) listener(signal);
+    for (const event of incomingEvents)
+      for (const listener of this.#incomingListeners) listener(event);
     return complete;
   }
 
@@ -728,6 +784,9 @@ export class MessagingStore {
         this.#maybeAutoApprove(frame.conversationId);
         return;
       }
+      case 'notifications':
+        for (const listener of this.#notificationListeners) listener(frame.what);
+        return;
       case 'community': {
         this.#communityVersion += 1;
         await this.#loadSpaces();
@@ -872,6 +931,7 @@ export class MessagingStore {
     }
     if (latestIncoming <= conversation.readUpTo) return;
     conversation.readUpTo = latestIncoming;
+    this.#options.unseen?.clear(conversationId);
     this.#emit();
     if (this.#shareReadReceipts && conversation.meta.kind === 'direct')
       this.#control(conversationId, { kind: 'read', upToSeq: latestIncoming });
@@ -1414,6 +1474,18 @@ export class MessagingStore {
   onCallSignal(listener: (event: CallSignalEvent) => void): () => void {
     this.#callListeners.add(listener);
     return () => this.#callListeners.delete(listener);
+  }
+
+  /** Messages from other people as they are decrypted. */
+  onIncoming(listener: (event: IncomingMessageEvent) => void): () => void {
+    this.#incomingListeners.add(listener);
+    return () => this.#incomingListeners.delete(listener);
+  }
+
+  /** Notification settings or security alerts changed. */
+  onNotificationsChanged(listener: (what: 'settings' | 'alerts') => void): () => void {
+    this.#notificationListeners.add(listener);
+    return () => this.#notificationListeners.delete(listener);
   }
 
   /** Call state hints from the server (ringing, answered, ended). */

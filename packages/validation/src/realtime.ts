@@ -68,6 +68,8 @@ export const serverFrameSchema = z.discriminatedUnion('type', [
     state: z.enum(['ringing', 'active', 'ended']),
     mode: z.enum(['p2p', 'sfu']),
   }),
+  /** Notification settings or security alerts changed (on another device or by the server). */
+  z.object({ type: z.literal('notifications'), what: z.enum(['settings', 'alerts']) }),
   z.object({ type: z.literal('reconnect'), afterMs: z.number() }),
 ]);
 export type ServerFrame = z.infer<typeof serverFrameSchema>;
@@ -109,6 +111,8 @@ export const realtimeEventSchema = z.discriminatedUnion('type', [
     state: z.enum(['ringing', 'active', 'ended']),
     mode: z.enum(['p2p', 'sfu']),
   }),
+  /** Notification settings or security alerts changed (on another device or by the server). */
+  z.object({ type: z.literal('notifications'), what: z.enum(['settings', 'alerts']) }),
   /** Sessions of this user were revoked or rotated; realtime re-validates open connections. */
   z.object({ type: z.literal('sessions_changed') }),
 ]);

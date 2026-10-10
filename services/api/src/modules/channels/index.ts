@@ -1,3 +1,3 @@
-export { ChannelsService, type ChannelDirectory } from './channels.js';
+export { ChannelsService, type ChannelDirectory, type ChannelNotifier } from './channels.js';
 export { LinkPreviewer } from './previews.js';
 export { channelRoutes, type ChannelsModuleDeps } from './routes.js';

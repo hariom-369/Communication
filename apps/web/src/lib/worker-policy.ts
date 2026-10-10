@@ -25,3 +25,13 @@ const workerPolicy = (
 export function startWorker(url: string, name: string): Worker {
   return new Worker(workerPolicy?.createScriptURL(url) ?? url, { type: 'module', name });
 }
+
+/** The service worker (push notifications); a classic script at a fixed URL on our origin. */
+export const SERVICE_WORKER_URL = '/sw.js';
+
+/** Registers the service worker under the same Trusted Types policy. */
+export function registerServiceWorker(): Promise<ServiceWorkerRegistration> {
+  const url = workerPolicy?.createScriptURL(SERVICE_WORKER_URL) ?? SERVICE_WORKER_URL;
+  // Always revalidate the script itself, so a security fix reaches every browser quickly.
+  return navigator.serviceWorker.register(url, { scope: '/', updateViaCache: 'none' });
+}

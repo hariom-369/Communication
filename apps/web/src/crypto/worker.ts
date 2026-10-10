@@ -27,6 +27,11 @@ const engine = new CryptoEngine({
   verifyLinkCode,
 });
 
+// Another tab took over ("Use here"): tell the page, which stops using this worker.
+engine.onLockLost = () => {
+  self.postMessage({ event: 'lock-lost' });
+};
+
 self.onmessage = (event: MessageEvent<RpcRequest>) => {
   const { id, method, params } = event.data;
   void (async () => {

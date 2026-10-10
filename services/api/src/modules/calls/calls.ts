@@ -39,6 +39,16 @@ export interface CallDirectory {
   usernames(userIds: readonly string[]): Promise<Map<string, string>>;
 }
 
+/** Wakes devices that are not connected when a call rings (docs/notifications.md §1). */
+export interface CallNotifier {
+  callRinging(
+    conversationId: string,
+    callId: string,
+    recipientIds: readonly string[],
+    direct: boolean,
+  ): Promise<void>;
+}
+
 export interface CallsConfig {
   readonly turn: TurnConfig | null;
   readonly stunUrls: readonly string[];
@@ -61,6 +71,7 @@ export class CallsService {
   readonly #sfu: SfuRooms | null;
   readonly #config: CallsConfig;
   readonly #logger: Logger;
+  #notifier: CallNotifier | null = null;
 
   constructor(options: {
     db: Kysely<Database>;
@@ -80,6 +91,10 @@ export class CallsService {
     this.#sfu = options.sfu;
     this.#config = options.config;
     this.#logger = options.logger;
+  }
+
+  useNotifier(notifier: CallNotifier): void {
+    this.#notifier = notifier;
   }
 
   capabilities(): { relayAvailable: boolean; groupCallsAvailable: boolean } {
@@ -146,6 +161,13 @@ export class CallsService {
     }
     const row = await this.#row(this.#db, id);
     this.#announce(context.memberIds, row, 'ringing');
+    // Not awaited: a large group must not delay the caller; failures are logged by the notifier.
+    void this.#notifier?.callRinging(
+      input.conversationId,
+      id,
+      context.memberIds.filter((member) => member !== userId),
+      context.kind === 'direct',
+    );
     return { call: await this.#record(row), created: true, ice: this.ice() };
   }
 

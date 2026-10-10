@@ -26,8 +26,9 @@ Decisions: ADR-016, 017, **047** (implementation, keying and deviations)
   with fresh relay credentials after a network change, busy handling, glare (calling someone who
   is calling you answers their call).
 
-Deviations from the original design below are listed in ADR-047; not done yet: push "incoming
-call" for closed tabs (Phase 10), host controls beyond removal (mute requests), simulcast/SVC
+Deviations from the original design below are listed in ADR-047. Incoming calls reach closed
+tabs as content-free pushes since Phase 10 (ADR-048). Not done yet: host controls beyond removal
+(mute requests), simulcast/SVC
 tuning, SFU session resumption, call quality telemetry (no telemetry is collected).
 
 ## 1. Components

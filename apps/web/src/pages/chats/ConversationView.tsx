@@ -16,6 +16,7 @@ import { peerOf } from './ConversationList.js';
 import { lastSeen } from './format.js';
 import { GroupPanel } from './GroupPanel.js';
 import { MessageBubble } from './MessageBubble.js';
+import { MuteControl } from './MuteControl.js';
 import { PollDialog } from './PollDialog.js';
 import { SafetyNumber } from './SafetyNumber.js';
 import { SecurityNotices } from './SecurityNotices.js';
@@ -378,11 +379,13 @@ export function ConversationView({ conversation }: { conversation: ConversationS
       {detailsOpen && isGroup ? (
         <aside className="conversation__details" aria-labelledby="details-heading">
           <h2 id="details-heading">Group details</h2>
+          <MuteControl conversationId={conversationId} />
           <GroupPanel conversation={conversation} myId={myId} />
         </aside>
       ) : detailsOpen ? (
         <aside className="conversation__details" aria-labelledby="details-heading">
           <h2 id="details-heading">Details</h2>
+          <MuteControl conversationId={conversationId} />
           <h3>Encryption</h3>
           <p className="t-field__hint">
             Messages in this chat are end-to-end encrypted: only the devices of the people in it can

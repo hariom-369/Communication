@@ -1,4 +1,5 @@
 import {
+  channelNotificationsSchema,
   addChannelAdminSchema,
   channelAdminListSchema,
   channelAnalyticsSchema,
@@ -218,6 +219,25 @@ export function channelRoutes(deps: ChannelsModuleDeps): RouteDefinition[] {
       successStatus: 200,
       handler: async ({ params }, context) => {
         await channels.unsubscribe(context.session.userId, params.id);
+        return ok;
+      },
+    }),
+    defineRoute({
+      ...common,
+      id: 'channels.notifications',
+      method: 'PUT',
+      url: '/api/v1/channels/:id/notifications',
+      summary: 'Turn push notifications for new posts on or off (subscribers)',
+      rateLimit: limits.subscribe,
+      audit: selfService,
+      schema: {
+        params: channelParamsSchema,
+        body: channelNotificationsSchema,
+        response: okResponseSchema,
+      },
+      successStatus: 200,
+      handler: async ({ params, body }, context) => {
+        await channels.setNotifications(context.session.userId, params.id, body.enabled);
         return ok;
       },
     }),

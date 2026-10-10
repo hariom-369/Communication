@@ -35,6 +35,7 @@
     "openapi-types": "12.1.3",
     "otpauth": "9.5.2",
     "pg": "8.23.0",
+    "web-push": "3.6.7",
     "zod": "4.6.5"
   },
   "devDependencies": {
@@ -42,6 +43,8 @@
     "@types/nodemailer": "8.0.2",
     "@types/pg": "8.23.1",
     "@types/smtp-server": "3.5.13",
+    "@types/web-push": "3.6.4",
+    "http_ece": "1.2.0",
     "smtp-server": "3.19.14"
   }
 }
