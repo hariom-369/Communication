@@ -11,6 +11,7 @@ import pg from 'pg';
 
 import { buildApp } from '../app.js';
 import { composeModules, type Modules } from '../compose.js';
+import { generateModerationKeyPair, ModerationKey } from '../modules/moderation/index.js';
 import type { Database } from '../db/schema.js';
 import { MIGRATIONS_DIR } from '../paths.js';
 import type { EmailMessage, Mailer } from '../platform/email.js';
@@ -65,6 +66,8 @@ export interface IntegrationApp {
   keyPrefix: string;
   media: S3ObjectStore;
   bucket: string;
+  /** Public key report bundles are sealed to (base64url). */
+  moderationPublicKey: string;
   close(): Promise<void>;
 }
 
@@ -111,6 +114,11 @@ export async function startIntegrationApp(
     credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
   });
   await media.client.send(new CreateBucketCommand({ Bucket: bucket }));
+  const moderationPair = await generateModerationKeyPair();
+  const moderationKey = await ModerationKey.load(
+    moderationPair.publicKey,
+    moderationPair.privateKey,
+  );
   const modules = composeModules(
     {
       PASSWORD_PEPPER: `p1:${key()}`,
@@ -145,8 +153,10 @@ export async function startIntegrationApp(
       PUSH_SERVICE_HOSTS: ['push.tessera.test'],
       PUSH_TEST_ENDPOINT_ORIGIN: options.pushTestOrigin,
       SECURITY_ALERT_RETENTION_DAYS: 180,
+      FRANKING_KEYS: `f1:${key()}`,
+      EVIDENCE_RETENTION_DAYS: 365,
     },
-    { db, valkey, mailer, logger, media },
+    { db, valkey, mailer, logger, media, moderationKey },
   );
   const app = await buildApp({
     logger,
@@ -158,6 +168,7 @@ export async function startIntegrationApp(
     hsts: true,
     routes: modules.routes,
     sessions: modules.sessions,
+    standing: modules.moderation,
   });
 
   return {
@@ -171,6 +182,7 @@ export async function startIntegrationApp(
     keyPrefix,
     media,
     bucket,
+    moderationPublicKey: moderationPair.publicKey,
     close: async () => {
       await app.close();
       await db.destroy();

@@ -9,6 +9,7 @@ import {
 import { sql, type Kysely, type Transaction } from 'kysely';
 
 import type { Database } from '../../db/schema.js';
+import type { FrankingTagger } from '../../platform/franking.js';
 import type { RealtimePublisher } from '../../platform/realtime-publisher.js';
 
 /**
@@ -42,6 +43,16 @@ export interface MessagingAttachments {
     trx: Transaction<Database>,
     input: { userId: string; conversationId: string; blobIds: readonly string[]; expiresAt: Date },
   ): Promise<void>;
+}
+
+/** Blocks between two people (moderation; docs/moderation.md §2). */
+export interface MessagingBlocks {
+  blockedEitherWay(a: string, b: string): Promise<boolean>;
+}
+
+/** New-account limits and moderation restrictions on starting conversations. */
+export interface MessagingCreationGuard {
+  assertMay(userId: string, kind: 'chat' | 'group' | 'channel' | 'invite'): Promise<void>;
 }
 
 /** Wakes recipients' devices that are not connected (docs/notifications.md §2). */
@@ -95,6 +106,9 @@ export class MessagingService {
   #devices: MessagingDevices | null = null;
   #attachments: MessagingAttachments | null = null;
   #notifier: MessagingNotifier | null = null;
+  #franking: FrankingTagger | null = null;
+  #blocks: MessagingBlocks | null = null;
+  #guard: MessagingCreationGuard | null = null;
 
   constructor(
     db: Kysely<Database>,
@@ -113,6 +127,22 @@ export class MessagingService {
   /** Wired by the composition root (keys and messaging depend on each other's interfaces). */
   useNotifier(notifier: MessagingNotifier): void {
     this.#notifier = notifier;
+  }
+
+  useFranking(franking: FrankingTagger): void {
+    this.#franking = franking;
+  }
+
+  useSafety(blocks: MessagingBlocks, guard: MessagingCreationGuard): void {
+    this.#blocks = blocks;
+    this.#guard = guard;
+  }
+
+  /** The other member of a direct conversation (null for groups or unknown conversations). */
+  async directPeer(userId: string, conversationId: string): Promise<string | null> {
+    const context = await this.callContext(conversationId);
+    if (context?.kind !== 'direct') return null;
+    return context.memberIds.find((id) => id !== userId) ?? null;
   }
 
   useAttachments(attachments: MessagingAttachments): void {
@@ -148,6 +178,9 @@ export class MessagingService {
       .where('user_high', '=', high)
       .executeTakeFirst();
     if (existing !== undefined) return this.get(userId, existing.conversation_id);
+    if ((await this.#blocks?.blockedEitherWay(userId, peer.id)) === true)
+      throw new AppError('FORBIDDEN', { detail: 'You can’t message this person.' });
+    await this.#guard?.assertMay(userId, 'chat');
 
     const conversationId = newId();
     const created = await this.#db
@@ -249,9 +282,35 @@ export class MessagingService {
       epoch: number;
       ciphertext: Buffer;
       attachments?: readonly string[] | undefined;
+      /** Franking commitment (32 bytes), see platform/franking.ts. */
+      commitment?: Buffer | undefined;
     },
   ): Promise<{ message: MailboxMessage; duplicate: boolean }> {
     await this.#requireActiveDevice(userId, input.senderDeviceId);
+    // Blocks (docs/moderation.md §2), checked before the transaction: the moderation module uses
+    // its own connection, which must not be awaited while this one holds the conversation lock.
+    if (this.#blocks !== null) {
+      const peer = await this.#db
+        .selectFrom('conversation_members as m')
+        .innerJoin('conversations as c', 'c.id', 'm.conversation_id')
+        .select('m.user_id')
+        .where('c.id', '=', conversationId)
+        .where('c.kind', '=', 'direct')
+        .where('m.user_id', '!=', userId)
+        .where((eb) =>
+          eb.exists(
+            eb
+              .selectFrom('conversation_members as me')
+              .select('me.user_id')
+              .whereRef('me.conversation_id', '=', 'c.id')
+              .where('me.user_id', '=', userId)
+              .where('me.left_at', 'is', null),
+          ),
+        )
+        .executeTakeFirst();
+      if (peer !== undefined && (await this.#blocks.blockedEitherWay(userId, peer.user_id)))
+        throw new AppError('FORBIDDEN', { detail: 'You can’t message this person.' });
+    }
     const result = await this.#db.transaction().execute(async (trx) => {
       const conversation = await this.#lockMembership(trx, userId, conversationId);
       // Announcements-only groups: only admins post (server mirror of the E2EE setting).
@@ -291,6 +350,18 @@ export class MessagingService {
           ciphertext: input.ciphertext,
           created_at: now,
           expires_at: new Date(now.getTime() + ttlMs),
+          commitment: input.commitment ?? null,
+          franking_tag:
+            input.commitment === undefined || this.#franking === null
+              ? null
+              : this.#franking.tag(input.commitment, {
+                  conversationId,
+                  seq,
+                  senderUserId: userId,
+                  senderDeviceId: input.senderDeviceId,
+                  clientMessageId: input.clientMessageId,
+                  serverTime: now.toISOString(),
+                }),
         })
         .returningAll()
         .executeTakeFirstOrThrow();
@@ -794,6 +865,7 @@ export class MessagingService {
         'conversations.epoch',
         'conversations.disappearing_seconds',
         'conversations.announcements_only',
+        'conversations.kind',
         'conversation_members.role',
       ])
       .where('conversations.id', '=', conversationId)
@@ -827,6 +899,8 @@ function toMessage(row: {
   ciphertext: Buffer;
   created_at: Date;
   expires_at: Date;
+  commitment?: Buffer | null;
+  franking_tag?: string | null;
 }): MailboxMessage {
   return {
     seq: Number(row.seq),
@@ -838,5 +912,7 @@ function toMessage(row: {
     ciphertext: row.ciphertext.toString('base64'),
     serverTime: row.created_at.toISOString(),
     expiresAt: row.expires_at.toISOString(),
+    commitment: row.commitment?.toString('base64') ?? null,
+    frankingTag: row.franking_tag ?? null,
   };
 }

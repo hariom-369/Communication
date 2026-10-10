@@ -61,6 +61,8 @@ function mailbox(
     ciphertext: body === null ? 'commit' : encode({ v: 1, id, sentAt: seq, body }),
     serverTime: new Date(seq * 1000).toISOString(),
     expiresAt: new Date(10 ** 13).toISOString(),
+    commitment: null,
+    frankingTag: null,
   };
 }
 

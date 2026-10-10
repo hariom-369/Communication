@@ -138,6 +138,17 @@ const schema = z
     /** Local and E2E testing only: an extra push endpoint origin (may be http on loopback). */
     PUSH_TEST_ENDPOINT_ORIGIN: env.url(['http:', 'https:']).optional(),
     NOTIFY_INTERVAL_MS: env.positiveInt(1000),
+
+    /** Message franking (ADR-021): server MAC keys, `id:base64(32 bytes)`, newest first. */
+    FRANKING_KEYS: z.string().min(1).optional(),
+    /**
+     * Report evidence is encrypted to this HPKE key pair (RFC 9180, DHKEM P-256). The private
+     * key opens evidence for moderators only; production keeps it in the secrets manager.
+     */
+    MODERATION_HPKE_PUBLIC_KEY: base64urlKey(65).optional(),
+    MODERATION_HPKE_PRIVATE_KEY: base64urlKey(32).optional(),
+    MODERATION_SWEEP_INTERVAL_MS: env.positiveInt(60_000),
+    EVIDENCE_RETENTION_DAYS: env.positiveInt(365),
     SECURITY_ALERT_RETENTION_DAYS: env.positiveInt(180),
 
     BUILD_VERSION: z.string().min(1).default('0.0.0-dev'),
@@ -176,7 +187,23 @@ const schema = z
         message: 'Set VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT together',
       });
     }
+    const moderationKey = [config.MODERATION_HPKE_PUBLIC_KEY, config.MODERATION_HPKE_PRIVATE_KEY];
+    if (moderationKey.some((v) => v !== undefined) && moderationKey.some((v) => v === undefined)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['MODERATION_HPKE_PUBLIC_KEY'],
+        message: 'Set MODERATION_HPKE_PUBLIC_KEY and MODERATION_HPKE_PRIVATE_KEY together',
+      });
+    }
     if (config.NODE_ENV !== 'production') return;
+    for (const required of ['FRANKING_KEYS', 'MODERATION_HPKE_PUBLIC_KEY'] as const) {
+      if (config[required] === undefined)
+        ctx.addIssue({
+          code: 'custom',
+          path: [required],
+          message: 'Required in production (abuse reports must be verifiable and encrypted)',
+        });
+    }
     if (config.PUSH_TEST_ENDPOINT_ORIGIN !== undefined) {
       ctx.addIssue({
         code: 'custom',

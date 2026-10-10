@@ -251,6 +251,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       .subarray(-32)
       .toString('base64url'),
   };
+  const moderationKey = createECDH('prime256v1');
+  moderationKey.generateKeys();
   const apiEnv = {
     NODE_ENV: 'development',
     PORT: String(API_PORT),
@@ -292,6 +294,10 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     VAPID_SUBJECT: 'mailto:e2e@tessera.localhost',
     PUSH_TEST_ENDPOINT_ORIGIN: `http://127.0.0.1:${PUSH_PORT}`,
     NOTIFY_INTERVAL_MS: '250',
+    // Moderation: a fresh franking key ring and HPKE (P-256) key pair per run.
+    FRANKING_KEYS: `f1:${key()}`,
+    MODERATION_HPKE_PUBLIC_KEY: moderationKey.getPublicKey().toString('base64url'),
+    MODERATION_HPKE_PRIVATE_KEY: moderationKey.getPrivateKey().toString('base64url'),
   };
   process.env['E2E_VAPID_PUBLIC_KEY'] = vapid.publicKey;
   // Test workers use it to reset the per-IP sign-up limit between spec files (support.ts).

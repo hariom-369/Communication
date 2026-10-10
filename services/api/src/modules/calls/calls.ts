@@ -30,6 +30,11 @@ export interface CallConversations {
   areContacts(a: string, b: string): Promise<boolean>;
 }
 
+/** Blocks (docs/moderation.md §2): no calls between people where either blocked the other. */
+export interface CallBlocks {
+  blockedEitherWay(a: string, b: string): Promise<boolean>;
+}
+
 export interface CallDevices {
   isActiveDevice(userId: string, deviceId: string): Promise<boolean>;
 }
@@ -72,6 +77,7 @@ export class CallsService {
   readonly #config: CallsConfig;
   readonly #logger: Logger;
   #notifier: CallNotifier | null = null;
+  #blocks: CallBlocks | null = null;
 
   constructor(options: {
     db: Kysely<Database>;
@@ -91,6 +97,10 @@ export class CallsService {
     this.#sfu = options.sfu;
     this.#config = options.config;
     this.#logger = options.logger;
+  }
+
+  useBlocks(blocks: CallBlocks): void {
+    this.#blocks = blocks;
   }
 
   useNotifier(notifier: CallNotifier): void {
@@ -387,9 +397,11 @@ export class CallsService {
   /** "Who can call me" (privacy settings), checked for 1:1 calls. */
   async #requireAcceptsCalls(caller: string, callee: string): Promise<void> {
     const settings = await this.#directory.privacySettings(callee);
+    const blocked = (await this.#blocks?.blockedEitherWay(caller, callee)) === true;
     const allowed =
-      settings.calls === 'everyone' ||
-      (settings.calls === 'contacts' && (await this.#conversations.areContacts(caller, callee)));
+      !blocked &&
+      (settings.calls === 'everyone' ||
+        (settings.calls === 'contacts' && (await this.#conversations.areContacts(caller, callee))));
     if (!allowed) {
       const name = (await this.#directory.usernames([callee])).get(callee) ?? null;
       throw new AppError('FORBIDDEN', {

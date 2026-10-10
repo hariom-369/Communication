@@ -95,10 +95,24 @@ export interface ChannelNotifier {
   channelPost(channelId: string): Promise<void>;
 }
 
+/** Moderation hooks (docs/moderation.md §4): harmful links and creation limits. */
+export interface ChannelLinkGuard {
+  blockedHosts(text: string): Promise<string[]>;
+  assertMay(userId: string, kind: 'channel'): Promise<void>;
+}
+
+/** What a moderator sees of reported public content: captured by the server at report time. */
+export interface ChannelSnapshot {
+  readonly authorId: string;
+  readonly content: Record<string, unknown>;
+}
+
 interface ChannelRow {
   id: string;
   owner_id: string;
   visibility: 'public' | 'private';
+  /** Set by moderation (docs/moderation.md §5): unlisted, or suspended (admins only). */
+  moderation_state?: 'ok' | 'unlisted' | 'suspended';
   comments_enabled: boolean;
   slow_mode_seconds: number;
 }
@@ -112,6 +126,7 @@ export class ChannelsService {
   readonly #audit: AuditLog;
   readonly #logger: Logger;
   #notifier: ChannelNotifier | null = null;
+  #links: ChannelLinkGuard | null = null;
 
   constructor(options: {
     db: Kysely<Database>;
@@ -173,6 +188,9 @@ export class ChannelsService {
   async #viewer(executor: Executor, channel: ChannelRow, userId: string): Promise<Standing> {
     const standing = await this.#standing(executor, channel, userId);
     if (channel.visibility === 'private' && !standing.subscribed && standing.permissions === 0)
+      throw new AppError('NOT_FOUND');
+    // A suspended channel is visible to its own admins only (with the reason in their notices).
+    if (channel.moderation_state === 'suspended' && standing.permissions === 0)
       throw new AppError('NOT_FOUND');
     return standing;
   }
@@ -266,6 +284,7 @@ export class ChannelsService {
     input: z.infer<typeof createChannelSchema>,
     requestId?: string,
   ): Promise<string> {
+    await this.#links?.assertMay(actor, 'channel');
     const id = newId();
     await this.#db.transaction().execute(async (trx) => {
       const owned = await trx
@@ -448,6 +467,7 @@ export class ChannelsService {
       ])
       .where('channels.visibility', '=', 'public')
       .where('channels.deleted_at', 'is', null)
+      .where('channels.moderation_state', '=', 'ok')
       .where((eb) =>
         eb.or([
           sql<boolean>`channels.handle LIKE ${pattern} ESCAPE '\\'`,
@@ -520,6 +540,143 @@ export class ChannelsService {
 
   useNotifier(notifier: ChannelNotifier): void {
     this.#notifier = notifier;
+  }
+
+  useLinkGuard(links: ChannelLinkGuard): void {
+    this.#links = links;
+  }
+
+  #notSuspended(channel: ChannelRow): void {
+    if (channel.moderation_state === 'suspended')
+      throw new AppError('FORBIDDEN', { detail: 'This channel is suspended.' });
+  }
+
+  // ---- moderation (docs/moderation.md) ----------------------------------------------------------
+
+  /**
+   * Captures reported public content as the reporter can see it (so a report cannot reach
+   * content its reporter could not read). Returns null if it does not exist.
+   */
+  async moderationSnapshot(
+    viewer: string,
+    kind: 'channel' | 'post' | 'comment',
+    channelId: string,
+    id: string,
+  ): Promise<ChannelSnapshot | null> {
+    const channel = await this.#channel(this.#db, channelId).catch(() => null);
+    if (channel === null) return null;
+    await this.#viewer(this.#db, channel, viewer);
+    if (kind === 'channel')
+      return {
+        authorId: channel.owner_id,
+        content: {
+          handle: channel.handle,
+          title: channel.title,
+          description: channel.description,
+          visibility: channel.visibility,
+        },
+      };
+    if (kind === 'post') {
+      const post = await this.#db
+        .selectFrom('channel_posts')
+        .select(['author_id', 'body', 'preview_url', 'published_at'])
+        .where('id', '=', id)
+        .where('channel_id', '=', channelId)
+        .where('status', '=', 'published')
+        .executeTakeFirst();
+      if (post === undefined) return null;
+      return {
+        authorId: post.author_id,
+        content: {
+          channel: channel.handle,
+          body: post.body,
+          previewUrl: post.preview_url,
+          publishedAt: post.published_at?.toISOString() ?? null,
+        },
+      };
+    }
+    const comment = await this.#db
+      .selectFrom('channel_comments')
+      .innerJoin('channel_posts', 'channel_posts.id', 'channel_comments.post_id')
+      .select([
+        'channel_comments.author_id',
+        'channel_comments.body',
+        'channel_comments.created_at',
+      ])
+      .where('channel_comments.id', '=', id)
+      .where('channel_posts.channel_id', '=', channelId)
+      .where('channel_comments.removed_at', 'is', null)
+      .executeTakeFirst();
+    if (comment === undefined) return null;
+    return {
+      authorId: comment.author_id,
+      content: {
+        channel: channel.handle,
+        body: comment.body,
+        createdAt: comment.created_at.toISOString(),
+      },
+    };
+  }
+
+  /** Removes (or restores, on a successful appeal) a post or comment by moderation decision. */
+  async moderationSetRemoved(
+    kind: 'post' | 'comment',
+    channelId: string,
+    id: string,
+    removed: boolean,
+    actor: string | null,
+  ): Promise<void> {
+    const now = new Date();
+    if (kind === 'post') {
+      await this.#db
+        .updateTable('channel_posts')
+        .set(
+          removed
+            ? { status: 'removed', removed_at: now, removed_by: actor, publish_at: null }
+            : { status: 'published', removed_at: null, removed_by: null },
+        )
+        .where('id', '=', id)
+        .where('channel_id', '=', channelId)
+        .where('status', '=', removed ? 'published' : 'removed')
+        .execute();
+      return;
+    }
+    const comment = await this.#db
+      .selectFrom('channel_comments')
+      .innerJoin('channel_posts', 'channel_posts.id', 'channel_comments.post_id')
+      .select('channel_comments.id')
+      .where('channel_comments.id', '=', id)
+      .where('channel_posts.channel_id', '=', channelId)
+      .executeTakeFirst();
+    if (comment === undefined) return;
+    await this.#db
+      .updateTable('channel_comments')
+      .set(
+        removed ? { removed_at: now, removed_by: actor } : { removed_at: null, removed_by: null },
+      )
+      .where('id', '=', id)
+      .execute();
+  }
+
+  async moderationSetState(
+    channelId: string,
+    state: 'ok' | 'unlisted' | 'suspended',
+  ): Promise<void> {
+    await this.#db
+      .updateTable('channels')
+      .set({ moderation_state: state })
+      .where('id', '=', channelId)
+      .execute();
+  }
+
+  /** Display name of a channel for moderators (handle and title). */
+  async moderationLabel(channelId: string): Promise<string> {
+    const row = await this.#db
+      .selectFrom('channels')
+      .select(['handle', 'title'])
+      .where('id', '=', channelId)
+      .executeTakeFirst();
+    return row === undefined ? 'Deleted channel' : `${row.title} (@${row.handle})`;
   }
 
   /** Turns post notifications on or off for a subscriber. */
@@ -901,6 +1058,12 @@ export class ChannelsService {
   ): Promise<Post> {
     const channel = await this.#channel(this.#db, id);
     await this.#require(this.#db, channel, actor, 'post');
+    this.#notSuspended(channel);
+    const harmful = await this.#links?.blockedHosts(`${input.body} ${input.previewUrl ?? ''}`);
+    if (harmful !== undefined && harmful.length > 0)
+      throw new AppError('VALIDATION_FAILED', {
+        detail: `This post links to a site reported as harmful (${harmful.join(', ')}).`,
+      });
     const now = new Date();
     let status: ChannelPostStatus;
     let publishAt: Date | null = null;
@@ -1384,7 +1547,13 @@ export class ChannelsService {
   ): Promise<z.infer<typeof commentSchema>> {
     const channel = await this.#channel(this.#db, id);
     const me = await this.#viewer(this.#db, channel, userId);
+    this.#notSuspended(channel);
     await this.#publishedPost(this.#db, id, postId);
+    const harmful = await this.#links?.blockedHosts(body);
+    if (harmful !== undefined && harmful.length > 0)
+      throw new AppError('VALIDATION_FAILED', {
+        detail: `This comment links to a site reported as harmful (${harmful.join(', ')}).`,
+      });
     const moderator = (me.permissions & CHANNEL_PERMISSIONS.manageComments) !== 0;
     if (!channel.comments_enabled && !moderator)
       throw new AppError('FORBIDDEN', { detail: 'Comments are turned off in this channel.' });

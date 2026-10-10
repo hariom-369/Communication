@@ -2,6 +2,7 @@ import { createHealthServer, createLifecycle, createLogger } from '@tessera/plat
 
 import { buildApp } from './app.js';
 import { composeModules } from './compose.js';
+import { ModerationKey } from './modules/moderation/index.js';
 import { loadApiConfig } from './config.js';
 import { MIGRATIONS_DIR } from './paths.js';
 import { createDatabase, databaseHealthCheck } from './platform/db.js';
@@ -99,7 +100,22 @@ async function main(): Promise<void> {
         }
       : {}),
   });
-  const modules = composeModules(config, { db: database.db, valkey, mailer, logger, media });
+  const moderationKey =
+    config.MODERATION_HPKE_PUBLIC_KEY !== undefined &&
+    config.MODERATION_HPKE_PRIVATE_KEY !== undefined
+      ? await ModerationKey.load(
+          config.MODERATION_HPKE_PUBLIC_KEY,
+          config.MODERATION_HPKE_PRIVATE_KEY,
+        )
+      : null;
+  const modules = composeModules(config, {
+    db: database.db,
+    valkey,
+    mailer,
+    logger,
+    media,
+    moderationKey,
+  });
 
   const sweeper = startSingletonTask({
     name: 'mailbox_sweeper',
@@ -174,6 +190,19 @@ async function main(): Promise<void> {
   });
   lifecycle.onShutdown({ name: 'notify_sweeper', run: () => notifySweeper.stop() });
 
+  // Moderation: record service-level breaches (and alert), delete evidence past retention.
+  const moderationSweeper = startSingletonTask({
+    name: 'moderation_sweeper',
+    lockKey: 0x6d6f6472, // "modr"
+    intervalMs: config.MODERATION_SWEEP_INTERVAL_MS,
+    pool: database.pool,
+    logger,
+    task: async () => {
+      await modules.moderation.sweep();
+    },
+  });
+  lifecycle.onShutdown({ name: 'moderation_sweeper', run: () => moderationSweeper.stop() });
+
   const app = await buildApp({
     logger,
     rateLimiter,
@@ -183,6 +212,7 @@ async function main(): Promise<void> {
     hsts: config.NODE_ENV === 'production',
     routes: modules.routes,
     sessions: modules.sessions,
+    standing: modules.moderation,
     ipFloodLimitPerMinute: config.IP_FLOOD_LIMIT_PER_MINUTE,
   });
   lifecycle.onShutdown({ name: 'http', run: () => app.close() });

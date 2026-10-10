@@ -474,6 +474,10 @@ describe("'realtime.ticket' and 'realtime.presence'", () => {
       { table_name: 'link_sessions', column_name: 'short_id', data_type: 'bytea' },
       { table_name: 'link_sessions', column_name: 'signature_public', data_type: 'bytea' },
       { table_name: 'mailbox_messages', column_name: 'ciphertext', data_type: 'bytea' },
+      // Message franking (ADR-021): the sender's HMAC commitment to the plaintext (32 bytes, it
+      // reveals nothing without the key inside the ciphertext) and the server's tag over it.
+      { table_name: 'mailbox_messages', column_name: 'commitment', data_type: 'bytea' },
+      { table_name: 'mailbox_messages', column_name: 'franking_tag', data_type: 'text' },
       // Attachments: a random object key, the storage upload id and a status enum. No names,
       // types or content; the blob itself is ciphertext in object storage.
       { table_name: 'media_blobs', column_name: 'object_key', data_type: 'text' },

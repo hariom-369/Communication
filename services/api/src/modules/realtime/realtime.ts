@@ -15,6 +15,8 @@ export const TICKET_TTL_SECONDS = 30;
 export interface PresenceDirectory {
   privacySettings(userId: string): Promise<PrivacySettings>;
   areContacts(userA: string, userB: string): Promise<boolean>;
+  /** Blocked either way: presence is hidden both ways (docs/moderation.md §2). */
+  blockedEitherWay(userA: string, userB: string): Promise<boolean>;
 }
 
 export class RealtimeService {
@@ -56,6 +58,8 @@ export class RealtimeService {
     ]);
     const hidden = { online: null, lastSeenAt: null };
     if (viewer.lastSeen === 'nobody' || target.lastSeen === 'nobody') return hidden;
+    if (viewerId !== targetId && (await this.#directory.blockedEitherWay(viewerId, targetId)))
+      return hidden;
     if (target.lastSeen === 'contacts' && !(await this.#directory.areContacts(viewerId, targetId)))
       return hidden;
 

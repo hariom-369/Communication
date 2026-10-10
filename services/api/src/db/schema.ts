@@ -279,6 +279,11 @@ export interface ChannelsTable {
   last_post_at: Date | null;
   created_at: Timestamp;
   deleted_at: NullableTimestamp;
+  moderation_state: ColumnType<
+    'ok' | 'unlisted' | 'suspended',
+    undefined,
+    'ok' | 'unlisted' | 'suspended'
+  >;
 }
 
 export interface ChannelAdminsTable {
@@ -434,6 +439,8 @@ export interface MailboxMessagesTable {
   ciphertext: Buffer;
   created_at: Timestamp;
   expires_at: Date;
+  commitment: ColumnType<Buffer | null, Buffer | null | undefined, Buffer | null>;
+  franking_tag: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
 export interface AccountKeysTable {
@@ -571,6 +578,142 @@ export interface SecurityAlertsTable {
   read_at: NullableTimestamp;
 }
 
+export interface BlocksTable {
+  blocker_id: string;
+  blocked_id: string;
+  created_at: Timestamp;
+}
+
+export interface StaffRolesTable {
+  user_id: string;
+  role: 'moderator' | 'senior_moderator' | 'legal';
+  granted_by: string;
+  granted_at: Timestamp;
+  expires_at: Date;
+}
+
+export interface ModerationCasesTable {
+  id: string;
+  subject_kind:
+    'user' | 'conversation' | 'channel' | 'post' | 'comment' | 'community' | 'grievance';
+  subject_id: string;
+  subject_parent_id: string | null;
+  subject_user_id: string | null;
+  category: string;
+  source: 'report' | 'grievance' | 'legal_order' | 'automated';
+  priority: number;
+  status: 'open' | 'actioned' | 'dismissed';
+  ack_due_at: Date;
+  due_at: Date;
+  acknowledged_at: Date | null;
+  resolved_at: Date | null;
+  assigned_to: string | null;
+  report_count: ColumnType<number, number | undefined, number>;
+  breached_at: Date | null;
+  legal_hold: ColumnType<boolean, boolean | undefined, boolean>;
+  opened_at: Timestamp;
+}
+
+export interface ModerationCaseEventsTable {
+  id: string;
+  case_id: string;
+  actor_id: string | null;
+  kind: string;
+  payload: ColumnType<Record<string, unknown>, string | undefined, string>;
+  created_at: Timestamp;
+}
+
+export interface ModerationEvidenceTable {
+  id: string;
+  case_id: string;
+  kind: 'e2ee_bundle' | 'public_snapshot';
+  hpke_enc: Buffer | null;
+  sealed: Buffer;
+  sha256: Buffer;
+  plaintext_sha256: Buffer | null;
+  size: number;
+  media_count: ColumnType<number, number | undefined, number>;
+  csam_match: ColumnType<boolean, boolean | undefined, boolean>;
+  created_at: Timestamp;
+}
+
+export interface ModerationReportsTable {
+  id: string;
+  case_id: string;
+  reporter_id: string | null;
+  target_kind: string;
+  target_id: string;
+  category: string;
+  details: ColumnType<string, string | undefined, string>;
+  evidence_id: string | null;
+  verification: 'content_verified' | 'unverified' | 'server_content' | 'none';
+  created_at: Timestamp;
+}
+
+export interface ModerationActionsTable {
+  id: string;
+  case_id: string;
+  subject_user_id: string | null;
+  target_kind: string;
+  target_id: string;
+  action:
+    | 'warn'
+    | 'restrict'
+    | 'suspend'
+    | 'ban'
+    | 'remove_content'
+    | 'channel_unlist'
+    | 'channel_suspend'
+    | 'legal_referral';
+  restriction: 'new_chats' | 'creation' | null;
+  reason_code: string;
+  note: ColumnType<string, string | undefined, string>;
+  status: 'pending_review' | 'active' | 'reverted' | 'rejected';
+  starts_at: Timestamp;
+  ends_at: Date | null;
+  created_by: string | null;
+  approved_by: string | null;
+  created_at: Timestamp;
+}
+
+export interface ModerationAppealsTable {
+  id: string;
+  action_id: string;
+  user_id: string;
+  statement: string;
+  status: 'open' | 'upheld' | 'overturned';
+  reviewer_id: string | null;
+  decision_reason: string | null;
+  decided_at: Date | null;
+  created_at: Timestamp;
+}
+
+export interface ModerationGrievancesTable {
+  id: string;
+  case_id: string;
+  user_id: string | null;
+  contact: string;
+  kind: 'grievance' | 'ncii' | 'synthetic_media' | 'court_order' | 'government_order';
+  description: string;
+  reference: ColumnType<string, string | undefined, string>;
+  created_at: Timestamp;
+}
+
+export interface LinkBlocklistTable {
+  host: string;
+  host_hash: Buffer;
+  category: 'phishing' | 'malware' | 'scam' | 'csam';
+  added_by: string | null;
+  created_at: Timestamp;
+}
+
+export interface CsamHashesTable {
+  sha256: Buffer;
+  source: string;
+  added_by: string | null;
+  added_at: Timestamp;
+}
+
 export interface Database {
   schema_migrations: SchemaMigrationsTable;
   users: UsersTable;
@@ -631,6 +774,17 @@ export interface Database {
   notification_preferences: NotificationPreferencesTable;
   conversation_mutes: ConversationMutesTable;
   security_alerts: SecurityAlertsTable;
+  blocks: BlocksTable;
+  staff_roles: StaffRolesTable;
+  moderation_cases: ModerationCasesTable;
+  moderation_case_events: ModerationCaseEventsTable;
+  moderation_evidence: ModerationEvidenceTable;
+  moderation_reports: ModerationReportsTable;
+  moderation_actions: ModerationActionsTable;
+  moderation_appeals: ModerationAppealsTable;
+  moderation_grievances: ModerationGrievancesTable;
+  link_blocklist: LinkBlocklistTable;
+  csam_hashes: CsamHashesTable;
 }
 
 /** Owning module of every table ('platform' = infrastructure code outside modules/). */
@@ -694,4 +848,15 @@ export const TABLE_OWNERS: Readonly<Record<keyof Database, string>> = {
   notification_preferences: 'notifications',
   conversation_mutes: 'notifications',
   security_alerts: 'notifications',
+  blocks: 'moderation',
+  staff_roles: 'moderation',
+  moderation_cases: 'moderation',
+  moderation_case_events: 'moderation',
+  moderation_evidence: 'moderation',
+  moderation_reports: 'moderation',
+  moderation_actions: 'moderation',
+  moderation_appeals: 'moderation',
+  moderation_grievances: 'moderation',
+  link_blocklist: 'moderation',
+  csam_hashes: 'moderation',
 };

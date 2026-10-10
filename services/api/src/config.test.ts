@@ -28,6 +28,10 @@ const production = {
   VALKEY_URL: 'rediss://cache.internal:6379',
   ALLOWED_ORIGINS: 'https://app.tessera.example',
   LOG_ERROR_DETAILS: 'false',
+  // Shapes only (not real keys): franking key ring, moderation HPKE key pair.
+  FRANKING_KEYS: `f1:${Buffer.alloc(32, 7).toString('base64')}`,
+  MODERATION_HPKE_PUBLIC_KEY: Buffer.alloc(65, 4).toString('base64url'),
+  MODERATION_HPKE_PRIVATE_KEY: Buffer.alloc(32, 9).toString('base64url'),
 };
 
 function issueKeys(source: Record<string, string>): string[] {
@@ -50,6 +54,21 @@ describe('api config', () => {
 
   it('accepts a hardened production configuration', () => {
     expect(issueKeys(production)).toEqual([]);
+  });
+
+  it('requires verifiable, encrypted abuse reports in production', () => {
+    const {
+      FRANKING_KEYS: _f,
+      MODERATION_HPKE_PUBLIC_KEY: _p,
+      MODERATION_HPKE_PRIVATE_KEY: _k,
+      ...rest
+    } = production;
+    expect(issueKeys(rest).sort()).toEqual(['FRANKING_KEYS', 'MODERATION_HPKE_PUBLIC_KEY']);
+    // Half a key pair is refused everywhere.
+    const { MODERATION_HPKE_PRIVATE_KEY: _private, ...publicOnly } = production;
+    expect(issueKeys({ ...publicOnly, NODE_ENV: 'development' })).toEqual([
+      'MODERATION_HPKE_PUBLIC_KEY',
+    ]);
   });
 
   it('rejects insecure production settings', () => {

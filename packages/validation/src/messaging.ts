@@ -98,6 +98,15 @@ export const sendMessageSchema = z.strictObject({
    * this conversation so its members can download them. At most 10.
    */
   attachments: z.array(idSchema).max(10).optional(),
+  /**
+   * Message franking (ADR-021, docs/moderation.md §3): HMAC-SHA256 of the exact plaintext under
+   * a fresh key carried inside the ciphertext. The server tags it, so a recipient who reports
+   * the message can prove what was sent. 32 bytes, base64.
+   */
+  commitment: z
+    .string()
+    .regex(/^[A-Za-z0-9+/]{43}=$/)
+    .optional(),
 });
 
 /** Largest Welcome or commit accepted: they grow with the group (a 256-member Welcome is ~120
@@ -157,6 +166,9 @@ export const mailboxMessageSchema = z.object({
   ciphertext: z.string(),
   serverTime: z.iso.datetime(),
   expiresAt: z.iso.datetime(),
+  /** Franking commitment from the sender and the server's tag over it (null: not franked). */
+  commitment: z.string().nullable().default(null),
+  frankingTag: z.string().nullable().default(null),
 });
 export type MailboxMessage = z.infer<typeof mailboxMessageSchema>;
 

@@ -12,6 +12,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@hpke/core": "1.9.0",
     "@simplewebauthn/browser": "14.0.0",
     "@tessera/crypto-core": "workspace:*",
     "@tessera/shared": "workspace:*",

@@ -320,17 +320,28 @@ export class RealtimeGateway {
     this.#send(connection, { type: 'ack', id: frameId });
   }
 
-  /** Member ids of the conversation if the connection's user is a member, else null (cached). */
+  /**
+   * Member ids of the conversation if the connection's user is a member, else null (cached).
+   * Members who blocked the user, or whom the user blocked, are left out (docs/moderation.md §2).
+   */
   async #members(connection: Connection, conversationId: string): Promise<string[] | null> {
     if (!/^[0-9a-f-]{36}$/.test(conversationId)) return null;
     const cached = connection.membership.get(conversationId);
     if (cached !== undefined && cached.until > Date.now()) return cached.members;
-    const result = await this.#deps.db.query<{ user_id: string }>(
-      'SELECT user_id FROM conversation_members WHERE conversation_id = $1 AND left_at IS NULL',
-      [conversationId],
+    const result = await this.#deps.db.query<{ user_id: string; blocked: boolean }>(
+      `SELECT m.user_id,
+              EXISTS (SELECT 1 FROM blocks b
+                      WHERE (b.blocker_id = m.user_id AND b.blocked_id = $2)
+                         OR (b.blocker_id = $2 AND b.blocked_id = m.user_id)) AS blocked
+         FROM conversation_members m
+        WHERE m.conversation_id = $1 AND m.left_at IS NULL`,
+      [conversationId, connection.userId],
     );
-    const all = result.rows.map((row) => row.user_id);
-    const members = connection.userId !== null && all.includes(connection.userId) ? all : null;
+    const isMember =
+      connection.userId !== null && result.rows.some((row) => row.user_id === connection.userId);
+    const members = isMember
+      ? result.rows.filter((row) => !row.blocked).map((row) => row.user_id)
+      : null;
     if (connection.membership.size > 500) connection.membership.clear(); // bound memory per socket
     connection.membership.set(conversationId, { members, until: Date.now() + MEMBERSHIP_CACHE_MS });
     return members;

@@ -29,6 +29,11 @@ export type AuthRequirement =
       readonly kind: 'session';
       readonly stages?: readonly SessionStage[];
       readonly stepUp?: boolean;
+      /**
+       * Reachable while the account is suspended or banned (its status, appeals, signing out).
+       * Every other signed-in route answers ACCOUNT_SUSPENDED (docs/moderation.md §5).
+       */
+      readonly whileSuspended?: boolean;
     };
 
 export const STEP_UP_WINDOW_MS = 10 * 60_000;
@@ -38,6 +43,11 @@ export interface AuthenticatedSession {
   readonly userId: string;
   readonly stage: SessionStage;
   readonly reauthenticatedAt: Date | null;
+}
+
+/** Whether an account is suspended or banned (the moderation module; cached briefly). */
+export interface AccountStandingCheck {
+  suspended(userId: string): Promise<boolean>;
 }
 
 /** Resolves the session for a request. Implemented by the auth module and injected in app.ts. */
@@ -138,6 +148,7 @@ export interface RouteRegistrationDeps {
   readonly rateLimiter: RateLimiter;
   readonly logger: Logger;
   readonly sessions: SessionAuthenticator;
+  readonly standing?: AccountStandingCheck;
   /** Requests per minute per address (default IP_FLOOD_GUARD). */
   readonly ipFloodLimitPerMinute?: number;
 }
@@ -247,6 +258,13 @@ function registerRoute(
       const ipSubject = rateLimitSubject(request.ip);
       await enforceLimit(deps.rateLimiter, floodGuard, ipSubject);
       request.authSession = await authenticate(request, route.auth, deps.sessions);
+      if (
+        route.auth.kind === 'session' &&
+        route.auth.whileSuspended !== true &&
+        request.authSession !== null &&
+        (await deps.standing?.suspended(request.authSession.userId)) === true
+      )
+        throw new AppError('ACCOUNT_SUSPENDED');
       const subject =
         route.auth.kind === 'session' && request.authSession !== null
           ? `user:${request.authSession.userId}`

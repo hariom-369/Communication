@@ -134,6 +134,8 @@ export function messagingRoutes(deps: MessagingModuleDeps): RouteDefinition[] {
           epoch: body.epoch,
           ciphertext,
           attachments: body.attachments,
+          commitment:
+            body.commitment === undefined ? undefined : Buffer.from(body.commitment, 'base64'),
         });
         return {
           seq: result.message.seq,

@@ -31,6 +31,11 @@ import {
 } from './modules/messaging/index.js';
 import { metaRoutes } from './modules/meta/index.js';
 import {
+  ModerationService,
+  moderationRoutes,
+  type ModerationKey,
+} from './modules/moderation/index.js';
+import {
   NotificationsService,
   NotifyQueue,
   PushSender,
@@ -38,6 +43,7 @@ import {
 } from './modules/notifications/index.js';
 import { RealtimeService, realtimeRoutes } from './modules/realtime/index.js';
 import type { Mailer } from './platform/email.js';
+import { FrankingTagger } from './platform/franking.js';
 import type { ObjectStore } from './platform/object-store.js';
 import type { RouteDefinition, SessionAuthenticator } from './platform/http/routes.js';
 import { ValkeyRealtimePublisher } from './platform/realtime-publisher.js';
@@ -78,6 +84,8 @@ export type ModuleConfig = Pick<
   | 'PUSH_SERVICE_HOSTS'
   | 'PUSH_TEST_ENDPOINT_ORIGIN'
   | 'SECURITY_ALERT_RETENTION_DAYS'
+  | 'FRANKING_KEYS'
+  | 'EVIDENCE_RETENTION_DAYS'
 >;
 
 export interface ModuleInfrastructure {
@@ -87,6 +95,8 @@ export interface ModuleInfrastructure {
   readonly logger: Logger;
   /** Encrypted attachments (docs/media.md §5). */
   readonly media: ObjectStore;
+  /** HPKE key report bundles are encrypted to (loaded asynchronously; null when unset). */
+  readonly moderationKey?: ModerationKey | null;
 }
 
 export interface Modules {
@@ -99,12 +109,14 @@ export interface Modules {
   readonly channels: ChannelsService;
   readonly calls: CallsService;
   readonly notifications: NotificationsService;
+  readonly moderation: ModerationService;
 }
 
 const DAY_MS = 24 * 60 * 60_000;
 
 export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure): Modules {
   const audit = new AuditLog(infra.db);
+  const secretBox = new SecretBox(parseKeyring(config.SECRET_BOX_KEYS));
   const accounts = new AccountService(infra.db, infra.mailer, audit);
   const publisher = new ValkeyRealtimePublisher(
     infra.valkey,
@@ -137,7 +149,7 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
     passwords: new PasswordHasher(parsePepper(config.PASSWORD_PEPPER)),
     passkeys,
     loginEvents: new LoginEvents(infra.db),
-    secretBox: new SecretBox(parseKeyring(config.SECRET_BOX_KEYS)),
+    secretBox,
     audit,
     mailer: infra.mailer,
     logger: infra.logger,
@@ -187,9 +199,42 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
   const media = new MediaService(infra.db, infra.media, infra.logger);
   media.useMembership(messaging);
   messaging.useAttachments(media);
+  const franking =
+    config.FRANKING_KEYS === undefined
+      ? null
+      : new FrankingTagger(parseKeyring(config.FRANKING_KEYS));
+  const moderation = new ModerationService({
+    db: infra.db,
+    valkey: infra.valkey,
+    keyPrefix: config.VALKEY_KEY_PREFIX,
+    audit,
+    secretBox,
+    mailer: infra.mailer,
+    logger: infra.logger,
+    moderationKey: infra.moderationKey ?? null,
+    franking,
+    accounts,
+    sessions,
+    notices: auth,
+    conversations: {
+      isMember: (userId, conversationId) => messaging.isMember(userId, conversationId),
+      directPeer: (userId, conversationId) => messaging.directPeer(userId, conversationId),
+    },
+    channels,
+    communities,
+    evidenceRetentionDays: config.EVIDENCE_RETENTION_DAYS,
+  });
+  if (franking !== null) messaging.useFranking(franking);
+  messaging.useSafety(moderation, moderation);
+  groups.useSafety(moderation, moderation);
+  channels.useLinkGuard({
+    blockedHosts: (text) => moderation.blockedHosts(text),
+    assertMay: (userId, kind) => moderation.assertMay(userId, kind),
+  });
   const realtime = new RealtimeService(infra.valkey, config.VALKEY_KEY_PREFIX, {
     privacySettings: (userId) => accounts.privacySettings(userId),
     areContacts: (a, b) => messaging.areContacts(a, b),
+    blockedEitherWay: (a, b) => moderation.blockedEitherWay(a, b),
   });
 
   const livekit =
@@ -269,6 +314,7 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
   notifications.useChannels(channels);
   messaging.useNotifier(notifications);
   calls.useNotifier(notifications);
+  calls.useBlocks(moderation);
   channels.useNotifier(notifications);
   auth.useAlerts(notifications);
   sessions.onRotated((from, to) => {
@@ -290,6 +336,7 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
       ...backupsRoutes({ backups }),
       ...mediaRoutes({ media }),
       ...realtimeRoutes({ realtime, websocketPath: config.REALTIME_WS_PATH }),
+      ...moderationRoutes({ moderation }),
     ],
     sessions,
     audit,
@@ -299,5 +346,6 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
     channels,
     calls,
     notifications,
+    moderation,
   };
 }

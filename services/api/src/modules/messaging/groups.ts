@@ -18,6 +18,7 @@ import type { z } from 'zod';
 
 import type { Database } from '../../db/schema.js';
 import type { RealtimePublisher } from '../../platform/realtime-publisher.js';
+import type { MessagingBlocks, MessagingCreationGuard } from './messaging.js';
 
 /**
  * Groups (docs/groups.md, ADR-044): membership, roles, settings, invitations, invite links,
@@ -63,6 +64,8 @@ export class GroupsService {
   readonly #publisher: RealtimePublisher;
   readonly #logger: Logger;
   #spaces: SpaceGate | null = null;
+  #blocks: MessagingBlocks | null = null;
+  #guard: MessagingCreationGuard | null = null;
 
   constructor(
     db: Kysely<Database>,
@@ -80,6 +83,12 @@ export class GroupsService {
 
   useSpaces(gate: SpaceGate): void {
     this.#spaces = gate;
+  }
+
+  /** Blocks and new-account limits (docs/moderation.md §2, §4). */
+  useSafety(blocks: MessagingBlocks, guard: MessagingCreationGuard): void {
+    this.#blocks = blocks;
+    this.#guard = guard;
   }
 
   // ---- helpers ---------------------------------------------------------------------------------
@@ -245,6 +254,11 @@ export class GroupsService {
         result.skipped.push({ username, reason: 'banned' });
         continue;
       }
+      // A block either way: not added, and the adder is not told why.
+      if ((await this.#blocks?.blockedEitherWay(actor, user.id)) === true) {
+        result.skipped.push({ username, reason: 'not_allowed' });
+        continue;
+      }
       if (!(await this.#eligible(groupId, user.id))) {
         result.skipped.push({ username, reason: 'not_allowed' });
         continue;
@@ -285,6 +299,7 @@ export class GroupsService {
     ciphersuite: number,
     usernames: readonly string[],
   ): Promise<{ groupId: string; result: AddResult }> {
+    await this.#guard?.assertMay(actor, 'group');
     const groupId = newId();
     const result = await this.#db.transaction().execute(async (trx) => {
       await trx
@@ -553,6 +568,7 @@ export class GroupsService {
     const me = await this.#membership(this.#db, actor, groupId);
     if (me.role === 'member' && !me.members_can_add)
       throw new AppError('FORBIDDEN', { detail: 'Only group admins can create invite links.' });
+    await this.#guard?.assertMay(actor, 'invite');
     const token = randomBytes(16).toString('base64url');
     const id = newId();
     const createdAt = new Date();

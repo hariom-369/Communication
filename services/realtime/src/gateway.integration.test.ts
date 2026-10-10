@@ -252,6 +252,8 @@ const sampleMessage = (seq: number) => ({
   ciphertext: 'AAAA',
   serverTime: new Date().toISOString(),
   expiresAt: new Date(Date.now() + 1000).toISOString(),
+  commitment: null,
+  frankingTag: null,
 });
 
 describe('connection security', () => {
@@ -414,6 +416,31 @@ describe('typing', () => {
     mallorySocket.send({ type: 'typing', id: 't2', conversationId, state: 'start' });
     expect(await mallorySocket.next('error')).toMatchObject({ id: 't2', code: 'NOT_FOUND' });
     for (const socket of [aliceSocket, bobSocket, mallorySocket]) socket.ws.close();
+  });
+
+  it('does not relay typing between people where either blocked the other', async () => {
+    const node = await startNode();
+    const [alice, bob, carol] = [await createUser(), await createUser(), await createUser()];
+    const conversationId = await createConversation([alice.userId, bob.userId, carol.userId]);
+    await db.query('INSERT INTO blocks (blocker_id, blocked_id) VALUES ($1, $2)', [
+      bob.userId,
+      alice.userId,
+    ]);
+    const [aliceSocket, bobSocket, carolSocket] = [
+      await connect(node.url, alice),
+      await connect(node.url, bob),
+      await connect(node.url, carol),
+    ];
+    aliceSocket.send({ type: 'typing', id: 't1', conversationId, state: 'start' });
+    await aliceSocket.next('ack');
+    expect(await carolSocket.next('typing')).toMatchObject({ userId: alice.userId });
+    await expect(bobSocket.next('typing', 200)).rejects.toThrow();
+    // The other way too: Bob's typing does not reach Alice.
+    bobSocket.send({ type: 'typing', id: 't2', conversationId, state: 'start' });
+    await bobSocket.next('ack');
+    expect(await carolSocket.next('typing')).toMatchObject({ userId: bob.userId });
+    await expect(aliceSocket.next('typing', 200)).rejects.toThrow();
+    for (const socket of [aliceSocket, bobSocket, carolSocket]) socket.ws.close();
   });
 });
 

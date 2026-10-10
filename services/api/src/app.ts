@@ -16,6 +16,7 @@ import { installRequestLogging } from './platform/http/request-logging.js';
 import {
   registerRoutes,
   type RouteDefinition,
+  type AccountStandingCheck,
   type SessionAuthenticator,
 } from './platform/http/routes.js';
 import { installSecurityHeaders } from './platform/http/security-headers.js';
@@ -30,6 +31,8 @@ export interface AppOptions {
   readonly hsts: boolean;
   readonly routes: readonly RouteDefinition[];
   readonly sessions: SessionAuthenticator;
+  /** Suspended accounts reach only routes marked `whileSuspended` (moderation). */
+  readonly standing?: AccountStandingCheck;
   /** Per-address flood guard, requests per minute (default 1200). */
   readonly ipFloodLimitPerMinute?: number;
 }
@@ -82,6 +85,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     rateLimiter: options.rateLimiter,
     logger: options.logger,
     sessions: options.sessions,
+    ...(options.standing === undefined ? {} : { standing: options.standing }),
     ...(options.ipFloodLimitPerMinute === undefined
       ? {}
       : { ipFloodLimitPerMinute: options.ipFloodLimitPerMinute }),

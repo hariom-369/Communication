@@ -146,7 +146,7 @@ export function accountsRoutes(deps: AccountsModuleDeps): RouteDefinition[] {
       url: '/api/v1/accounts/me',
       summary: 'The signed-in account',
       tags: ['accounts'],
-      auth: { kind: 'session', stages: ['active', 'credential_setup'] },
+      auth: { kind: 'session', whileSuspended: true, stages: ['active', 'credential_setup'] },
       authorize: ownAccount,
       rateLimit: readLimit,
       audit: { kind: 'none', reason: 'Read-only access to own account' },

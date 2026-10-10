@@ -335,6 +335,35 @@ export class CommunitiesService {
     return id;
   }
 
+  /**
+   * Captures a reported community as the reporter can see it (docs/moderation.md §3); null if it
+   * does not exist or the reporter cannot see it.
+   */
+  async moderationSnapshot(
+    viewer: string,
+    id: string,
+  ): Promise<{ authorId: string; content: Record<string, unknown> } | null> {
+    try {
+      const community = await this.#community(this.#db, id);
+      const view = await this.get(viewer, id);
+      return {
+        authorId: community.owner_id,
+        content: { name: view.name, description: view.description, visibility: view.visibility },
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  async moderationLabel(id: string): Promise<string> {
+    try {
+      const community = await this.#community(this.#db, id);
+      return community.name;
+    } catch {
+      return 'Deleted community';
+    }
+  }
+
   async get(viewer: string, id: string): Promise<z.infer<typeof communitySchema>> {
     const community = await this.#community(this.#db, id);
     const standing = await this.#standing(this.#db, community, viewer);

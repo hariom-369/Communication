@@ -36,6 +36,8 @@ export function routeCatalog(): { routes: RouteDefinition[]; close(): Promise<vo
       CALL_RECORD_RETENTION_DAYS: 90,
       PUSH_SERVICE_HOSTS: [],
       SECURITY_ALERT_RETENTION_DAYS: 180,
+      FRANKING_KEYS: undefined,
+      EVIDENCE_RETENTION_DAYS: 365,
     },
     {
       db: new Kysely<Database>({ dialect: new PostgresDialect({ pool }) }),
