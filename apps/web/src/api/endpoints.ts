@@ -587,6 +587,8 @@ export const endpoints = {
       epoch: number;
       ciphertext: string;
       attachments?: readonly string[];
+      /** Franking commitment (base64, 32 bytes). */
+      commitment?: string;
     },
   ) =>
     api(

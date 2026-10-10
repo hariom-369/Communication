@@ -1157,6 +1157,23 @@ describe("'moderation.grievance', 'moderation.legal_order', 'moderation.dismiss'
       );
     expect(statuses.slice(0, 3)).toEqual([201, 201, 201]);
     expect(statuses).toContain(429);
+    // Rotating addresses within one IPv6 /64 does not reset the limit.
+    const rotated: number[] = [];
+    for (let i = 1; i <= 5; i += 1)
+      rotated.push(
+        (
+          await new TestClient(env.app, { ip: `2001:db8:77:1::${String(i)}` }).post(
+            '/api/v1/grievances',
+            {
+              kind: 'grievance',
+              contact: 'rotate@example.test',
+              description: `Rotating complaint ${String(i)} about nothing`,
+            },
+          )
+        ).statusCode,
+      );
+    expect(rotated.slice(0, 3)).toEqual([201, 201, 201]);
+    expect(rotated.at(-1)).toBe(429);
   });
 
   it('records legal orders for the legal team only, with a 3-hour deadline and legal hold', async () => {
@@ -1436,6 +1453,16 @@ describe('abuse controls', () => {
       statuses.push((await reportUser(reporter, await user(), 'spam')).statusCode);
     expect(statuses.slice(0, 10).every((s) => s === 201)).toBe(true);
     expect(statuses.at(-1)).toBe(429);
+    // Another session from another address (a second device) shares the person's limit.
+    const second = await login(reporter);
+    expect(
+      (
+        await second.post('/api/v1/reports', {
+          target: { kind: 'user', userId: (await user()).id },
+          category: 'spam',
+        })
+      ).statusCode,
+    ).toBe(429);
   });
 
   it('limits new accounts in their first week', async () => {

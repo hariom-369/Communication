@@ -11,6 +11,7 @@ import {
 } from '../../messaging/timeline.js';
 
 import type { UploadProgress } from '../../messaging/store.js';
+import { useHarmfulLinks } from '../../moderation/link-safety.js';
 
 import { AttachmentView, UploadingAttachment } from './AttachmentView.js';
 import { clockTime } from './format.js';
@@ -70,6 +71,8 @@ export interface MessageBubbleProps {
   /** False in announcement-only groups for members (no replies or reactions). */
   canRespond?: boolean;
   onVote?: (choices: number[]) => void;
+  /** Report this message (offered for other people's messages). */
+  onReport?: (() => void) | undefined;
 }
 
 function PollCard({
@@ -139,6 +142,8 @@ export function MessageBubble(props: MessageBubbleProps): ReactNode {
     ((mine && age < DELETE_WINDOW_MS) || (!mine && props.canModerate === true));
   const canRespond = props.canRespond !== false;
   const accepted = message.seq !== null && !message.deleted && !message.undecodable;
+  // Other people's links are checked on this device against the harmful-link list.
+  const harmful = useHarmfulLinks(message.text, !mine && !message.deleted);
   const myReaction = props.message.reactions[props.myId] ?? null;
   const reactionCounts = Object.values(message.reactions).reduce<Record<string, number>>(
     (counts, emoji) => {
@@ -203,6 +208,12 @@ export function MessageBubble(props: MessageBubbleProps): ReactNode {
               />
             ) : message.text === '' ? null : (
               <p className="bubble__text">{message.text}</p>
+            )}
+            {harmful.length === 0 ? null : (
+              <p className="bubble__warning" role="note">
+                ⚠ This message links to a site reported as harmful ({harmful.join(', ')}). Do not
+                enter passwords or payment details there.
+              </p>
             )}
           </>
         )}
@@ -304,6 +315,18 @@ export function MessageBubble(props: MessageBubbleProps): ReactNode {
                   }}
                 >
                   {mine ? 'Delete for everyone' : 'Remove for everyone'}
+                </button>
+              ) : null}
+              {!mine && props.onReport !== undefined ? (
+                <button
+                  type="button"
+                  className="text-button text-button--danger"
+                  onClick={() => {
+                    props.onReport?.();
+                    setActionsOpen(false);
+                  }}
+                >
+                  Report
                 </button>
               ) : null}
             </div>

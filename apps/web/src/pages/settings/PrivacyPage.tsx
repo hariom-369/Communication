@@ -4,6 +4,7 @@ import { useEffect, useId, useState, type SubmitEvent, type ReactNode } from 're
 
 import { errorMessage } from '../../api/client.js';
 import { endpoints } from '../../api/endpoints.js';
+import { moderationEndpoints } from '../../api/moderation-endpoints.js';
 import { PageHeading } from '../../components/PageHeading.js';
 
 type Visibility = 'everyone' | 'contacts' | 'nobody';
@@ -167,6 +168,54 @@ export function PrivacyPage(): ReactNode {
           </div>
         </form>
       )}
+      <BlockedPeople />
     </div>
+  );
+}
+
+/** People this user blocked (docs/moderation.md §2). Nobody is told they were blocked. */
+function BlockedPeople(): ReactNode {
+  const [blocked, setBlocked] = useState<{ userId: string; username: string }[]>();
+  const [error, setError] = useState<string>();
+  useEffect(() => {
+    moderationEndpoints.blocked().then(
+      (list) => setBlocked(list.blocked),
+      (caught: unknown) => setError(errorMessage(caught)),
+    );
+  }, []);
+
+  async function unblock(userId: string) {
+    setError(undefined);
+    try {
+      await moderationEndpoints.unblock(userId);
+      setBlocked((current) => current?.filter((entry) => entry.userId !== userId));
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  }
+
+  return (
+    <section className="settings-section" aria-labelledby="blocked-heading">
+      <h2 id="blocked-heading">Blocked people</h2>
+      <p className="t-field__hint">
+        Blocked people cannot message or call you, add you to groups, or see when you are online.
+        They are not told.
+      </p>
+      {error === undefined ? null : <Alert tone="danger">{error}</Alert>}
+      {blocked === undefined ? null : blocked.length === 0 ? (
+        <p className="empty">You have not blocked anyone.</p>
+      ) : (
+        <ul className="plain-list">
+          {blocked.map((entry) => (
+            <li key={entry.userId} className="button-row">
+              <span>@{entry.username}</span>
+              <Button size="sm" variant="ghost" onClick={() => void unblock(entry.userId)}>
+                Unblock @{entry.username}
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

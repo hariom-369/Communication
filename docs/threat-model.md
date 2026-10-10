@@ -162,3 +162,24 @@ floods (coalescing and a minimum interval). Residual: push services see that and
 is woken; the server knows notification preferences, mutes and quiet hours; what a notification
 shows on the lock screen is the person's choice (default: nothing but "New message"); browsers other than
 Chromium are not covered by automated push tests.
+
+**Phase 11 delta (moderation and safety).** New flows: reports carrying reporter-selected
+plaintext sealed to a moderation key; message franking commitments and server tags on every
+message; a moderation console with evidence views; automated restrictions; public grievance
+form; staff roles. Analysis in [phase-reports/phase-11.md](phase-reports/phase-11.md) and
+ADR-049. Mitigated: fabricated reports of encrypted messages (franking: the server verifies the
+reported plaintext is what the sender's device sent — integration- and E2E-tested; tampering
+yields "unverified", mutation-checked); moderators browsing conversations (no such route; evidence
+only through its case, every view recorded and audited — tested); a single moderator banning or
+referring someone (second reviewer with step-up — tested); suspended accounts continuing to act
+(sessions revoked, server-side route gate — mutation-checked); harassment after blocking
+(server-enforced on every path, including typing); report floods and brigading (per-person
+limits, distinct-reporter counting, automated effect limited to a 24 h new-chat restriction plus
+human review); fresh-account spam waves (first-week limits); phishing links (blocklist in public
+content; private-chat warnings without revealing the link to the server). Residual: the HPKE
+private key can open every reported bundle (KMS custody in production; only reported content);
+the server learns who reported whom and when, and who blocked whom; a reporter chooses what to
+include (selection bias); exact hashing misses altered media; coordinated reporting can impose a
+24 h restriction on a target; staff roles are granted by database operators until the admin
+console (Phase 12); old messages without franking stay unverifiable.
+

@@ -210,6 +210,16 @@ describe('crypto worker engine', () => {
       expect.objectContaining({ seq: message.seq, content }),
     ]);
     expect(await restarted.call('cursor', [CONVERSATION])).toBe(message.seq);
+    // Franking commitment and tag are kept with the record (for verifiable reports).
+    const franked = {
+      ...inbound(alice, (await alice.engine.call('encrypt', [CONVERSATION, content])).ciphertext),
+      commitment: 'c'.repeat(43) + '=',
+      frankingTag: 'f1.tag',
+    };
+    expect(await restarted.call('ingest', [CONVERSATION, franked, [ALICE]])).toMatchObject({
+      status: 'application',
+      record: { franking: { commitment: 'c'.repeat(43) + '=', tag: 'f1.tag' } },
+    });
     expect(await restarted.call('ingest', [CONVERSATION, message, [ALICE]])).toEqual({
       status: 'duplicate',
     });

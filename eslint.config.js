@@ -96,7 +96,7 @@ export default tseslint.config(
   {
     // Return types are inferred from the shared Zod response schemas, which is more precise
     // than restating them by hand.
-    files: ['apps/web/src/api/endpoints.ts'],
+    files: ['apps/web/src/api/endpoints.ts', 'apps/web/src/api/moderation-endpoints.ts'],
     rules: { '@typescript-eslint/explicit-module-boundary-types': 'off' },
   },
   {

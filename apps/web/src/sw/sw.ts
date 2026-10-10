@@ -132,6 +132,8 @@ async function syncConversation(conversationId: string): Promise<Shown> {
             serverTime: message.serverTime,
             clientMessageId: message.clientMessageId,
             ciphertext: message.ciphertext,
+            commitment: message.commitment,
+            frankingTag: message.frankingTag,
           },
           peers,
         ]);

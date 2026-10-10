@@ -290,7 +290,7 @@ franking** (committing AEAD / HMAC commitment over the plaintext, stored by serv
 delivery, per Grubbs et al. 2017). Until reviewed, reports are treated as unverified
 evidence.
 
-**Status.** NEEDS-SECURITY-REVIEW (S-10).
+**Status.** PROPOSED — franking implemented in Phase 11 (ADR-049); NEEDS-SECURITY-REVIEW (S-10).
 
 ## ADR-022 — Bots and automation
 
@@ -968,3 +968,80 @@ the same MLS state; and how to keep user-supplied push endpoints from becoming a
 preferences, mutes and quiet hours (it must, to decide), never what a notification shows.
 Delivery tests run in Chromium only here (Firefox/Safari push are untested in CI; iOS requires
 the installed app). Email change and account deletion alerts arrive with those features.
+
+## ADR-049 — Moderation: sealed report bundles, message franking, cases with legal deadlines (Phase 11)
+
+**Context.** docs/moderation.md fixed the principles (no client-side scanning, no server
+decryption, explicit reporting, due process). Implementing it raised: how a report of end-to-end
+encrypted messages can be trusted when the mailbox deletes ciphertext after delivery; how
+moderators reach evidence without reaching conversations; how deadlines from the IT Rules are
+kept; and what an automated control may do without a person.
+
+**Decision.**
+- **Message franking** (ADR-021; the construction of Facebook Messenger's encrypted
+  conversations as analysed by Grubbs, Lu and Ristenpart, CRYPTO 2017). Every message's content
+  carries a fresh 32-byte key `f`; the sender sends `commitment = HMAC-SHA256(f, exact content
+  JSON)` next to the ciphertext. The server stores it with the message and adds its tag:
+  `HMAC-SHA256(server key, length-prefixed(context, conversation, seq, sender user, sender
+  device, client message id, server time, commitment))`, as `<key id>.<base64url>` from a key ring
+  (`FRANKING_KEYS`, rotatable; old keys verify). Both travel with the delivered message and are
+  kept with the decrypted record on the device. A report is **content verified** only when every
+  selected message has a valid server tag and its commitment opens to the reported JSON with the
+  `f` inside it; otherwise **unverified** (older messages, or tampering). Nothing about franking
+  is kept by the server after delivery: the tag is self-verifying.
+- **Report bundles.** The reporter's device builds `{v, conversationId, reporterId, messages[],
+  media[]}` from its own history: the selected messages, optionally up to 10 earlier ones for
+  context (the person chooses), optionally the decrypted files of selected media messages — and
+  seals it with HPKE (RFC 9180 base mode, DHKEM(P-256, HKDF-SHA256), HKDF-SHA256, AES-128-GCM,
+  `@hpke/core`) to the moderation key, info `tessera report bundle v1`, AAD `info |
+  conversation | reporter`. The server opens it at ingestion (to verify and to match hashes),
+  checks it matches the declared conversation, reporter and sequence numbers, and stores the
+  **sealed** bytes with their SHA-256 (chain of custody). Plaintext is never stored, logged or
+  indexed. Moderators open evidence through a recorded, audited view; the key is the HPKE private
+  key held by the API (`MODERATION_HPKE_PRIVATE_KEY`; KMS-held in production). Public content is
+  captured by the server as the reporter can see it (so a report cannot reach content its
+  reporter could not read) and sealed with the server key ring.
+- **Cases.** One open case per subject and category; reports, grievances, legal orders and
+  automated signals attach to it. Deadlines by category: court and government orders 3 h,
+  non-consensual intimate imagery and synthetic media 2 h, child abuse material acknowledge 1 h /
+  resolve 24 h, threats, terrorism and self-harm 4 h / 24 h, everything else 24 h / 7 days
+  (IT Rules as amended in 2026 — to be confirmed by counsel, L-05). A singleton sweeper records
+  each breach once and logs an alert. Evidence is deleted one year after a case closes unless it
+  is under legal hold.
+- **Enforcement ladder** (moderation.md §5): warn; restrict (no new chats, or no creation of
+  chats, groups, channels or invite links); suspend (signs out every session; afterwards only the
+  account status, appeals, sessions and signing out are reachable — every other signed-in route
+  answers `ACCOUNT_SUSPENDED`); ban; remove a public post or comment; unlist or suspend a
+  channel; refer to the legal team. **Bans and legal referrals take effect only when a second
+  reviewer approves** (a senior moderator, or the legal team for referrals), with step-up
+  re-authentication. Every action is audited, explained to the person by email and in the app
+  (reason code; internal notes are never shown), and can be appealed for 30 days to someone who
+  neither took nor approved it.
+- **Staff.** Roles (`moderator`, `senior_moderator`, `legal`) are granted only from the command
+  line, always with an expiry ≤ 90 days, and audited (interim until the admin console with the
+  corporate identity provider, Phase 12). The moderation console lives in the app for staff.
+  Moderators see cases — never conversations; evidence of a case only through that case.
+- **Automated controls, all without content:** new accounts (first 7 days) may start 20 chats
+  and 5 groups a day, 2 channels a week and 10 invite links a day; when 3 different people report
+  or 5 block someone within a day, that account cannot start new chats for 24 h and a case opens
+  for a person to review. Known child abuse material is matched by exact SHA-256 (hash list
+  imported by the legal role): only when a matching file is attested by a verified (franked)
+  message of the sender is the sender suspended automatically and the case put on legal hold; an
+  unproven match opens a priority case. Harmful link hosts are refused in public posts and
+  comments, and devices warn in chats after a k-anonymous lookup (4-byte SHA-256 prefixes, then
+  the full hashes of one prefix; the server never sees the link).
+- **Blocks** are enforced by the server on every path: new direct chats, messages both ways,
+  one-to-one calls, group adds (skipped without saying why), presence, and typing in the realtime
+  gateway.
+
+**Consequences.** The server can verify reported plaintext without ever holding plaintext of
+unreported messages. A reporter can still choose what to include (selection bias); context is
+optional by design. The franking commitment adds 32 bytes per message (it reveals nothing
+without `f`). Exact hashing misses re-encoded media (perceptual hashing needs a licensed
+list, L-12). The HPKE private key is a high-value secret: whoever holds it can read reported
+evidence (only that). Behaviour signals can be gamed by coordinated reporting; their effect is
+limited to a 24 h new-chat restriction and human review.
+
+**Status.** PROPOSED — implemented; NEEDS-SECURITY-REVIEW S-10 (franking and report
+verification); legal confirmation L-04, L-05, L-12, L-13.
+

@@ -1266,6 +1266,8 @@ export class E2eeSession {
       serverTime: message.serverTime,
       clientMessageId: message.clientMessageId,
       ciphertext: message.ciphertext,
+      commitment: message.commitment,
+      frankingTag: message.frankingTag,
     };
     let result = await this.#crypto.ingest(meta.id, inbound, peers);
     if (result.status === 'no-group') {

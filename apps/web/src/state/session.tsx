@@ -9,10 +9,21 @@ import {
   type ReactNode,
 } from 'react';
 
-import { ApiError } from '../api/client.js';
+import { ApiError, onAccountSuspended } from '../api/client.js';
 import { endpoints } from '../api/endpoints.js';
+import { moderationEndpoints } from '../api/moderation-endpoints.js';
 
-export type SessionStatus = 'loading' | 'anonymous' | 'setup' | 'active' | 'offline';
+/** `suspended`: signed in, but the account is suspended or banned (only its status page). */
+export type SessionStatus = 'loading' | 'anonymous' | 'setup' | 'active' | 'suspended' | 'offline';
+
+/** Active accounts are checked for a suspension or ban (docs/moderation.md §5). */
+async function load(): Promise<{ account: MeResponse; status: SessionStatus }> {
+  const account = await endpoints.me();
+  if (account.status !== 'active') return { account, status: 'setup' };
+  const standing = await moderationEndpoints.standing();
+  const suspended = standing.status === 'suspended' || standing.status === 'banned';
+  return { account, status: suspended ? 'suspended' : 'active' };
+}
 
 interface SessionValue {
   readonly status: SessionStatus;
@@ -35,8 +46,7 @@ export function SessionProvider({ children }: { children: ReactNode }): ReactNod
 
   const refresh = useCallback(async (): Promise<SessionStatus> => {
     try {
-      const account = await endpoints.me();
-      const next: SessionStatus = account.status === 'active' ? 'active' : 'setup';
+      const { account, status: next } = await load();
       setMe(account);
       setStatus(next);
       return next;
@@ -62,11 +72,11 @@ export function SessionProvider({ children }: { children: ReactNode }): ReactNod
   // Initial load: same logic as `refresh`, written as a cancellable effect.
   useEffect(() => {
     let cancelled = false;
-    endpoints.me().then(
-      (account) => {
+    load().then(
+      ({ account, status: next }) => {
         if (cancelled) return;
         setMe(account);
-        setStatus(account.status === 'active' ? 'active' : 'setup');
+        setStatus(next);
       },
       (error: unknown) => {
         if (cancelled) return;
@@ -80,6 +90,9 @@ export function SessionProvider({ children }: { children: ReactNode }): ReactNod
       cancelled = true;
     };
   }, []);
+
+  // Any request refused because the account was suspended in the meantime: show the status page.
+  useEffect(() => onAccountSuspended(() => setStatus('suspended')), []);
 
   const value = useMemo(() => ({ status, me, refresh, clear }), [status, me, refresh, clear]);
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

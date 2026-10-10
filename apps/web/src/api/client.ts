@@ -6,6 +6,14 @@ import {
 } from '@tessera/validation';
 import type { z } from 'zod';
 
+const suspendedListeners = new Set<() => void>();
+
+/** Called when the API refuses a request because the account is suspended or banned. */
+export function onAccountSuspended(listener: () => void): () => void {
+  suspendedListeners.add(listener);
+  return () => suspendedListeners.delete(listener);
+}
+
 /** An error response from the API (RFC 9457 problem details). */
 export class ApiError extends Error {
   readonly problem: ProblemDetails;
@@ -79,6 +87,7 @@ export async function api<S extends z.ZodType>(
   if (!response.ok) {
     const problem = problemDetailsSchema.safeParse(data);
     const error = new ApiError(problem.success ? problem.data : fallbackProblem(response.status));
+    if (error.code === 'ACCOUNT_SUSPENDED') for (const listener of suspendedListeners) listener();
     // A read that hit a rate limit with a short wait is retried once, so a page does not fail
     // (or stay empty) because of a burst; writes are never repeated automatically.
     const wait = error.problem.retryAfterSeconds ?? 1;

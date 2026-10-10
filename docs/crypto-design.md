@@ -22,7 +22,8 @@ Implemented in `packages/crypto-core` (Rust, compiled to WebAssembly for the web
 | §8 Safety numbers | Implemented as specified (version constant `0x5453`); verified against an independent Python implementation. The UI compares the 60 digits; QR comparison arrives with camera-capable clients (the QR payload is already computed). |
 | Multi-device / backups | Device linking (typed code + HPKE), full-access vs messages-only devices, history transfer, encrypted backups with recovery key or passkey PRF — ADR-042, [multi-device.md](multi-device.md), [encrypted-backups.md](encrypted-backups.md). Fuzz target `backup`; `inbound` also covers link payloads and backup restore. |
 | Groups | Policy (roles/settings) as GroupContext extension `0xF0A2` with RequiredCapabilities; every staged commit authorised against the previous policy before merging (adds of new users, removals, policy changes); group cap 256 users (measured, ADR-044); commit/Welcome limit 1 MiB. No new primitive. |
-| §9 Payload | Versioned JSON content (ADR-039) + length padding to buckets. |
+| §9 Payload | Versioned JSON content (ADR-039) + length padding to buckets. **Phase 11 (ADR-049):** every content carries a franking key `f` (32 random bytes); the sender sends HMAC-SHA-256(f, exact content JSON) as the commitment (WebCrypto), the server tags it (HMAC-SHA-256 with a server key ring over length-prefixed delivery fields), and the device keeps commitment and tag with the decrypted record so the message can be reported verifiably. |
+| Abuse reports | Report bundles sealed with HPKE (RFC 9180 base mode, DHKEM(P-256, HKDF-SHA256) / HKDF-SHA256 / AES-128-GCM, `@hpke/core` 1.9 on device and server) to the moderation key; info `tessera report bundle v1`, AAD binds conversation and reporter (ADR-049). No new primitive. NEEDS-SECURITY-REVIEW S-10. |
 | §10 Local storage | IndexedDB per user, AES-256-GCM under a non-extractable key, AAD binds each record to its position; MLS state, history and cursor written in one transaction; state persisted before any ciphertext leaves the worker. Downloaded attachments are cached as their (already encrypted) ciphertext, whose key lives only in the encrypted history; capped at 256 MiB, oldest first. **Phase 10 (ADR-048):** one writer per device — the holder of the device's Web Lock (a tab, or the push service worker when no tab is open); each holder claims a writer number and every commit checks it in its transaction, so a context that lost the lock cannot overwrite newer state. Conversation titles for notifications are stored here too (encrypted). |
 | §11 Parsing | Length limits before parsing; errors returned as values; fuzz targets for certificates, padding, snapshots, all inbound MLS bytes, backups and attachments (nightly CI). WASM panics trap; the worker reloads from the last persisted state. |
 
@@ -169,7 +170,8 @@ Envelope v1 (Protobuf)
     Poll / PollVote
     CallSignal      { call_id, sdp | ice | hangup, dtls_fingerprint }
     GroupMetaUpdate { name, description, avatar(Media) }
-    HistoryTransferOffer, FrankingTag (if ADR-021 adopted)
+    HistoryTransferOffer
+  f                 bytes(32)    # franking key (as built: JSON field `f`, ADR-049)
   }
   padding           bytes        # pad plaintext to bucket sizes (32, 64, 128 … 64 KiB) to reduce length leakage
 ```

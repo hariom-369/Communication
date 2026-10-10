@@ -1,5 +1,5 @@
 import { Aes128Gcm, CipherSuite, DhkemP256HkdfSha256, HkdfSha256 } from '@hpke/core';
-import { REPORT_HPKE_INFO } from '@tessera/validation';
+import { REPORT_HPKE_INFO, reportBundleAad } from '@tessera/validation';
 
 /**
  * The moderation key (docs/moderation.md §3, §8): reporters' devices encrypt report bundles to its
@@ -18,7 +18,7 @@ const encoder = new TextEncoder();
 
 /** Additional data binding a bundle to its conversation and reporter. */
 export function bundleAad(conversationId: string, reporterId: string): Uint8Array {
-  return encoder.encode(`${REPORT_HPKE_INFO}|${conversationId}|${reporterId}`);
+  return encoder.encode(reportBundleAad(conversationId, reporterId));
 }
 
 export class ModerationKey {

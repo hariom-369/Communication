@@ -7,6 +7,7 @@ import type { z } from 'zod';
 import { errorMessage } from '../../api/client.js';
 import { endpoints } from '../../api/endpoints.js';
 import { PageHeading } from '../../components/PageHeading.js';
+import { ReportContentDialog } from '../../moderation/ReportContentDialog.js';
 import { useResource } from '../../lib/use-resource.js';
 import { useSession } from '../../state/session.js';
 
@@ -50,6 +51,7 @@ function ChannelView({ channel, reload }: { channel: Channel; reload: () => void
   const isAdmin = perms !== 0;
   const [tab, setTab] = useState<Tab>('posts');
   const [error, setError] = useState<string>();
+  const [reportingChannel, setReportingChannel] = useState(false);
 
   async function toggleSubscription() {
     setError(undefined);
@@ -104,6 +106,11 @@ function ChannelView({ channel, reload }: { channel: Channel; reload: () => void
         >
           {channel.me.subscribed ? 'Unsubscribe' : 'Subscribe'}
         </Button>
+        {isAdmin ? null : (
+          <Button variant="ghost" onClick={() => setReportingChannel(true)}>
+            Report channel
+          </Button>
+        )}
         {channel.me.subscribed ? (
           <Button
             variant="ghost"
@@ -114,6 +121,11 @@ function ChannelView({ channel, reload }: { channel: Channel; reload: () => void
           </Button>
         ) : null}
       </div>
+      <ReportContentDialog
+        target={reportingChannel ? { kind: 'channel', channelId: channel.id } : null}
+        title="Report channel"
+        onClose={() => setReportingChannel(false)}
+      />
       {tabs.length > 1 ? (
         <div className="segmented" role="tablist" aria-label="Channel sections">
           {tabs.map((t) => (

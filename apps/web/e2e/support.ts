@@ -150,3 +150,41 @@ export async function signUpWithPassword(
   await page.getByRole('heading', { name: 'Security', level: 1 }).waitFor();
   return identity;
 }
+
+/** Runs a query against the E2E database (setup and verification only). */
+export async function dbQuery<T extends Record<string, unknown>>(
+  sql: string,
+  params: unknown[] = [],
+): Promise<T[]> {
+  const url = new URL(process.env['TEST_DATABASE_URL'] ?? '');
+  url.pathname = '/tessera_e2e';
+  const client = new pg.Client({ connectionString: url.toString() });
+  await client.connect();
+  try {
+    return (await client.query<T>(sql, params)).rows;
+  } finally {
+    await client.end();
+  }
+}
+
+/** Grants a moderation role, as the operator command does (services/api/src/cli/staff-roles.ts). */
+export async function grantStaff(
+  username: string,
+  role: 'moderator' | 'senior_moderator' | 'legal',
+): Promise<void> {
+  await dbQuery(
+    `INSERT INTO staff_roles (user_id, role, granted_by, expires_at)
+     SELECT id, $2, 'e2e', now() + interval '1 day' FROM users WHERE username = $1`,
+    [username, role],
+  );
+}
+
+export async function signIn(
+  page: Page,
+  identity: { email: string; password: string },
+): Promise<void> {
+  await page.goto('/login');
+  await page.getByLabel('Email or username').fill(identity.email);
+  await page.getByLabel('Password').fill(identity.password);
+  await page.getByRole('button', { name: 'Sign in with password' }).click();
+}

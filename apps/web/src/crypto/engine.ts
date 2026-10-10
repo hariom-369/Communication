@@ -702,6 +702,16 @@ export class CryptoEngine {
       clientMessageId: message.clientMessageId,
       content: decoder.decode(fromBase64(processed.plaintext)),
     };
+    if (
+      message.commitment !== undefined &&
+      message.commitment !== null &&
+      message.frankingTag !== undefined &&
+      message.frankingTag !== null
+    )
+      record = {
+        ...record,
+        franking: { commitment: message.commitment, tag: message.frankingTag },
+      };
     const authority = this.#authority(conversationId, processed.senderUserId);
     if (authority !== undefined) record = { ...record, authority };
     await this.#persist({

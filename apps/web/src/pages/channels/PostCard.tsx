@@ -6,6 +6,7 @@ import type { z } from 'zod';
 import { errorMessage } from '../../api/client.js';
 import { endpoints } from '../../api/endpoints.js';
 import { useResource } from '../../lib/use-resource.js';
+import { ReportContentDialog } from '../../moderation/ReportContentDialog.js';
 import { shortTime } from '../chats/format.js';
 
 export type ChannelPost = z.infer<typeof channelPostSchema>;
@@ -30,6 +31,7 @@ export function PostCard(props: {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(post.body);
   const [commentsOpen, setCommentsOpen] = useState(false);
+  const [reporting, setReporting] = useState(false);
   const mine = post.authorId === props.myId && props.canPost;
   const published = post.status === 'published';
 
@@ -176,7 +178,17 @@ export function PostCard(props: {
             Delete
           </Button>
         ) : null}
+        {post.authorId === props.myId || !published ? null : (
+          <Button size="sm" variant="ghost" onClick={() => setReporting(true)}>
+            Report
+          </Button>
+        )}
       </div>
+      <ReportContentDialog
+        target={reporting ? { kind: 'post', channelId, postId: post.id } : null}
+        title="Report post"
+        onClose={() => setReporting(false)}
+      />
       {commentsOpen ? (
         <Comments
           channelId={channelId}
@@ -295,6 +307,7 @@ function Comments(props: {
     [props.channelId, props.postId],
   );
   const comments = useResource(load);
+  const [reported, setReported] = useState<string | null>(null);
   const [body, setBody] = useState('');
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -315,6 +328,15 @@ function Comments(props: {
 
   return (
     <section className="channel-comments stack" aria-label="Comments">
+      <ReportContentDialog
+        target={
+          reported === null
+            ? null
+            : { kind: 'comment', channelId: props.channelId, commentId: reported }
+        }
+        title="Report comment"
+        onClose={() => setReported(null)}
+      />
       {comments.error === undefined ? null : <Alert tone="danger">{comments.error}</Alert>}
       <ul className="member-list">
         {(comments.data?.comments ?? []).map((comment) => (
@@ -338,6 +360,11 @@ function Comments(props: {
                 Delete comment
               </Button>
             ) : null}
+            {comment.authorId === props.myId ? null : (
+              <Button size="sm" variant="ghost" onClick={() => setReported(comment.id)}>
+                Report comment
+              </Button>
+            )}
           </li>
         ))}
       </ul>

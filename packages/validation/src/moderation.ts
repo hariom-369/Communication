@@ -47,6 +47,10 @@ export const MAX_REPORT_MEDIA = 10;
 export const MAX_REPORT_BUNDLE_BYTES = 6 * 1024 * 1024;
 /** HPKE info string for report bundles (binds the ciphertext to this use). */
 export const REPORT_HPKE_INFO = 'tessera report bundle v1' as const;
+/** HPKE additional data: binds a sealed bundle to its conversation and reporter. */
+export function reportBundleAad(conversationId: string, reporterId: string): string {
+  return `${REPORT_HPKE_INFO}|${conversationId}|${reporterId}`;
+}
 
 const base64 = z.string().regex(/^[A-Za-z0-9+/]*={0,2}$/);
 const base64url = z.string().regex(/^[A-Za-z0-9_-]+$/);

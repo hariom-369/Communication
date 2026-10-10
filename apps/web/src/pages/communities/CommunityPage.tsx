@@ -12,6 +12,7 @@ import type { z } from 'zod';
 import { errorMessage } from '../../api/client.js';
 import { endpoints } from '../../api/endpoints.js';
 import { PageHeading } from '../../components/PageHeading.js';
+import { ReportContentDialog } from '../../moderation/ReportContentDialog.js';
 import { useResource } from '../../lib/use-resource.js';
 import { useMessaging, useMessagingStore } from '../../messaging/provider.js';
 import { useSession } from '../../state/session.js';
@@ -61,6 +62,7 @@ function CommunityView({
   const { me } = community;
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const [reporting, setReporting] = useState(false);
 
   async function join() {
     setBusy(true);
@@ -88,6 +90,16 @@ function CommunityView({
         The community’s name, rules, roles and member list are visible to Tessera’s servers. Each
         space is an end-to-end encrypted group: only its members’ devices can read it.
       </p>
+      <div className="button-row">
+        <Button size="sm" variant="ghost" onClick={() => setReporting(true)}>
+          Report community
+        </Button>
+      </div>
+      <ReportContentDialog
+        target={reporting ? { kind: 'community', communityId: community.id } : null}
+        title="Report community"
+        onClose={() => setReporting(false)}
+      />
       {error === undefined ? null : <Alert tone="danger">{error}</Alert>}
       {!me.member ? (
         <section className="settings-section stack" aria-label="Join">

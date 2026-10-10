@@ -1,6 +1,49 @@
 # Abuse prevention and moderation
 
-Status: PROPOSED · Decisions: ADR-021, 022 · Legal: L-04, L-05, L-12, L-13
+Status: IMPLEMENTED (Phase 11, pending review S-10) · Decisions: ADR-021, 022, 049 · Legal: L-04, L-05, L-12, L-13
+
+## 0. As built (Phase 11)
+
+- **Blocks** (§2) are enforced by the server on new direct chats, messages in both directions,
+  one-to-one calls, group adds (skipped as "not allowed", without saying why), presence and
+  typing. Blocking is private; the blocked person is not told. *Not built:* the message-requests
+  inbox for unknown senders (tracked before public beta); per-person mute (conversations can be
+  muted, Phase 10).
+- **Reporting** (§3) works as designed, with **message franking implemented** (ADR-049): every
+  message is franked, so a report is *content verified* when the server's tag and the sender's
+  commitment both check out, and *unverified* otherwise. The sheet lets the reporter pick
+  messages, up to 10 earlier ones, and whether to include decrypted files, then seals the bundle
+  with HPKE to the moderation key (`GET /moderation/key`). Reports of people, channels, posts,
+  comments and communities capture what the reporter can see on the server. Reporting can also
+  block. Reporters see their reports' status (received / action taken / no violation).
+- **Automated controls** (§4): per-route GCRA limits (reports 30/h per person, grievances 5/h per
+  address or IPv6 /64); new accounts (7 days): 20 new chats and 5 groups a day, 2 channels a week,
+  10 invite links a day; behaviour signal: 3 distinct reporters or 5 blockers within 24 h →
+  24 h new-chat restriction plus a case; harmful-link blocklist (refused in public posts and
+  comments; on devices, warnings after a k-anonymous prefix lookup); known child abuse material by
+  exact SHA-256 (in reports; public channel media are not uploaded as files in this release).
+  *Not built:* lookalike-domain and IDN homograph detection, public-upload malware scanning (no
+  public uploads yet), risk scores and CAPTCHA-style challenges, perceptual hashing (L-12),
+  reporting to authorities (L-12, legal process).
+- **Enforcement** (§5) and **moderator workflow** (§6): as described, with bans and legal
+  referrals waiting for a second reviewer (with re-authentication); deadlines per §6 recorded on
+  each case and swept every minute (`MODERATION_SWEEP_INTERVAL_MS`); queue by priority and
+  deadline with countdowns; case view with reports, sealed evidence (opened explicitly, every view
+  recorded on the case and audited; images blurred until revealed; matches of known abuse
+  material only for the legal role), earlier decisions about the person, timeline and notes.
+  The console is in the app for staff (`/moderation`) until the admin console (Phase 12); staff
+  roles come from the operator command `pnpm --filter @tessera/api staff grant <user> <role>
+  --days <1-90> --by <operator>`.
+- **Appeals** (§7): in the account status page (reachable while suspended), within 30 days, decided
+  by someone who did not take or approve the decision; outcome by email and in the app; the
+  Grievance Appellate Committee is named in grievance emails.
+- **Grievances and orders:** a public grievance-officer form (`/grievance`, no account needed)
+  with emailed reference, acknowledgement and resolution deadlines and outcome; court and
+  government orders recorded by the legal role (3 h, legal hold).
+- **Evidence** (§8): HPKE-sealed bundles or server-sealed snapshots with SHA-256 at ingestion; 1
+  year after closure unless on legal hold.
+- **Transparency** (§9): monthly figures (reports, grievances, orders, cases opened and resolved,
+  missed deadlines, actions by kind, appeals and outcomes, automated actions) for senior staff.
 
 ## 1. Principles
 
@@ -90,3 +133,14 @@ Rate-limit bypass attempts (IP rotation, multiple devices, IPv6 /64 rotation); b
 enforcement across all paths (message, call, group add, presence); report bundle
 integrity; moderator can't access unreported content (authorization tests); SLA timer
 accuracy; appeal flow; audit completeness.
+
+| Required test | Where |
+|---|---|
+| Rate-limit bypass | `moderation.integration.test.ts` › abuse controls (per-person report limit across a second session and address), grievances (per address, and across addresses in one IPv6 /64); `rate-limit.test.ts` (/64 grouping) |
+| Block enforcement on every path | `moderation.integration.test.ts` › blocks (new chats both ways, messages both ways, calls, group adds both ways, presence); `gateway.integration.test.ts` › typing; E2E `moderation.spec.ts` |
+| Report bundle integrity | integration: franked messages verified; altered plaintext, forged tag → unverified; bundle for another conversation, reporter, message set or garbage → refused; sealed bytes hashed, no plaintext in storage, events or logs; unit: `franking.test.ts` (API and web), `report-bundle.test.ts`, HPKE binding |
+| No access to unreported content | integration: staff routes closed to everyone else; evidence only through its own case (E2EE and server snapshots); no conversation access; the unreported message never appears; CSAM-matched evidence legal-only |
+| SLA timer accuracy | integration › service-level deadlines (each category's deadlines to the millisecond; sweep just before / after each deadline; breach once; queue order); `moderation.test.ts` (rules table) |
+| Appeal flow | integration (while suspended; once; not someone else's; not the decision-maker; overturn reverses; window); E2E (report → evidence → suspension → appeal → overturn by a colleague) |
+| Audit completeness | integration › every staff decision present in the hash-chained audit log, chain verified |
+| Mutation checks | 22 of 22 seeded faults caught (block paths, second reviewer, approver role, appeal independence, evidence scoping, CSAM legal-only, suspension gate, breach once, commitment/tag checks, proven-sender rule, distinct reporters, new-account limit, legal hold, session revocation, harmful links, legal-order role, bundle binding) plus the gateway typing filter |

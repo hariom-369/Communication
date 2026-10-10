@@ -70,30 +70,9 @@ no advertising profiling at launch.
 | Attachment existence, ciphertext size, uploader, blob↔conversation link, upload/download times | Yes | Until the referencing message expires (≤ 30 days); unsent uploads 1 day | [media.md](media.md), ADR-043. File names, types, dimensions, durations, previews and keys are **inside** the encrypted message only |
 | Group membership, roles (owner/admin/member), who added whom, the two settings "members can add" and "announcements only", invitations, join requests, bans | Yes | while the group exists (rows deleted with it) | needed to route and enforce the API; the authoritative roles are also end-to-end in the group (ADR-044) |
 | Communities: name, description, rules (and which version each member accepted), visibility, roles and their permissions, members and their roles, bans, invite-link usage, space names and who is in each space | Yes | while the community exists (deleted with it; ban rows kept until lifted or the community is deleted) | needed to list, search and enforce communities (ADR-045); public communities are searchable by any signed-in user |
-| Group name, description, pins, polls, votes, mentions | **No** | — | E2EE content |
-| Invite links: token digest, expiry, use count, optional preview title | Yes | until revoked/expired and the group is deleted | the preview title is the only group text the server can read, and only if an admin sets one |
-| Channels: handle, title, description, visibility, posts, polls and votes, reactions, comments, admins, subscribers, invite-link usage | Yes — **not end-to-end encrypted** (labelled in the UI) | until deleted by the author/admin or the channel is deleted | ADR-012/046; public channels and their posts are visible to any signed-in user |
-| Channel views | Aggregate only: unique viewers per post per day (HyperLogLog), never who viewed | daily keys 40 days; daily totals while the post exists | owners see totals, never individuals |
-| Link previews in channel posts | The URL and the page's title/description/site name, fetched by the server | with the post; fetch cache 1 h | fetched by the SSRF-hardened fetcher, no images |
-| Push notification content | No (content-free push: conversation, channel or call id only, padded, encrypted to the browser) | — | [notifications.md](notifications.md), ADR-048; what a notification shows is decided and decrypted on the device |
-| Push subscriptions (push service endpoint and keys, session, device), delivery successes/failures | Yes | until the session or device ends (then deleted by the hourly sweep) | the push service (Google, Mozilla, Apple, Microsoft) sees that and when a device is woken, never why |
-| Notification preferences, quiet hours (incl. time zone), muted conversations | Yes | while set; expired mutes deleted | needed to decide whether to wake a device |
-| Account security alerts (headline and details such as device type, network prefix, time) | Yes | 180 days (`SECURITY_ALERT_RETENTION_DAYS`) | shown in the app on every device; also emailed |
-| Channel posts, comments, public profiles | Yes | until deleted | not E2EE |
-| Search queries (public directory) | Yes | 30 days, not linked to profile for analytics | |
-| Reported content | Yes — only what the reporter submits | case retention | ADR-021 |
-| Device platform/UA family, app version | Yes | while device active | |
-| Payment details | Tokens only (provider holds card/UPI data) | per tax law | |
-
-This table is published (user-facing version) in the privacy policy.
-
-## 5. Analytics privacy
-
-Event schema allow-list (no free text, no content, no recipient IDs); user ID replaced by a
-rotating pseudonymous ID for product analytics; aggregation thresholds (k ≥ 20) for
-dashboards; self-hosted analytics pipeline (no third-party trackers in the app origin).
-
-## 6. Children
-
-Launch is 18+ (L-06). Age declaration at sign-up; accounts reported/identified as minors are
-restricted pending the verifiable parental consent design required by DPDP.
+| Blocks (who blocked whom, when) | Yes | until unblocked or an account is deleted | enforced by the server on every path; never shown to the blocked person ([moderation.md](moderation.md)) |
+| Message franking commitment and server tag per message | Yes | with the ciphertext (≤ 30 days) | an HMAC commitment that reveals nothing without the key inside the encrypted message (ADR-049) |
+| Reports: reporter, target, category, details, time, verification result | Yes | 1 year after the case closes (legal hold: longer) | the reporter is never shown to the reported person |
+| Reported messages and files | Only as reported: sealed to the moderation key, opened for verification and for recorded moderator views | 1 year after the case closes (legal hold: longer) | only what the reporter selected ([moderation.md](moderation.md) §3) |
+| Moderation cases, actions, notices, appeals, grievances (with the complainant's email), legal orders | Yes | case lifetime + 1 year; audit log entries per audit policy | needed for due process and legal duties |
+| Link checks in chats | Only a 4-byte hash prefix shared by many hosts, when one matches | not stored | the link itself never leaves the device |

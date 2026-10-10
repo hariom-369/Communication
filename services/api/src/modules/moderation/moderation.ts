@@ -1061,7 +1061,9 @@ export class ModerationService {
       .where('expires_at', '>', new Date())
       .execute();
     const roles = rows.map((row) => row.role);
-    this.#staffCache.set(userId, { at: Date.now(), roles });
+    // Only staff are cached: a grant applies at once, a revocation within STAFF_CACHE_MS.
+    if (roles.length > 0) this.#staffCache.set(userId, { at: Date.now(), roles });
+    else this.#staffCache.delete(userId);
     return roles;
   }
 

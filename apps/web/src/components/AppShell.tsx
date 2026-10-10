@@ -5,6 +5,7 @@ import { NavLink, Outlet, useLocation } from 'react-router';
 import { errorMessage } from '../api/client.js';
 import { endpoints } from '../api/endpoints.js';
 import { useMessaging, useMessagingStore } from '../messaging/provider.js';
+import { useStaffRoles } from '../moderation/use-staff.js';
 import { useSecurityAlerts } from '../notifications/use-alerts.js';
 import { CallOverlay } from '../pages/calls/CallOverlay.js';
 import { useSession } from '../state/session.js';
@@ -21,6 +22,7 @@ const NAV: readonly { to: string; label: string }[] = [
   { to: '/settings/privacy', label: 'Privacy' },
   { to: '/settings/notifications', label: 'Notifications' },
   { to: '/settings/account', label: 'Account' },
+  { to: '/settings/status', label: 'Account status' },
 ];
 
 /**
@@ -61,6 +63,12 @@ export function AppShell(): ReactNode {
   const [error, setError] = useState<string>();
   const { device } = useMessaging();
   const { unread } = useSecurityAlerts();
+  const staffRoles = useStaffRoles();
+  // The console is offered to staff only (the server enforces every staff action anyway).
+  const nav =
+    staffRoles !== null && staffRoles.length > 0
+      ? [...NAV, { to: '/moderation', label: 'Moderation' }]
+      : NAV;
 
   async function signOut() {
     setSigningOut(true);
@@ -86,7 +94,7 @@ export function AppShell(): ReactNode {
       <nav className="app-shell__rail" aria-label="Main">
         <Brand />
         <ul className="app-shell__nav">
-          {NAV.map((item) => (
+          {nav.map((item) => (
             <li key={item.to}>
               <NavLink
                 to={item.to}

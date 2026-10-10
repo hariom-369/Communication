@@ -63,6 +63,14 @@ export const contentSchema = z.object({
   id: messageRef,
   /** Sender's clock, informational only; ordering uses the server sequence number. */
   sentAt: z.number().int().nonnegative(),
+  /**
+   * Franking key (ADR-021, 32 bytes base64): the sender commits to this exact JSON with
+   * HMAC-SHA256 under it, so a recipient who reports the message can prove what was sent.
+   */
+  f: z
+    .string()
+    .regex(/^[A-Za-z0-9+/]{43}=$/)
+    .optional(),
   body: z.discriminatedUnion('kind', [
     z.object({
       kind: z.literal('text'),

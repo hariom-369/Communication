@@ -7,6 +7,7 @@ import { HOME_PATH } from './home.js';
 import { MessagingProvider } from './messaging/provider.js';
 import { ChatsPage } from './pages/chats/ChatsPage.js';
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage.js';
+import { GrievancePage } from './pages/GrievancePage.js';
 import { ChannelInvitePage } from './pages/channels/ChannelInvitePage.js';
 import { ChannelPage } from './pages/channels/ChannelPage.js';
 import { ChannelsPage } from './pages/channels/ChannelsPage.js';
@@ -18,7 +19,10 @@ import { LoginPage } from './pages/LoginPage.js';
 import { MfaPage } from './pages/MfaPage.js';
 import { NotFoundPage } from './pages/NotFoundPage.js';
 import { ResetPasswordPage } from './pages/ResetPasswordPage.js';
+import { CaseView } from './pages/moderation/CaseView.js';
+import { ModerationPage } from './pages/moderation/ModerationPage.js';
 import { AccountPage } from './pages/settings/AccountPage.js';
+import { AccountStatusPage, SuspendedScreen } from './pages/settings/AccountStatusPage.js';
 import { DevicesPage } from './pages/settings/DevicesPage.js';
 import { NotificationsPage } from './pages/settings/NotificationsPage.js';
 import { PrivacyPage } from './pages/settings/PrivacyPage.js';
@@ -65,6 +69,8 @@ function Guard({
   if (status === 'loading') return <Loading />;
   if (status === 'offline') return <Offline />;
   if (allow.includes(status)) return children;
+  // A suspended or banned account sees only its status (and can appeal or sign out).
+  if (status === 'suspended') return <SuspendedScreen />;
   // Finishing credential setup lands on Security with a welcome message.
   if (status === 'active') {
     return pathname === '/setup' ? (
@@ -124,6 +130,7 @@ const router = createBrowserRouter([
   },
   { path: '/forgot-password', element: <ForgotPasswordPage /> },
   { path: '/reset-password', element: <ResetPasswordPage /> },
+  { path: '/grievance', element: <GrievancePage /> },
   {
     path: '/setup',
     element: (
@@ -141,6 +148,9 @@ const router = createBrowserRouter([
       { path: '/settings/privacy', element: <PrivacyPage /> },
       { path: '/settings/notifications', element: <NotificationsPage /> },
       { path: '/settings/account', element: <AccountPage /> },
+      { path: '/settings/status', element: <AccountStatusPage /> },
+      { path: '/moderation', element: <ModerationPage /> },
+      { path: '/moderation/cases/:caseId', element: <CaseView /> },
       { path: '/chats', element: <ChatsPage /> },
       { path: '/chats/:conversationId', element: <ChatsPage /> },
       { path: '/invite/:token', element: <InvitePage /> },

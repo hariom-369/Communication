@@ -6,6 +6,7 @@ import { expect, test } from '@playwright/test';
 import {
   addVirtualAuthenticator,
   expireStepUp,
+  grantStaff,
   inbox,
   newIdentity,
   signUpWithPassword,
@@ -236,12 +237,12 @@ test.describe('accessibility', () => {
       });
       expect(violations).toEqual([]);
     };
-    for (const path of ['/login', '/signup', '/forgot-password']) {
+    for (const path of ['/login', '/signup', '/forgot-password', '/grievance']) {
       await page.goto(path);
       await page.getByRole('heading', { level: 1 }).waitFor();
       await audit();
     }
-    await signUpWithPassword(page);
+    const me = await signUpWithPassword(page);
     await page.getByText('This device').waitFor();
     await audit();
     await page.getByRole('link', { name: 'Privacy' }).click();
@@ -328,6 +329,30 @@ test.describe('accessibility', () => {
     await audit();
     await page.getByRole('tab', { name: 'Analytics' }).click();
     await page.getByRole('heading', { name: 'Recent posts' }).waitFor();
+    await audit();
+    // Safety (Phase 11): account status, reporting from a chat, the moderation console.
+    await page.getByRole('link', { name: 'Account status' }).click();
+    await page.getByRole('heading', { name: 'Your reports' }).waitFor();
+    await audit();
+    await page.getByRole('link', { name: 'Chats' }).click();
+    await page.getByRole('link', { name: new RegExp(`@${peer.username}`) }).click();
+    await page.getByRole('button', { name: 'Details' }).click();
+    await page.getByRole('button', { name: `Report @${peer.username}` }).click();
+    const report = page.getByRole('dialog', { name: `Report @${peer.username}` });
+    await report.getByLabel('What is wrong?').waitFor();
+    await audit();
+    await report.getByLabel('What is wrong?').selectOption({ label: 'Spam or unwanted messages' });
+    await report.getByRole('button', { name: 'Send report' }).click();
+    await report.getByRole('button', { name: 'Done' }).click();
+    await grantStaff(me.username, 'senior_moderator');
+    await page.reload();
+    await page.getByRole('link', { name: 'Moderation' }).click();
+    await page.getByRole('heading', { name: 'Cases' }).waitFor();
+    await audit();
+    await page
+      .getByRole('link', { name: new RegExp(`Spam or unwanted messages · @${peer.username}`) })
+      .click();
+    await page.getByRole('heading', { name: 'Take action' }).waitFor();
     await audit();
     await other.close();
     await context.close();

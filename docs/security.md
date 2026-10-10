@@ -116,7 +116,14 @@ networks, so thousands of legitimate users can share one IPv4 address. Therefore
 - route limits on **authenticated** routes are keyed per user, not per IP;
 - public routes (sign-up, login, reset) combine a CGNAT-tolerant per-IP limit with strict
   per-identifier limits (per email / username), which are the real brute-force control;
-- risk-based challenges (CAPTCHA-style) for abusive sources are a Phase 11 item.
+- risk-based challenges (CAPTCHA-style) for abusive sources are deferred (Phase 12/15; not
+  built in Phase 11).
+
+**Abuse controls (implemented in Phase 11, [moderation.md](moderation.md) §0).** New-account
+limits (first 7 days), per-person report limits (closed on store failure), a per-address limit
+on the public grievance form, automated new-chat restriction on behaviour signals, a suspension
+gate on every signed-in route (`whileSuspended` routes excepted: status, appeals, sessions,
+sign-out), and server-enforced blocks.
 A regression test ("many people behind one shared IP") guards this behaviour.
 
 ## 8. Error handling
@@ -132,6 +139,8 @@ logs. `Server`/`X-Powered-By` headers removed.
 | DB/Valkey credentials | Secrets Manager (+ IAM auth for RDS where possible) | 30 days automated |
 | Password pepper, TOTP KEK, cursor HMAC key | KMS (envelope) | yearly, versioned |
 | VAPID keys, TURN shared secret, LiveKit API key | Secrets Manager | 90 days (TURN: 24 h overlap) |
+| Franking key ring (`FRANKING_KEYS`) | KMS (envelope) | yearly, versioned (old ids keep verifying) |
+| Moderation HPKE key pair (`MODERATION_HPKE_*`) | KMS-held private key | on staff change / yearly; old evidence needs the old key until it expires |
 | Payment provider keys, webhook secrets | Secrets Manager | on staff change / yearly |
 | Release signing key | Sigstore keyless (OIDC) + HSM-backed key for manifest | per policy |
 
@@ -154,6 +163,12 @@ Append-only `audit_log`, hash-chained (each row includes hash of previous), expo
 hourly to write-once storage (S3 Object Lock, compliance mode). Covers: auth events,
 session/device changes, admin actions, moderation decisions, data exports/deletions,
 permission changes, key-publication events, billing state changes.
+
+Moderation (Phase 11) records every staff decision (`moderation.<action>`, approvals,
+reversals, appeal outcomes, dismissals, legal orders, blocklist and hash-list changes), every
+evidence view (`moderation.evidence_viewed`) and staff-role grants and revocations; each case
+also keeps its own append-only timeline. The integration suite checks that each of these is
+present and that the chain verifies.
 
 ## 12. Browser storage policy
 

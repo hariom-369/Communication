@@ -85,6 +85,11 @@ export interface HistoryRecord {
   /** Application content (JSON text), or null when it could not be decrypted. */
   readonly content: string | null;
   /**
+   * Message franking (ADR-021): the sender's commitment to `content` and the server's tag over
+   * it, as delivered. Kept so the message can be reported verifiably.
+   */
+  readonly franking?: { readonly commitment: string; readonly tag: string };
+  /**
    * What the sender was allowed to do under the authenticated group policy when the message was
    * decrypted (groups only; absent for 1:1 conversations). Admin-only content such as pins and
    * moderation deletes is honoured only when this allows it.
@@ -108,6 +113,8 @@ export interface InboundMessage {
   readonly serverTime: string;
   readonly clientMessageId: string;
   readonly ciphertext: string;
+  readonly commitment?: string | null;
+  readonly frankingTag?: string | null;
 }
 
 export type IngestResult =

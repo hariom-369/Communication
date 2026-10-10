@@ -18,6 +18,7 @@ import {
   type MessageContent,
 } from './content.js';
 import type { MediaTransfer } from './media-transfer.js';
+import { frank } from './franking.js';
 import { SecurityBlocked, roleIn, type ConversationSecurity, type DeviceStatus } from './e2ee.js';
 import type { SafetyNumber } from '../crypto/protocol.js';
 import { RealtimeClient, type ConnectionStatus } from './realtime-client.js';
@@ -263,6 +264,8 @@ export interface StoreOptions {
   readonly createRealtime?: (
     options: ConstructorParameters<typeof RealtimeClient>[0],
   ) => Pick<RealtimeClient, 'start' | 'stop' | 'sendTyping' | 'reconnectNow' | 'interrupt'>;
+  /** Message franking (default: WebCrypto, see ./franking.ts). */
+  readonly frank?: typeof frank;
 }
 
 function parseContent(json: string | null): MessageContent | null {
@@ -1552,7 +1555,8 @@ export class MessagingStore {
     }
     entry.attempts += 1;
     try {
-      const json = JSON.stringify(entry.content);
+      // Every message is franked, so any of them can later be reported verifiably.
+      const { json, commitment } = await (this.#options.frank ?? frank)(entry.content);
       const encrypted = await this.#options.security.encrypt(conversation.meta, json);
       const body = entry.content.body;
       const result = await this.#options.api.sendMessage(entry.conversationId, {
@@ -1560,6 +1564,7 @@ export class MessagingStore {
         senderDeviceId: encrypted.senderDeviceId,
         epoch: encrypted.epoch,
         ciphertext: encrypted.ciphertext,
+        commitment,
         ...(body.kind === 'media' ? { attachments: [body.attachment.media.blobId] } : {}),
       });
       conversation.blocked = null;

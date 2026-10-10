@@ -8,6 +8,7 @@ import { callErrorMessage } from '../../calls/manager.js';
 import { useCalls, useMessaging, useMessagingStore } from '../../messaging/provider.js';
 import { roleIn } from '../../messaging/e2ee.js';
 import type { ConversationView as ConversationState } from '../../messaging/store.js';
+import { useBlocked } from '../../moderation/use-blocks.js';
 import { useSession } from '../../state/session.js';
 
 import { CallEntry } from './CallEntry.js';
@@ -18,6 +19,7 @@ import { GroupPanel } from './GroupPanel.js';
 import { MessageBubble } from './MessageBubble.js';
 import { MuteControl } from './MuteControl.js';
 import { PollDialog } from './PollDialog.js';
+import { ReportDialog } from './ReportDialog.js';
 import { SafetyNumber } from './SafetyNumber.js';
 import { SecurityNotices } from './SecurityNotices.js';
 import { conversationTitle, mentionsIn } from './titles.js';
@@ -95,6 +97,7 @@ export function ConversationView({ conversation }: { conversation: ConversationS
   const peer = peerOf(conversation, myId);
   const isGroup = conversation.meta.kind === 'group';
   const presence = usePresence(isGroup ? null : peer.userId);
+  const { blocked, setBlocked } = useBlocked(isGroup ? null : peer.userId);
   const location = useLocation();
   const [notice, setNotice] = useState<string | undefined>(
     (location.state as { notice?: string } | null)?.notice,
@@ -103,6 +106,7 @@ export function ConversationView({ conversation }: { conversation: ConversationS
   const now = useNow(30_000);
   const [context, setContext] = useState<{ kind: 'reply' | 'edit'; id: string } | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [reporting, setReporting] = useState<{ messageId: string | null } | null>(null);
   const [error, setError] = useState<string>();
   const bottom = useRef<HTMLDivElement>(null);
   const { timeline, meta } = conversation;
@@ -156,6 +160,20 @@ export function ConversationView({ conversation }: { conversation: ConversationS
         ? calls?.join(conversationId, groupCall)
         : calls?.start(conversationId, media);
     work?.catch((caught: unknown) => setError(callErrorMessage(caught)));
+  }
+
+  async function toggleBlock(next: boolean) {
+    setError(undefined);
+    if (
+      next &&
+      !window.confirm(`Block @${peer.username}? You will not get their messages or calls.`)
+    )
+      return;
+    try {
+      await setBlocked(next);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
   }
 
   async function setTimer(seconds: 0 | 86400 | 604800 | 7776000) {
@@ -308,6 +326,7 @@ export function ConversationView({ conversation }: { conversation: ConversationS
                     }
                     canRespond={!readOnly}
                     onVote={(choices) => store.vote(conversationId, id, choices)}
+                    onReport={() => setReporting({ messageId: id })}
                   />
                 );
               })}
@@ -315,6 +334,14 @@ export function ConversationView({ conversation }: { conversation: ConversationS
           )}
           <div ref={bottom} />
         </div>
+        {blocked ? (
+          <div className="conversation__notice composer-locked" role="status">
+            <p>You blocked @{peer.username}. Unblock them to send messages.</p>
+            <Button size="sm" variant="ghost" onClick={() => void toggleBlock(false)}>
+              Unblock
+            </Button>
+          </div>
+        ) : null}
         {readOnly ? (
           <p className="conversation__notice composer-locked" role="status">
             {conversation.removed
@@ -338,7 +365,7 @@ export function ConversationView({ conversation }: { conversation: ConversationS
             />
           </>
         ) : null}
-        {readOnly ? null : (
+        {readOnly || blocked ? null : (
           <Composer
             key={context === null ? 'new' : `${context.kind}:${context.id}`}
             context={
@@ -381,6 +408,12 @@ export function ConversationView({ conversation }: { conversation: ConversationS
           <h2 id="details-heading">Group details</h2>
           <MuteControl conversationId={conversationId} />
           <GroupPanel conversation={conversation} myId={myId} />
+          <h3>Safety</h3>
+          <div className="button-row">
+            <Button size="sm" variant="ghost" onClick={() => setReporting({ messageId: null })}>
+              Report group
+            </Button>
+          </div>
         </aside>
       ) : detailsOpen ? (
         <aside className="conversation__details" aria-labelledby="details-heading">
@@ -425,8 +458,29 @@ export function ConversationView({ conversation }: { conversation: ConversationS
           <p className="t-field__hint">
             Recipients can still copy or photograph messages before they disappear.
           </p>
+          <h3>Safety</h3>
+          <div className="button-row">
+            <Button size="sm" variant="ghost" onClick={() => void toggleBlock(!blocked)}>
+              {blocked ? `Unblock @${peer.username}` : `Block @${peer.username}`}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setReporting({ messageId: null })}>
+              Report @{peer.username}
+            </Button>
+          </div>
         </aside>
       ) : null}
+      <ReportDialog
+        open={reporting !== null}
+        onClose={() => setReporting(null)}
+        conversation={conversation}
+        myId={myId}
+        peer={isGroup ? null : peer}
+        initialMessageId={reporting?.messageId ?? null}
+        username={username}
+        onBlocked={(userId) => {
+          if (!isGroup && userId === peer.userId) void setBlocked(true).catch(() => undefined);
+        }}
+      />
     </div>
   );
 }

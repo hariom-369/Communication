@@ -45,6 +45,13 @@ function meta(overrides: Partial<Conversation> = {}): Conversation {
 const encode = (content: unknown) => btoa(encodeURIComponent(JSON.stringify(content)));
 const decode = (ciphertext: string) => decodeURIComponent(atob(ciphertext));
 
+/** Franking without WebCrypto's thread hop (fake timers): a fixed commitment, same JSON shape. */
+const testFrank = (content: MessageContent) =>
+  Promise.resolve({
+    json: JSON.stringify({ ...content, f: 'A'.repeat(43) + '=' }),
+    commitment: 'C'.repeat(43) + '=',
+  });
+
 function mailbox(
   seq: number,
   senderUserId: string,
@@ -225,6 +232,7 @@ function createStore(
     api,
     security: security.port,
     me: { id: ME },
+    frank: testFrank,
     ...(media === undefined ? {} : { media }),
     createRealtime: (options) => {
       frameHandler = options.onFrame;
@@ -470,6 +478,7 @@ describe('MessagingStore', () => {
       api: api,
       security: fakeSecurity().port,
       me: { id: ME },
+      frank: testFrank,
       unseen: {
         load: () => Promise.resolve({ [CONVERSATION]: 2 }),
         clear: (id) => cleared.push(id),
@@ -622,8 +631,13 @@ describe('MessagingStore', () => {
     await vi.runOnlyPendingTimersAsync();
 
     expect(store.getSnapshot().uploads[id]).toBeUndefined();
-    const sent = api.sendMessage.mock.calls[0] as unknown as [string, { attachments?: string[] }];
+    const sent = api.sendMessage.mock.calls[0] as unknown as [
+      string,
+      { attachments?: string[]; commitment?: string },
+    ];
     expect(sent[1].attachments).toEqual(['blob-1']);
+    // Franked: the commitment goes with the ciphertext, the key inside it.
+    expect(sent[1].commitment).toBe('C'.repeat(43) + '=');
     const json = (security.mock.encrypt.mock.calls.at(-1) as unknown as [unknown, string])[1];
     expect(JSON.parse(json)).toMatchObject({
       id,
