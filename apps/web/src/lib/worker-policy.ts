@@ -26,7 +26,7 @@ export function startWorker(url: string, name: string): Worker {
   return new Worker(workerPolicy?.createScriptURL(url) ?? url, { type: 'module', name });
 }
 
-/** The service worker (push notifications); a classic script at a fixed URL on our origin. */
+/** The service worker (pinned app shell, push notifications); a classic script at a fixed URL. */
 export const SERVICE_WORKER_URL = '/sw.js';
 
 /** Registers the service worker under the same Trusted Types policy. */

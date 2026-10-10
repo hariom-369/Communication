@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -p tsconfig.json && vite build",
+    "build": "tsc -p tsconfig.json && vite build && node scripts/release.mjs && node scripts/budgets.mjs",
     "typecheck": "tsc -p tsconfig.json && tsc -p e2e/tsconfig.json",
     "preview": "vite preview",
     "test": "vitest run",
@@ -39,6 +39,7 @@
     "fake-indexeddb": "6.2.5",
     "http_ece": "1.2.0",
     "jsdom": "30.1.1",
+    "lighthouse": "13.5.0",
     "otpauth": "9.5.2",
     "pg": "8.23.0",
     "smtp-server": "3.19.14"

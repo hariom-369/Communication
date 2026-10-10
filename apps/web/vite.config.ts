@@ -147,6 +147,14 @@ export default defineConfig({
     sourcemap: true,
     modulePreload: { polyfill: false }, // the polyfill injects inline script
     assetsInlineLimit: 0, // no data: script/style inlining
+    rolldownOptions: {
+      output: {
+        // Modules run in source order across chunks, so zod-config.ts (first import of main.tsx)
+        // still runs before any schema in a shared chunk is created — otherwise Zod probes for
+        // `Function`, a Trusted Types / CSP violation (docs/performance.md §2).
+        strictExecutionOrder: true,
+      },
+    },
   },
   server: { port: 5173, strictPort: true, proxy },
   preview: { port: 4173, strictPort: true, proxy, headers: productionHeaders },

@@ -47,8 +47,11 @@ Web app, as implemented (Phase 4, `apps/web/vite.config.ts`): `script-src 'self'
 `worker-src 'self'`, `connect-src 'self'` (API and realtime share the origin, ADR-033), and
 Trusted Types with exactly one policy, `tessera-worker`, which only produces same-origin script
 URLs for the crypto worker (Phase 9: also the call-media worker; Phase 10: the service worker
-`/sw.js`, registered with `updateViaCache: 'none'` so a fix to it reaches browsers at once). The
-service worker has no fetch handler: it handles pushes and notification clicks only.
+`/sw.js`, registered with `updateViaCache: 'none'` so a fix to it reaches browsers at once).
+Phase 14: the service worker also pins the app shell (ADR-052): it answers page loads and the
+release's own files from a copy verified against the signed release manifest, and leaves every
+other request (API, realtime, SFU, media) to the network untouched. `manifest-src 'self'` serves
+the web app manifest; SRI covers the scripts and stylesheet `index.html` loads.
 
 Phase 6 additions: `img-src 'self' data: blob:` and `media-src 'self' blob:` (decrypted
 attachments are shown from `blob:` URLs created in the app; previews are `data:` JPEGs from inside
@@ -147,6 +150,12 @@ logs. `Server`/`X-Powered-By` headers removed.
 Secret scanning: gitleaks pre-commit + CI; GitHub push protection.
 
 ## 10. Supply chain
+
+- **Web releases** are signed (ADR-052): `RELEASE_SIGNING_KEY` (Ed25519, PKCS#8) exists only in
+  the release pipeline's secret store; production builds set `RELEASE_REQUIRE_OFFICIAL=1` so an
+  unsigned build cannot ship; the successor key is announced in the previous release
+  (`RELEASE_NEXT_KEYS`). Losing the key without an announced successor strands browsers on the
+  last release until their site data is cleared — custody and rotation runbook in Phase 15.
 
 - Lockfiles committed; `pnpm install --frozen-lockfile`; `cargo --locked`.
 - Dependency review on PRs; OSV-Scanner + `cargo audit`/`cargo deny` (licenses, advisories,

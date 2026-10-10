@@ -96,7 +96,7 @@ jobs:
   e2e:
     name: End-to-end (Chromium, production build)
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:17-alpine
@@ -153,6 +153,13 @@ jobs:
       - run: pnpm build
       - run: pnpm --filter @tessera/web exec playwright install --with-deps chromium
       - run: pnpm --filter @tessera/web test:e2e
+      - name: Admin console end to end (test identity provider, virtual security keys)
+        run: pnpm --filter @tessera/admin test:e2e
+      - name: Release manifest of the built app verifies (signature and every file)
+        run: |
+          pnpm --filter @tessera/web exec vite preview --port 4173 --strictPort > preview.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://localhost:4173/release.json > /dev/null && break; sleep 1; done
+          node apps/web/scripts/verify-release.mjs http://localhost:4173
 
   secrets:
     name: Secret scan

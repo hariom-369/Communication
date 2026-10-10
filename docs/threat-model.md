@@ -225,3 +225,20 @@ provider dashboard or API key can grant plans); webhook endpoints are public (ra
 address, cheap rejection before any database work); invoices hold buyer names, states and
 GSTINs for the statutory period; refunds and disputes are handled in provider dashboards.
 
+**Phase 14 delta (web code delivery, PWA).** New: a service worker that serves the app from its
+own verified copy, a release signing key, an installable app, route chunks loaded on demand.
+Analysis in [phase-reports/phase-14.md](phase-reports/phase-14.md) and ADR-052. Mitigated:
+tampered, partially deployed or mixed-up asset files and CDN/storage tampering for returning
+browsers (every file checked against the signed manifest at install; a changed file on the server
+is not used — tested, mutation-checked); rollback to an older release (refused — unit-tested);
+an update signed by an unknown key, even one the new worker embeds (refused; the trusted release
+keeps running and the page says an update was refused — tested); unaudited releases (signed
+manifest per release, `verify-release` monitor — tested); a failed install leaving partial copies
+(per-install cache removed — mutation-checked); the worker caching or answering API, realtime or
+media requests (pass-through by path and origin — unit-tested). Residual (stated in e2ee.md §7):
+the first visit trusts the server; whoever can serve `sw.js` and holds the signing key can ship
+any code; theft of the signing key lets an attacker sign releases until rotation, and its loss
+without an announced successor strands browsers on the last release; no public transparency log
+or reproducible builds yet; lazily loaded chunks have no SRI on a first visit (the pin covers
+them afterwards); the pinned copy keeps the CSP captured at install until the next release.
+

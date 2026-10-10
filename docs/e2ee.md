@@ -95,16 +95,26 @@ is not trusted to enforce it alone. Application messages are always **PrivateMes
 A browser downloads client code from our servers. A compromised or coerced server (or
 CDN) could serve code that exfiltrates keys, which **no protocol can prevent**.
 
-Mitigations:
+Mitigations, **as built in Phase 14** (ADR-052; what is not built yet is marked):
 1. Static, content-hashed bundles; strict CSP (`script-src 'self' 'wasm-unsafe-eval'`),
-   Trusted Types, SRI on every script, no third-party scripts in the app origin.
-2. Reproducible builds; each release's asset hashes published in a signed, append-only
-   release manifest (Sigstore transparency log) so third parties can audit what was served.
-3. Service Worker pins the app shell and refuses to activate a new version whose manifest
-   signature fails to verify (defends against CDN tampering, **not** against a malicious
-   signing key holder).
+   Trusted Types, no third-party scripts in the app origin. **SRI** (`sha384`) on the entry
+   script, its preloads and the stylesheet in `index.html`.
+2. Every release has a **signed manifest** (`release.json`, Ed25519 over a domain-separated
+   message, verified in `crypto-core`) listing the SHA-256 of every served file, and
+   `scripts/verify-release.mjs` checks a live deployment against it, so third parties can audit
+   what was served. *Not yet:* a public append-only log of releases (Sigstore/Rekor) and
+   reproducible builds — release pipeline, Phase 15/17.
+3. The **service worker pins the app shell**: it installs a release only if the manifest
+   verifies under a key this browser already trusts (on first install, the key built into the
+   worker), is not older than the running one, and every file matches; it then serves the app
+   from that verified copy (also offline). An update that fails is not installed, and the page
+   says so. This defends against tampered or mixed-up asset files, CDN or storage tampering and
+   rollbacks — **not** against a first visit to a compromised server, nor against whoever can
+   serve a malicious `sw.js` (the browser fetches the worker script itself from the network) or
+   holds the signing key.
 4. Separate origin for user-generated content (`*.usercontent` domain) — no user content is
-   ever rendered as HTML in the app origin.
+   ever rendered as HTML in the app origin (attachments outside an image/audio/video allow-list
+   are downloads only, ADR-043). *Not yet:* in-browser document viewers on that origin.
 5. Higher-assurance desktop client (ADR-019) and future verification browser extension.
 6. Product copy says the web app is E2EE but recommends the desktop/mobile app for
    high-risk users.

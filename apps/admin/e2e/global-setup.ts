@@ -9,13 +9,12 @@ import pg from 'pg';
 /**
  * Starts the admin stack for E2E tests:
  *   PostgreSQL database `tessera_admin_e2e` (fresh, migrated, with a few user accounts) · Valkey
- *   (existing) · test identity provider on 127.0.0.1:58300 · admin API (`admin-server`) on
+ *   (existing) · test identity provider on a free port of 127.0.0.1 · admin API (`admin-server`) on
  *   :58082 · admin console preview on :4174.
  * Requires TEST_DATABASE_URL, TEST_VALKEY_URL and TEST_S3_URL, like the integration tests.
  */
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-const IDP_PORT = 58300;
 const ADMIN_PORT = 58082;
 const ADMIN_HEALTH_PORT = 59092;
 export const ADMIN_ORIGIN = 'http://localhost:4174';
@@ -70,6 +69,32 @@ function exited(child: ChildProcess): Promise<number | null> {
   return new Promise((resolve) => child.on('exit', resolve));
 }
 
+/** The issuer the test identity provider prints once it listens; fails as soon as it exits. */
+function announcedIssuer(child: ChildProcess, timeoutMs = 30_000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let output = '';
+    const timer = setTimeout(() => {
+      reject(new Error('The test identity provider did not start (see identity-provider.log)'));
+    }, timeoutMs);
+    child.stdout?.on('data', (chunk: Buffer) => {
+      output += chunk.toString();
+      const found = /fake identity provider at (http:\/\/127\.0\.0\.1:\d+)/.exec(output);
+      if (found?.[1] !== undefined) {
+        clearTimeout(timer);
+        resolve(found[1]);
+      }
+    });
+    child.once('exit', (code) => {
+      clearTimeout(timer);
+      reject(
+        new Error(
+          `The test identity provider exited (${String(code)}) before listening (see identity-provider.log)`,
+        ),
+      );
+    });
+  });
+}
+
 async function waitFor(url: string, timeoutMs = 30_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -104,25 +129,22 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   await fetch(`${s3.origin}/tessera-admin-e2e`, { method: 'PUT' });
   const apiDir = path.join(ROOT, 'services/api');
   // The test identity provider runs as its own process (services/api/scripts/fake-idp.mjs).
+  // It listens on a port the system picks: a fixed port in the ephemeral range can be held by an
+  // unrelated outgoing connection (seen as EADDRINUSE after a full user-app run).
   const idp = {
-    issuer: `http://127.0.0.1:${String(IDP_PORT)}`,
+    issuer: '',
     clientId: 'tessera-admin',
     clientSecret: randomBytes(24).toString('base64url'),
   };
   const idpProcess = start(
     'node',
     ['scripts/fake-idp.mjs'],
-    { FAKE_IDP_PORT: String(IDP_PORT), FAKE_IDP_CLIENT_SECRET: idp.clientSecret },
+    { FAKE_IDP_PORT: '0', FAKE_IDP_CLIENT_SECRET: idp.clientSecret },
     apiDir,
     path.join(logs, 'identity-provider.log'),
   );
+  idp.issuer = await announcedIssuer(idpProcess);
   await waitFor(`${idp.issuer}/.well-known/openid-configuration`);
-  // A provider left over from an earlier run would answer instead (with another secret).
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  if (idpProcess.exitCode !== null)
-    throw new Error(
-      `The test identity provider could not start (port ${String(IDP_PORT)} in use?)`,
-    );
   const key = () => randomBytes(32).toString('base64');
   const env = {
     NODE_ENV: 'development',

@@ -70,7 +70,7 @@ only where the operator configured the provider's price for it (`STRIPE_PRICES`,
 `RAZORPAY_PLANS`); Business is listed but not configured in the test setups.
 
 *Deviation from the earlier proposal:* the 2 GB attachment limit became 1 GB (the browser
-assembles the encrypted file in memory; larger files wait for streamed uploads, Phase 14).
+assembles the encrypted file in memory; larger files wait for streamed uploads, before public beta — moved from Phase 14).
 Themes, premium usernames, team inboxes and business badges are not built, so they are not sold.
 Backup media sizes are not tiered: encrypted backups do not include media yet.
 

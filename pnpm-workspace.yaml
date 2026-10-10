@@ -5,3 +5,8 @@ packages:
 
 # Supply-chain control: dependency install scripts are blocked unless listed here.
 onlyBuiltDependencies: []
+
+# Security fixes for transitive dependencies (remove once the parents require the fixed version).
+overrides:
+  # GHSA-68fv-2mgg-jv7q (event-loop DoS on crafted source maps); via vitest coverage and the build.
+  source-map-js: '>=1.2.2'

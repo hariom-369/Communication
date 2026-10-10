@@ -12,6 +12,7 @@ import { useSession } from '../state/session.js';
 
 import { Brand } from './Brand.js';
 import { OfflineBanner } from './OfflineBanner.js';
+import { UpdateBanner } from './UpdateBanner.js';
 
 const NAV: readonly { to: string; label: string }[] = [
   { to: '/chats', label: 'Chats' },
@@ -92,6 +93,7 @@ export function AppShell(): ReactNode {
         Skip to content
       </a>
       <OfflineBanner />
+      <UpdateBanner />
       <nav className="app-shell__rail" aria-label="Main">
         <Brand />
         <ul className="app-shell__nav">
@@ -138,6 +140,7 @@ export function AppShell(): ReactNode {
             : 'app-shell__main'
         }
         id="main"
+        tabIndex={-1}
       >
         {device === 'elsewhere' ? (
           <OpenElsewhere />

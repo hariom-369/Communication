@@ -1,39 +1,18 @@
 import { Alert, Button, Skeleton } from '@tessera/ui';
-import type { ReactNode } from 'react';
+import { lazy, Suspense, type ComponentType, type ReactNode } from 'react';
 import { createBrowserRouter, Navigate, RouterProvider, useLocation } from 'react-router';
 
-import { AppShell } from './components/AppShell.js';
 import { HOME_PATH } from './home.js';
-import { MessagingProvider } from './messaging/provider.js';
-import { ChatsPage } from './pages/chats/ChatsPage.js';
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage.js';
 import { GrievancePage } from './pages/GrievancePage.js';
-import { ChannelInvitePage } from './pages/channels/ChannelInvitePage.js';
-import { ChannelPage } from './pages/channels/ChannelPage.js';
-import { ChannelsPage } from './pages/channels/ChannelsPage.js';
-import { CommunitiesPage } from './pages/communities/CommunitiesPage.js';
-import { CommunityInvitePage } from './pages/communities/CommunityInvitePage.js';
-import { CommunityPage } from './pages/communities/CommunityPage.js';
-import { InvitePage } from './pages/InvitePage.js';
 import { LoginPage } from './pages/LoginPage.js';
 import { MfaPage } from './pages/MfaPage.js';
 import { NotFoundPage } from './pages/NotFoundPage.js';
 import { ResetPasswordPage } from './pages/ResetPasswordPage.js';
-import { CaseView } from './pages/moderation/CaseView.js';
-import { ModerationPage } from './pages/moderation/ModerationPage.js';
-import { AccountPage } from './pages/settings/AccountPage.js';
-import { AccountStatusPage, SuspendedScreen } from './pages/settings/AccountStatusPage.js';
-import { DevicesPage } from './pages/settings/DevicesPage.js';
-import { NotificationsPage } from './pages/settings/NotificationsPage.js';
-import { InvoicePage } from './pages/settings/InvoicePage.js';
-import { PlanPage } from './pages/settings/PlanPage.js';
-import { PrivacyPage } from './pages/settings/PrivacyPage.js';
-import { SecurityPage } from './pages/settings/SecurityPage.js';
 import { SetupCredentialPage } from './pages/SetupCredentialPage.js';
 import { SignUpPage } from './pages/SignUpPage.js';
 import { VerifyEmailPage } from './pages/VerifyEmailPage.js';
 import { useSession, type SessionStatus } from './state/session.js';
-import { StepUpProvider } from './state/step-up.js';
 
 function Loading(): ReactNode {
   return (
@@ -43,6 +22,26 @@ function Loading(): ReactNode {
     </div>
   );
 }
+
+/**
+ * Signed-in pages are separate chunks, loaded when first visited (docs/performance.md); the
+ * service worker pins them with the rest of the release.
+ */
+function page<M>(
+  load: () => Promise<M>,
+  pick: (module: M) => ComponentType,
+): () => Promise<{ Component: ComponentType }> {
+  return async () => ({ Component: pick(await load()) });
+}
+
+const SignedInLayout = lazy(() =>
+  import('./signed-in.js').then((module) => ({ default: module.SignedInLayout })),
+);
+const SuspendedScreen = lazy(() =>
+  import('./pages/settings/AccountStatusPage.js').then((module) => ({
+    default: module.SuspendedScreen,
+  })),
+);
 
 function Offline(): ReactNode {
   const { refresh } = useSession();
@@ -72,7 +71,12 @@ function Guard({
   if (status === 'offline') return <Offline />;
   if (allow.includes(status)) return children;
   // A suspended or banned account sees only its status (and can appeal or sign out).
-  if (status === 'suspended') return <SuspendedScreen />;
+  if (status === 'suspended')
+    return (
+      <Suspense fallback={<Loading />}>
+        <SuspendedScreen />
+      </Suspense>
+    );
   // Finishing credential setup lands on Security with a welcome message.
   if (status === 'active') {
     return pathname === '/setup' ? (
@@ -87,11 +91,9 @@ function Guard({
 
 const signedInArea = (
   <Guard allow={['active']}>
-    <StepUpProvider>
-      <MessagingProvider>
-        <AppShell />
-      </MessagingProvider>
-    </StepUpProvider>
+    <Suspense fallback={<Loading />}>
+      <SignedInLayout />
+    </Suspense>
   </Guard>
 );
 
@@ -143,27 +145,143 @@ const router = createBrowserRouter([
   },
   {
     element: signedInArea,
+    // Shown while a page's chunk loads on the first visit.
+    hydrateFallbackElement: <Loading />,
     children: [
       { path: '/settings', element: <Navigate to="/settings/security" replace /> },
-      { path: '/settings/security', element: <SecurityPage /> },
-      { path: '/settings/devices', element: <DevicesPage /> },
-      { path: '/settings/privacy', element: <PrivacyPage /> },
-      { path: '/settings/notifications', element: <NotificationsPage /> },
-      { path: '/settings/account', element: <AccountPage /> },
-      { path: '/settings/status', element: <AccountStatusPage /> },
-      { path: '/settings/plan', element: <PlanPage /> },
-      { path: '/settings/plan/invoices/:invoiceId', element: <InvoicePage /> },
-      { path: '/moderation', element: <ModerationPage /> },
-      { path: '/moderation/cases/:caseId', element: <CaseView /> },
-      { path: '/chats', element: <ChatsPage /> },
-      { path: '/chats/:conversationId', element: <ChatsPage /> },
-      { path: '/invite/:token', element: <InvitePage /> },
-      { path: '/channels', element: <ChannelsPage /> },
-      { path: '/channels/:channelId', element: <ChannelPage /> },
-      { path: '/channel-invite/:token', element: <ChannelInvitePage /> },
-      { path: '/communities', element: <CommunitiesPage /> },
-      { path: '/communities/:communityId', element: <CommunityPage /> },
-      { path: '/join/:token', element: <CommunityInvitePage /> },
+      {
+        path: '/settings/security',
+        lazy: page(
+          () => import('./pages/settings/SecurityPage.js'),
+          (m) => m.SecurityPage,
+        ),
+      },
+      {
+        path: '/settings/devices',
+        lazy: page(
+          () => import('./pages/settings/DevicesPage.js'),
+          (m) => m.DevicesPage,
+        ),
+      },
+      {
+        path: '/settings/privacy',
+        lazy: page(
+          () => import('./pages/settings/PrivacyPage.js'),
+          (m) => m.PrivacyPage,
+        ),
+      },
+      {
+        path: '/settings/notifications',
+        lazy: page(
+          () => import('./pages/settings/NotificationsPage.js'),
+          (m) => m.NotificationsPage,
+        ),
+      },
+      {
+        path: '/settings/account',
+        lazy: page(
+          () => import('./pages/settings/AccountPage.js'),
+          (m) => m.AccountPage,
+        ),
+      },
+      {
+        path: '/settings/status',
+        lazy: page(
+          () => import('./pages/settings/AccountStatusPage.js'),
+          (m) => m.AccountStatusPage,
+        ),
+      },
+      {
+        path: '/settings/plan',
+        lazy: page(
+          () => import('./pages/settings/PlanPage.js'),
+          (m) => m.PlanPage,
+        ),
+      },
+      {
+        path: '/settings/plan/invoices/:invoiceId',
+        lazy: page(
+          () => import('./pages/settings/InvoicePage.js'),
+          (m) => m.InvoicePage,
+        ),
+      },
+      {
+        path: '/moderation',
+        lazy: page(
+          () => import('./pages/moderation/ModerationPage.js'),
+          (m) => m.ModerationPage,
+        ),
+      },
+      {
+        path: '/moderation/cases/:caseId',
+        lazy: page(
+          () => import('./pages/moderation/CaseView.js'),
+          (m) => m.CaseView,
+        ),
+      },
+      {
+        path: '/chats',
+        lazy: page(
+          () => import('./pages/chats/ChatsPage.js'),
+          (m) => m.ChatsPage,
+        ),
+      },
+      {
+        path: '/chats/:conversationId',
+        lazy: page(
+          () => import('./pages/chats/ChatsPage.js'),
+          (m) => m.ChatsPage,
+        ),
+      },
+      {
+        path: '/invite/:token',
+        lazy: page(
+          () => import('./pages/InvitePage.js'),
+          (m) => m.InvitePage,
+        ),
+      },
+      {
+        path: '/channels',
+        lazy: page(
+          () => import('./pages/channels/ChannelsPage.js'),
+          (m) => m.ChannelsPage,
+        ),
+      },
+      {
+        path: '/channels/:channelId',
+        lazy: page(
+          () => import('./pages/channels/ChannelPage.js'),
+          (m) => m.ChannelPage,
+        ),
+      },
+      {
+        path: '/channel-invite/:token',
+        lazy: page(
+          () => import('./pages/channels/ChannelInvitePage.js'),
+          (m) => m.ChannelInvitePage,
+        ),
+      },
+      {
+        path: '/communities',
+        lazy: page(
+          () => import('./pages/communities/CommunitiesPage.js'),
+          (m) => m.CommunitiesPage,
+        ),
+      },
+      {
+        path: '/communities/:communityId',
+        lazy: page(
+          () => import('./pages/communities/CommunityPage.js'),
+          (m) => m.CommunityPage,
+        ),
+      },
+      {
+        path: '/join/:token',
+        lazy: page(
+          () => import('./pages/communities/CommunityInvitePage.js'),
+          (m) => m.CommunityInvitePage,
+        ),
+      },
     ],
   },
   { path: '*', element: <NotFoundPage /> },

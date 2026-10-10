@@ -45,6 +45,23 @@ fn commit_json(output: CommitOutput) -> String {
     .to_string()
 }
 
+/// Signed web releases (docs/e2ee.md §7): whether the manifest bytes verify under any trusted key
+/// (JSON array of base64 Ed25519 public keys).
+#[wasm_bindgen(js_name = verifyRelease)]
+pub fn verify_release(manifest: &[u8], signature: &str, keys: &str) -> Result<bool, JsError> {
+    Ok(crate::release::verify(
+        manifest,
+        &bytes(signature)?,
+        &byte_list(keys)?,
+    ))
+}
+
+/// SHA-256 of a served file, base64.
+#[wasm_bindgen(js_name = releaseDigest)]
+pub fn release_digest(file: &[u8]) -> String {
+    B64.encode(crate::release::digest(file))
+}
+
 /// Short link id (base64) from a link code the user typed; the rest is checked by `approveLink`.
 #[wasm_bindgen(js_name = parseLinkCode)]
 pub fn parse_link_code(code: &str) -> Result<String, JsError> {

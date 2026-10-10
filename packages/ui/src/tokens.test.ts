@@ -35,6 +35,9 @@ const nonTextPairs: readonly [ColorRole, ColorRole][] = [
   ['focusRing', 'surface'],
   ['focusRing', 'surfaceRaised'],
   ['accent', 'bg'],
+  ['controlBorder', 'bg'],
+  ['controlBorder', 'surface'],
+  ['controlBorder', 'surfaceRaised'],
 ];
 
 describe.each<Theme>(['light', 'dark'])('%s palette', (theme) => {

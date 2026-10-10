@@ -680,7 +680,7 @@ through audited libraries; the server can relay and store but not read or forge.
 - Public/channel media pipeline (malware scan, transcoding sandbox, CSAM hashing, polyglot and
   decompression-bomb checks) → Phase 8, with the first public content; there is none yet.
 - In-app document viewers on a separate user-content origin (PDF.js in a sandboxed frame) →
-  Phase 14; documents are downloads.
+  with that origin's deployment (Phase 17; moved from Phase 14); documents are downloads.
 - Resuming an interrupted upload after a reload (parts are retried and URLs refreshed within a
   session); forwarding attachments without re-upload; attachments inside backups (backups carry
   the keys, so restored history can open attachments while the server still has them).
@@ -1182,3 +1182,68 @@ paid attachment limit until uploads stream (memory), not 2 GB as first proposed.
 code, export treatment, credit notes and refund policy await the tax adviser and counsel (L-11).
 
 **Status.** PROPOSED — implemented; NEEDS-LEGAL-REVIEW L-11.
+
+## ADR-052 — The web app shell as built: a signed release manifest, SRI, and a service worker that pins one verified release (Phase 14)
+
+**Context.** e2ee.md §7 states the web code-delivery problem: the browser runs whatever code the
+server sends, so a tampered or coerced deployment could ship code that reads keys. No protocol
+fixes this; the mitigations reduce who can do it unnoticed and make releases auditable. Review
+item S-03 asked for a signed manifest and service-worker pinning; ADR-006 already isolates keys
+in a worker. Questions: what exactly is signed and by whom, what the service worker trusts on
+first contact, what it does when something does not verify, and what it honestly cannot stop.
+
+**Decision.**
+- **Release manifest.** After every production build `scripts/release.mjs` writes
+  `release.json`: format version, a monotonically increasing release `sequence`, version, commit,
+  whether it is an official build, the keys trusted for the *next* release (the signer plus any
+  announced successor, `RELEASE_NEXT_KEYS`), and the SHA-256 of every file served. It is signed
+  with **Ed25519** over the domain-separated message
+  `"tessera web release manifest v1\n" || manifest` (`release.json.sig`). The signing key
+  (`RELEASE_SIGNING_KEY`, PKCS#8) lives only in the release pipeline; builds without it are
+  signed with a throwaway key and marked `official: false`, and `RELEASE_REQUIRE_OFFICIAL=1` makes
+  a missing key fatal (production pipelines). Standard primitives only — Ed25519
+  (`verify_strict`, ed25519-dalek) and SHA-256, both in `crypto-core` (`release.rs`), the one place
+  client cryptography lives.
+- **SRI** (`sha384`) on the entry script and stylesheet in `index.html`.
+- **Service worker pinning** (`apps/web/src/sw/release.ts`). The release keys and sequence are
+  written into `sw.js` at build time. On `install` the worker downloads `release.json` and its
+  signature, verifies it in the crypto core under the keys of the release this browser already
+  runs — or, on first install only, the keys built into the worker (trust on first use) — requires
+  the manifest's sequence to equal its own and not to be lower than the running one (no
+  rollback), then downloads every listed file and checks its hash. Files go to a cache of their
+  own per installation (`tessera-shell-<sequence>-<id>`). Any failure fails installation, removes
+  that cache, and leaves the browser on the previous worker and its files. On `activate` the new
+  state (cache, sequence, version, next keys) is recorded and older copies are deleted.
+- **Serving.** Page loads (any same-origin navigation) and every file listed in the release are
+  answered from the verified copy, with the headers (CSP) captured at install. The API, realtime,
+  SFU and anything not in the release go to the network untouched. The app therefore also opens
+  offline and tells the person it cannot reach the server.
+- **Key rotation** is a release that lists the successor in `keys`; once installed, only the
+  listed keys are trusted.
+- **Monitoring.** `scripts/verify-release.mjs <origin> [--key]` checks a live deployment against
+  its signed manifest (signature and every file); intended for external monitors and CI after
+  deploy.
+- **Settings → Account** shows which verified release a browser runs, so a person can compare it
+  with the published list.
+
+**What this does not do (stated in e2ee.md §7).** The browser fetches `sw.js` itself from the
+network (`updateViaCache: 'none'`); a server that serves a *malicious service worker* replaces
+the pin. This therefore defends against tampered, mixed-up or partially deployed asset files, CDN
+or storage tampering of assets, and rollbacks to an older release, and it makes every release
+attributable to the signing key — it does not defend against whoever controls both the origin's
+`sw.js` and the signing key, nor against a first visit to a compromised server. Releases are not
+yet logged to a public transparency log (Sigstore/Rekor), and builds are not yet shown to be
+reproducible; both need the release pipeline (Phase 15/17). The higher-assurance answer remains
+the desktop app (ADR-019).
+
+**Alternatives.** A browser extension that verifies pages (planned, separate project); no
+pinning, SRI only (protects nothing once `index.html` is replaced); trusting any key embedded in
+each new worker (an attacker would embed their own — refused, tested).
+
+**Consequences.** A deploy whose files do not match its manifest does not reach browsers that
+already run Tessera (they keep the previous release), so deploys must upload files before the
+manifest and `sw.js`. Losing the release signing key without a successor announced means every
+browser must be reset (site data cleared) to trust a new key — the key needs the same custody as
+other signing keys (Phase 15). Install downloads about 4 MB once per release.
+
+**Status.** PROPOSED — implemented; NEEDS-SECURITY-REVIEW (S-03).

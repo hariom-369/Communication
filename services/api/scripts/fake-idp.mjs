@@ -1,6 +1,6 @@
 // Test only: runs the test identity provider (src/test/fake-idp.ts) as a process for the admin
 // console's E2E tests (apps/admin/e2e/global-setup.ts). Never part of a build or deployment.
-//   FAKE_IDP_PORT=58300 FAKE_IDP_CLIENT_SECRET=… node scripts/fake-idp.mjs
+//   FAKE_IDP_PORT=0 FAKE_IDP_CLIENT_SECRET=… node scripts/fake-idp.mjs   (0: any free port; the issuer is printed)
 const { FakeIdp } = await import('../src/test/fake-idp.ts');
 
 const port = Number(process.env.FAKE_IDP_PORT ?? '0');

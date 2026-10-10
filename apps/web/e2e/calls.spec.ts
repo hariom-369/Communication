@@ -514,9 +514,17 @@ test.describe('group calls (SFU, SFrame)', () => {
       return result.rows[0]?.id ?? '';
     });
     const spy = await inspector(browser, callId);
+    // Enough of both kinds: audio arrives at a steady 50 frames a second per sender, video at
+    // whatever rate the encoders manage on a busy machine, so wait for video explicitly.
     await expect
-      .poll(async () => (await spy.frames()).length, { timeout: 20_000 })
-      .toBeGreaterThan(300);
+      .poll(
+        async () => {
+          const seen = await spy.frames();
+          return Math.min(seen.length / 300, seen.filter((f) => f.kind === 'video').length / 51);
+        },
+        { timeout: 30_000 },
+      )
+      .toBeGreaterThanOrEqual(1);
     const frames = await spy.frames();
     const used = new Set<string>();
     let video = 0;

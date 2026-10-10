@@ -4,7 +4,9 @@ import init, {
   MediaDecryptor,
   MediaEncryptor,
   parseLinkCode,
+  releaseDigest,
   verifyLinkCode,
+  verifyRelease,
 } from '@tessera/crypto-core';
 import wasmUrl from '@tessera/crypto-core/wasm?url';
 import { pushPayloadSchema, type Conversation, type PushPayload } from '@tessera/validation';
@@ -16,9 +18,11 @@ import { contentSchema } from '../messaging/content.js';
 import { addUnseen, readDevicePrefs, type PreviewLevel } from '../notifications/device-prefs.js';
 import { describeBody, messageNotification, type IncomingItem } from '../notifications/text.js';
 
+import { embeddedRelease, ReleaseShell } from './release.js';
+
 /**
- * Service worker: push notifications only (docs/notifications.md §2, ADR-048). No fetch handler
- * and no caching — pages load from the network as before.
+ * Service worker: the pinned, signed app shell (./release.ts, ADR-052) and push notifications
+ * (docs/notifications.md §2, ADR-048).
  *
  * A push says only "something new in conversation X". This worker fetches the ciphertext and
  * decrypts it here, on the device, with the same encryption engine as the app — but only when no
@@ -34,11 +38,46 @@ const MAX_PAGES = 5;
 const core = { CryptoClient, MediaEncryptor, MediaDecryptor, parseLinkCode, verifyLinkCode };
 let wasm: Promise<unknown> | null = null;
 
-self.addEventListener('install', () => {
-  void self.skipWaiting();
+async function ensureWasm(): Promise<void> {
+  wasm ??= init({ module_or_path: wasmUrl });
+  await wasm;
+}
+
+// Written by scripts/release.mjs at build time. Read through `globalThis` so the minifier cannot
+// fold the placeholder away (development builds keep it, and do not pin).
+const tags = globalThis as { __tesseraReleaseKeys?: string; __tesseraReleaseSequence?: string };
+const RELEASE_KEYS: string = tags.__tesseraReleaseKeys ?? '__TESSERA_RELEASE_KEYS__';
+const RELEASE_SEQUENCE: string | number =
+  tags.__tesseraReleaseSequence ?? '__TESSERA_RELEASE_SEQUENCE__';
+
+const shell = new ReleaseShell({
+  fetch: (path) => fetch(path, { cache: 'no-store', credentials: 'same-origin' }),
+  caches: self.caches,
+  core: async () => {
+    await ensureWasm();
+    return { verifyRelease, releaseDigest };
+  },
+  embedded: embeddedRelease(RELEASE_KEYS, RELEASE_SEQUENCE),
+});
+
+self.addEventListener('install', (event) => {
+  // A release that does not verify fails installation: the browser keeps the previous worker.
+  event.waitUntil(shell.install().then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(shell.activate().then(() => self.clients.claim()));
+});
+self.addEventListener('fetch', (event) => {
+  const request = event.request;
+  if (!shell.enabled || request.method !== 'GET') return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin || /^\/(api|rt|sfu)\//.test(url.pathname)) return;
+  event.respondWith(
+    shell
+      .respond(request, self.location.origin)
+      .catch(() => null)
+      .then((cached) => cached ?? fetch(request)),
+  );
 });
 
 interface Shown {
@@ -103,8 +142,7 @@ async function syncConversation(conversationId: string): Promise<Shown> {
     tag: `chat:${conversationId}`,
     url: `/chats/${conversationId}`,
   });
-  wasm ??= init({ module_or_path: wasmUrl });
-  await wasm;
+  await ensureWasm();
   const engine = new CryptoEngine(core);
   const lock = await engine.call('acquire', [me.id, 'try']);
   // A tab is open (it shows its own notifications for what it receives).

@@ -38,6 +38,7 @@ Supporting documents:
 - [groups.md](groups.md), [channels.md](channels.md) — groups, communities, channels
 - [privacy.md](privacy.md) — privacy center and **exact server-visible metadata inventory**
 - [notifications.md](notifications.md), [search.md](search.md), [ai.md](ai.md)
+- [performance.md](performance.md) — web performance budgets; [accessibility.md](accessibility.md) — WCAG 2.2 AA audit
 
 ## Conventions used in every document
 

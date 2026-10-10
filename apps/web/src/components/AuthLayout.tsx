@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 
 import { Brand } from './Brand.js';
 import { OfflineBanner } from './OfflineBanner.js';
+import { UpdateBanner } from './UpdateBanner.js';
 
 /** Layout for signed-out flows: brand, a focused card, and the privacy promise. */
 export function AuthLayout({
@@ -15,7 +16,8 @@ export function AuthLayout({
   return (
     <div className="auth-layout">
       <OfflineBanner />
-      <main className="auth-layout__main" id="main">
+      <UpdateBanner />
+      <main className="auth-layout__main" id="main" tabIndex={-1}>
         <Link to="/" className="auth-layout__brand" aria-label="Tessera home">
           <Brand />
         </Link>

@@ -14,6 +14,7 @@ pub mod ids;
 pub mod link;
 pub mod media;
 pub mod padding;
+pub mod release;
 pub mod safety;
 
 #[cfg(target_arch = "wasm32")]
