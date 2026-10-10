@@ -803,6 +803,96 @@ export interface FeatureFlagsTable {
   updated_at: Timestamp;
 }
 
+export interface BillingPlansTable {
+  code: string;
+  tier: 'premium' | 'creator' | 'business';
+  name: string;
+  interval: 'month' | 'year';
+  price_inr_minor: number;
+  price_usd_minor: number;
+  active: boolean;
+  sort_order: number;
+}
+
+export interface BillingProfilesTable {
+  user_id: string;
+  legal_name: string;
+  country: string;
+  state: string | null;
+  gstin: string | null;
+  updated_at: Generated<Date>;
+}
+
+export interface BillingSubscriptionsTable {
+  id: string;
+  user_id: string;
+  plan_code: string;
+  provider: 'razorpay' | 'stripe';
+  provider_ref: string | null;
+  checkout_ref: string;
+  status: 'incomplete' | 'active' | 'past_due' | 'canceled';
+  provider_status: string;
+  cancel_at_period_end: Generated<boolean>;
+  current_period_start: Date | null;
+  current_period_end: Date | null;
+  past_due_since: Date | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+  ended_at: Date | null;
+}
+
+export interface BillingEventsTable {
+  provider: 'razorpay' | 'stripe';
+  event_id: string;
+  type: string;
+  subscription_id: string | null;
+  received_at: Generated<Date>;
+}
+
+export interface BillingInvoiceCountersTable {
+  financial_year: string;
+  last_number: number;
+}
+
+export interface BillingInvoicesTable {
+  id: string;
+  number: string;
+  user_id: string | null;
+  subscription_id: string | null;
+  provider: 'razorpay' | 'stripe';
+  payment_ref: string;
+  issued_at: Generated<Date>;
+  plan_code: string;
+  plan_name: string;
+  period_start: Date | null;
+  period_end: Date | null;
+  currency: 'INR' | 'USD';
+  total_minor: number;
+  taxable_minor: number;
+  cgst_minor: Generated<number>;
+  sgst_minor: Generated<number>;
+  igst_minor: Generated<number>;
+  tax_note: string;
+  sac_code: string;
+  refunded_minor: Generated<number>;
+  buyer_name: string;
+  buyer_country: string;
+  buyer_state: string | null;
+  buyer_gstin: string | null;
+  seller_name: string;
+  seller_address: string;
+  seller_gstin: string | null;
+  seller_state: string;
+}
+
+export interface AccountTiersTable {
+  user_id: string;
+  tier: 'premium' | 'creator' | 'business';
+  valid_until: Date;
+  subscription_id: string;
+  updated_at: Generated<Date>;
+}
+
 export interface Database {
   schema_migrations: SchemaMigrationsTable;
   users: UsersTable;
@@ -881,6 +971,13 @@ export interface Database {
   admin_approvals: AdminApprovalsTable;
   support_tickets: SupportTicketsTable;
   feature_flags: FeatureFlagsTable;
+  billing_plans: BillingPlansTable;
+  billing_profiles: BillingProfilesTable;
+  billing_subscriptions: BillingSubscriptionsTable;
+  billing_events: BillingEventsTable;
+  billing_invoice_counters: BillingInvoiceCountersTable;
+  billing_invoices: BillingInvoicesTable;
+  account_tiers: AccountTiersTable;
 }
 
 /** Owning module of every table ('platform' = infrastructure code outside modules/). */
@@ -962,4 +1059,11 @@ export const TABLE_OWNERS: Readonly<Record<keyof Database, string>> = {
   admin_approvals: 'admin',
   support_tickets: 'admin',
   feature_flags: 'flags',
+  billing_plans: 'billing',
+  billing_profiles: 'billing',
+  billing_subscriptions: 'billing',
+  billing_events: 'billing',
+  billing_invoice_counters: 'billing',
+  billing_invoices: 'billing',
+  account_tiers: 'entitlements',
 };

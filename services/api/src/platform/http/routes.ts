@@ -25,6 +25,12 @@ export type SessionStage = 'credential_setup' | 'mfa_pending' | 'active';
  */
 export type AuthRequirement =
   | { readonly kind: 'public' }
+  /**
+   * A server-to-server callback (payment provider webhooks) that the handler authenticates by
+   * the sender's signature over the raw body. No cookie is read, the browser CSRF check does not
+   * apply (there is no browser), and the handler receives the body unparsed (`context.rawBody`).
+   */
+  | { readonly kind: 'webhook' }
   | {
       readonly kind: 'session';
       readonly stages?: readonly SessionStage[];
@@ -71,6 +77,10 @@ export interface RouteContext<A extends AuthRequirement = AuthRequirement> {
   rateLimit(policy: RateLimitPolicy, subject: string): Promise<void>;
   setSessionCookie(token: string, expiresAt: Date): void;
   clearSessionCookie(): void;
+  /** `webhook` routes only: the request body exactly as received. */
+  readonly rawBody: Buffer | null;
+  /** A request header (lower-case name), for signature schemes. */
+  header(name: string): string | undefined;
 }
 
 /** Authorization policy. Deny-by-default: a policy must explicitly return true. */
@@ -169,6 +179,8 @@ export const IP_FLOOD_GUARD: RateLimitPolicy = {
 declare module 'fastify' {
   interface FastifyContextConfig {
     routeId?: string;
+    /** Signature-authenticated callback: no browser CSRF check, raw body (see AuthRequirement). */
+    webhook?: boolean;
   }
   interface FastifyRequest {
     authSession: AuthenticatedSession | null;
@@ -231,12 +243,17 @@ function registerRoute(
         sameSite: 'lax',
       });
     },
+    rawBody: route.auth.kind === 'webhook' && Buffer.isBuffer(request.body) ? request.body : null,
+    header: (name) => {
+      const value = request.headers[name.toLowerCase()];
+      return Array.isArray(value) ? value[0] : value;
+    },
   });
 
   app.withTypeProvider<ZodTypeProvider>().route({
     method: route.method,
     url: route.url,
-    config: { routeId: route.id },
+    config: { routeId: route.id, ...(route.auth.kind === 'webhook' ? { webhook: true } : {}) },
     ...(route.bodyLimit === undefined ? {} : { bodyLimit: route.bodyLimit }),
     schema: {
       summary: route.summary,
@@ -305,6 +322,7 @@ async function authenticate(
   requirement: AuthRequirement,
   sessions: SessionAuthenticator,
 ): Promise<AuthenticatedSession | null> {
+  if (requirement.kind === 'webhook') return null;
   const token = request.cookies[SESSION_COOKIE];
   const session =
     token === undefined || token.length === 0 || token.length > 128

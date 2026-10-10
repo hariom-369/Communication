@@ -5,6 +5,7 @@ import { newId } from '@tessera/shared';
 import {
   MAX_ATTACHMENTS,
   MEDIA_PART_BYTES,
+  mediaCiphertextSize,
   type mediaDownloadSchema,
   type uploadCreatedSchema,
   type uploadPartsResponseSchema,
@@ -30,15 +31,25 @@ export interface MembershipPort {
 export interface MediaLimits {
   /** Uploads in progress per account. */
   readonly maxUploading: number;
-  /** Bytes uploaded per account per rolling 24 hours (FREE tier; entitlements in Phase 13). */
+  /** Bytes uploaded per account per rolling 24 hours (the free tier; see `useEntitlements`). */
   readonly dailyBytes: number;
   readonly dailyUploads: number;
+  /** Largest file before encryption. */
+  readonly maxFileBytes: number;
+}
+
+/** Per-account limits from the entitlements module (docs/billing.md §2). */
+export interface MediaEntitlementsPort {
+  limits(
+    userId: string,
+  ): Promise<{ dailyBytes: number; dailyUploads: number; maxFileBytes: number }>;
 }
 
 export const DEFAULT_MEDIA_LIMITS: MediaLimits = {
   maxUploading: 10,
   dailyBytes: 2 * 1024 * 1024 * 1024,
   dailyUploads: 300,
+  maxFileBytes: 200 * 1024 * 1024,
 };
 
 const HOUR_MS = 60 * 60_000;
@@ -67,6 +78,7 @@ export class MediaService {
   readonly #limits: MediaLimits;
   readonly #logger: Logger;
   #membership: MembershipPort | null = null;
+  #entitlements: MediaEntitlementsPort | null = null;
 
   constructor(
     db: Kysely<Database>,
@@ -82,6 +94,10 @@ export class MediaService {
 
   useMembership(membership: MembershipPort): void {
     this.#membership = membership;
+  }
+
+  useEntitlements(entitlements: MediaEntitlementsPort): void {
+    this.#entitlements = entitlements;
   }
 
   async #urls(
@@ -113,6 +129,11 @@ export class MediaService {
 
   /** Starts an upload of `size` ciphertext bytes; returns presigned URLs for every part. */
   async createUpload(userId: string, size: number): Promise<z.infer<typeof uploadCreatedSchema>> {
+    const plan = (await this.#entitlements?.limits(userId)) ?? this.#limits;
+    if (size > mediaCiphertextSize(plan.maxFileBytes))
+      throw new AppError('PAYLOAD_TOO_LARGE', {
+        detail: `Files can be up to ${String(Math.round(plan.maxFileBytes / 1024 / 1024))} MB on your plan.`,
+      });
     const since = new Date(Date.now() - DAY_MS);
     const usage = await this.#db
       .selectFrom('media_blobs')
@@ -128,10 +149,7 @@ export class MediaService {
       throw new AppError('RATE_LIMITED', {
         detail: 'Too many uploads in progress. Wait for them to finish.',
       });
-    if (
-      Number(usage.uploads) >= this.#limits.dailyUploads ||
-      Number(usage.bytes) + size > this.#limits.dailyBytes
-    )
+    if (Number(usage.uploads) >= plan.dailyUploads || Number(usage.bytes) + size > plan.dailyBytes)
       throw new AppError('RATE_LIMITED', {
         detail: 'You have reached today’s upload limit. Try again tomorrow.',
       });

@@ -1,4 +1,4 @@
-import { MAX_MEDIA_BYTES } from '@tessera/validation';
+import { TIER_LIMITS } from '@tessera/validation';
 
 import { MAX_THUMBNAIL_CHARS, type Attachment } from './content.js';
 import type { OutgoingAttachment } from './store.js';
@@ -225,9 +225,19 @@ export async function prepareVoiceNote(recording: Blob): Promise<OutgoingAttachm
   }
 }
 
-export async function prepareAttachment(file: File): Promise<OutgoingAttachment> {
+/**
+ * `maxFileBytes` is the account's plan limit (`GET /api/v1/entitlements`); the server enforces
+ * it too, this only spares encrypting a file that would be refused.
+ */
+export async function prepareAttachment(
+  file: File,
+  maxFileBytes: number = TIER_LIMITS.free['media.max_file_bytes'],
+): Promise<OutgoingAttachment> {
   if (file.size === 0) throw new AttachmentError('That file is empty.');
-  if (file.size > MAX_MEDIA_BYTES) throw new AttachmentError('Files can be up to 200 MB.');
+  if (file.size > maxFileBytes)
+    throw new AttachmentError(
+      `Files can be up to ${String(Math.round(maxFileBytes / 1024 / 1024))} MB on your plan.`,
+    );
   const name = safeFileName(file.name);
   const mime = mimeOf(file);
   if (REENCODED_IMAGES.has(mime)) {

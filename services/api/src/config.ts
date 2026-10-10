@@ -1,4 +1,5 @@
 import { env, loadConfig } from '@tessera/platform';
+import { INDIAN_STATES } from '@tessera/validation';
 import { z } from 'zod';
 
 /** Comma-separated ICE server URLs with the given schemes (RFC 7064/7065). */
@@ -196,6 +197,39 @@ const schema = z
     ADMIN_SESSION_IDLE_MINUTES: env.positiveInt(30),
     ADMIN_SESSION_ABSOLUTE_HOURS: env.positiveInt(8),
 
+    /**
+     * Billing (docs/billing.md, ADR-051). Each provider is configured completely or not at all;
+     * the price maps name the provider's price (Stripe) or plan (Razorpay) id for each of our
+     * plans: `premium_monthly=price_123,creator_monthly=price_456`.
+     */
+    STRIPE_SECRET_KEY: z.string().min(16).max(500).optional(),
+    STRIPE_WEBHOOK_SECRET: z.string().min(16).max(500).optional(),
+    STRIPE_PRICES: z.string().min(1).max(2000).optional(),
+    /** Testing only (a stand-in provider); production uses the default. */
+    STRIPE_API_URL: env.url(['https:', 'http:']).default('https://api.stripe.com'),
+    RAZORPAY_KEY_ID: z.string().min(8).max(200).optional(),
+    RAZORPAY_KEY_SECRET: z.string().min(16).max(500).optional(),
+    RAZORPAY_WEBHOOK_SECRET: z.string().min(16).max(500).optional(),
+    RAZORPAY_PLANS: z.string().min(1).max(2000).optional(),
+    RAZORPAY_API_URL: env.url(['https:', 'http:']).default('https://api.razorpay.com'),
+    /** The seller on tax invoices (required when any provider is configured). */
+    BILLING_SELLER_NAME: z.string().min(1).max(200).optional(),
+    BILLING_SELLER_ADDRESS: z.string().min(1).max(500).optional(),
+    BILLING_SELLER_GSTIN: z
+      .string()
+      .regex(/^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/)
+      .optional(),
+    /** ISO 3166-2:IN state of the seller's GST registration (CGST/SGST vs IGST). */
+    BILLING_SELLER_STATE: z
+      .string()
+      .regex(/^[A-Z]{2}$/)
+      .optional(),
+    /** Services Accounting Code on invoices (to confirm with the tax adviser, L-11). */
+    BILLING_SAC_CODE: z
+      .string()
+      .regex(/^\d{6}$/)
+      .default('998439'),
+
     BUILD_VERSION: z.string().min(1).default('0.0.0-dev'),
     BUILD_COMMIT: z.string().min(1).default('unknown'),
     SHUTDOWN_DRAIN_MS: env.nonNegativeInt(5000),
@@ -263,6 +297,51 @@ const schema = z
         message: 'A security-key allow-list needs the vendor attestation roots to check it against',
       });
     }
+    const providers = {
+      STRIPE_SECRET_KEY: [
+        config.STRIPE_SECRET_KEY,
+        config.STRIPE_WEBHOOK_SECRET,
+        config.STRIPE_PRICES,
+      ],
+      RAZORPAY_KEY_ID: [
+        config.RAZORPAY_KEY_ID,
+        config.RAZORPAY_KEY_SECRET,
+        config.RAZORPAY_WEBHOOK_SECRET,
+        config.RAZORPAY_PLANS,
+      ],
+    } as const;
+    for (const [key, values] of Object.entries(providers))
+      if (values.some((v) => v !== undefined) && values.some((v) => v === undefined))
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message: 'Configure every setting of a payment provider, or none (docs/billing.md)',
+        });
+    const anyProvider = Object.values(providers).some((values) =>
+      values.every((v) => v !== undefined),
+    );
+    if (
+      anyProvider &&
+      (config.BILLING_SELLER_NAME === undefined ||
+        config.BILLING_SELLER_ADDRESS === undefined ||
+        config.BILLING_SELLER_STATE === undefined)
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['BILLING_SELLER_NAME'],
+        message: 'Invoices need the seller name, address and state',
+      });
+    if (
+      config.BILLING_SELLER_GSTIN !== undefined &&
+      config.BILLING_SELLER_STATE !== undefined &&
+      (INDIAN_STATES as Record<string, { gst: string } | undefined>)[config.BILLING_SELLER_STATE]
+        ?.gst !== config.BILLING_SELLER_GSTIN.slice(0, 2)
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['BILLING_SELLER_GSTIN'],
+        message: 'The GSTIN does not belong to BILLING_SELLER_STATE',
+      });
     if (config.ADMIN_SESSION_ABSOLUTE_HOURS > 8 || config.ADMIN_SESSION_IDLE_MINUTES > 30) {
       ctx.addIssue({
         code: 'custom',
@@ -279,6 +358,25 @@ const schema = z
           message: 'Required in production (abuse reports must be verifiable and encrypted)',
         });
     }
+    for (const [key, value, official] of [
+      ['STRIPE_API_URL', config.STRIPE_API_URL, 'https://api.stripe.com'],
+      ['RAZORPAY_API_URL', config.RAZORPAY_API_URL, 'https://api.razorpay.com'],
+    ] as const)
+      if (value.replace(/\/$/, '') !== official)
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message: 'Testing only; must not be set in production',
+        });
+    if (
+      (config.STRIPE_SECRET_KEY?.startsWith('sk_test_') ?? false) ||
+      (config.RAZORPAY_KEY_ID?.startsWith('rzp_test_') ?? false)
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['STRIPE_SECRET_KEY'],
+        message: 'Test-mode payment keys must not be used in production',
+      });
     if (config.ADMIN_OIDC_ALLOW_INSECURE) {
       ctx.addIssue({
         code: 'custom',

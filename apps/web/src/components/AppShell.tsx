@@ -22,6 +22,7 @@ const NAV: readonly { to: string; label: string }[] = [
   { to: '/settings/privacy', label: 'Privacy' },
   { to: '/settings/notifications', label: 'Notifications' },
   { to: '/settings/account', label: 'Account' },
+  { to: '/settings/plan', label: 'Plan' },
   { to: '/settings/status', label: 'Account status' },
 ];
 

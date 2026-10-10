@@ -8,8 +8,11 @@ import { base64Bytes } from './messaging.js';
  * conversation an attachment was sent to, never names, types, keys or content.
  */
 
-/** Largest attachment before encryption (docs/media.md §1). */
-export const MAX_MEDIA_BYTES = 200 * 1024 * 1024;
+/**
+ * Largest attachment before encryption on any plan (docs/media.md §1). Each account's own limit
+ * is an entitlement (`media.max_file_bytes`, docs/billing.md §2): 200 MiB on the free plan.
+ */
+export const MAX_MEDIA_BYTES = 1024 * 1024 * 1024;
 /** Media STREAM framing (packages/crypto-core/src/media.rs): header + 16-byte tag per 64 KiB. */
 export function mediaCiphertextSize(plaintextBytes: number): number {
   return 23 + plaintextBytes + (Math.floor(plaintextBytes / 65_536) + 1) * 16;

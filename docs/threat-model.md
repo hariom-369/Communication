@@ -208,3 +208,20 @@ admins see account metadata within their role and purpose; without an allow-list
 is not consulted; off-hours and repeated-view alerting rules are pending (Phase 16); network
 reachability through the access proxy only is a deployment control (Phase 15).
 
+**Phase 13 delta (billing).** New: payment providers as a trust boundary (TB8), signed webhooks
+that change what accounts may do, hosted checkout, invoices with buyer names and GSTINs. Analysis
+in [phase-reports/phase-13.md](phase-reports/phase-13.md) and ADR-051. Mitigated: card-data
+exposure (hosted checkout; no card or UPI data stored — SAQ-A); forged webhooks granting plans
+(HMAC-SHA256 per provider, constant time, Stripe timestamp tolerance, Razorpay event id —
+tested, mutation-checked); replays and duplicate deliveries (event id inserted with its effect —
+tested, including six concurrent copies); out-of-order or stale deliveries rolling state back
+(provider state fetched under a per-subscription lock — tested); CSRF on the new
+cookie-less endpoints (no session is read; the exemption is limited to the `webhook` kind);
+stand-in URLs or test keys reaching production (config refuses them — tested); entitlements
+outliving payment (exact `valid_until`, 7-day grace from the first failure — tested); paying
+twice (second subscription ended, refund alert); a person reading another's invoice (owner-only,
+404 — tested). Residual: the provider is trusted for payment state (an attacker with the
+provider dashboard or API key can grant plans); webhook endpoints are public (rate-limited per
+address, cheap rejection before any database work); invoices hold buyer names, states and
+GSTINs for the statutory period; refunds and disputes are handled in provider dashboards.
+

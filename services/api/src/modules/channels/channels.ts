@@ -117,6 +117,11 @@ interface ChannelRow {
   slow_mode_seconds: number;
 }
 
+/** Per-account limits from the entitlements module (docs/billing.md §2). */
+export interface ChannelEntitlementsPort {
+  limits(userId: string): Promise<{ maxOwned: number; scheduleDays: number }>;
+}
+
 export class ChannelsService {
   readonly #db: Kysely<Database>;
   readonly #valkey: Redis;
@@ -125,6 +130,7 @@ export class ChannelsService {
   readonly #previews: LinkPreviewer;
   readonly #audit: AuditLog;
   readonly #logger: Logger;
+  #entitlements: ChannelEntitlementsPort | null = null;
   #notifier: ChannelNotifier | null = null;
   #links: ChannelLinkGuard | null = null;
 
@@ -293,8 +299,11 @@ export class ChannelsService {
         .where('owner_id', '=', actor)
         .where('deleted_at', 'is', null)
         .executeTakeFirstOrThrow();
-      if (Number(owned.count) >= MAX_OWNED)
-        throw new AppError('CONFLICT', { detail: `You can own up to ${MAX_OWNED} channels.` });
+      const maxOwned = (await this.#entitlements?.limits(actor))?.maxOwned ?? MAX_OWNED;
+      if (Number(owned.count) >= maxOwned)
+        throw new AppError('CONFLICT', {
+          detail: `You can own up to ${String(maxOwned)} channels.`,
+        });
       const taken = await trx
         .selectFrom('channels')
         .select('id')
@@ -540,6 +549,10 @@ export class ChannelsService {
 
   useNotifier(notifier: ChannelNotifier): void {
     this.#notifier = notifier;
+  }
+
+  useEntitlements(entitlements: ChannelEntitlementsPort): void {
+    this.#entitlements = entitlements;
   }
 
   useLinkGuard(links: ChannelLinkGuard): void {
@@ -1075,9 +1088,12 @@ export class ChannelsService {
         throw new AppError('BAD_REQUEST', {
           detail: 'Schedule posts at least 15 seconds ahead, or publish now.',
         });
-      if (publishAt.getTime() > now.getTime() + MAX_SCHEDULE_DAYS * DAY_MS)
+      const scheduleDays =
+        // The channel owner's plan decides (a Creator plan schedules further ahead).
+        (await this.#entitlements?.limits(channel.owner_id))?.scheduleDays ?? MAX_SCHEDULE_DAYS;
+      if (publishAt.getTime() > now.getTime() + scheduleDays * DAY_MS)
         throw new AppError('BAD_REQUEST', {
-          detail: `Posts can be scheduled up to ${MAX_SCHEDULE_DAYS} days ahead.`,
+          detail: `Posts can be scheduled up to ${String(scheduleDays)} days ahead on your plan.`,
         });
       status = 'scheduled';
     }

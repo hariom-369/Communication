@@ -148,6 +148,22 @@ export function composeAdmin(
         revokeStaff: (userId, role) => moderation.revokeStaff(userId, role),
       },
       messaging: { countSince: (since) => modules.messaging.countSince(since) },
+      billing: {
+        summary: async (userId) => {
+          const [entitlements, subscription] = await Promise.all([
+            modules.entitlements.forUser(userId),
+            modules.billing.subscription(userId),
+          ]);
+          return {
+            tier: entitlements.tier,
+            planName: subscription?.planName ?? null,
+            status: subscription?.status ?? null,
+            provider: subscription?.provider ?? null,
+            cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
+            currentPeriodEnd: subscription?.currentPeriodEnd ?? null,
+          };
+        },
+      },
       notifications: { queueDepth: () => modules.notifyQueue.depth() },
       flags: { list: () => flags.list() },
       audit: {

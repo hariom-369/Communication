@@ -184,6 +184,14 @@ checked before the body is parsed; four eyes for role, eligibility, admin, flag 
 changes; purpose binding for every account view; no impersonation route. The admin SPA's CSP
 forbids WebAssembly, workers, blob:/data: and any Trusted Types policy.
 
+**Billing (Phase 13, [billing.md](billing.md)).** Hosted checkout only (no card or UPI data;
+SAQ-A). Webhooks use the pipeline's `webhook` auth kind — no cookie, no browser CSRF check, raw
+body — and are accepted only with a valid provider signature (HMAC-SHA256, constant time; Stripe
+timestamp ≤ 5 min; Razorpay event id), applied once per event id, and from the provider's current
+state under a lock. Provider API URLs other than the official ones and test-mode keys are refused
+in production. Payment state changes are audited (`billing.status_changed`, `billing.cancelled`,
+`billing.checkout_started`).
+
 ## 12. Browser storage policy
 
 | Data | Storage |

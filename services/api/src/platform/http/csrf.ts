@@ -25,6 +25,8 @@ export function installCsrfProtection(
 
 function isAllowed(request: FastifyRequest, allowedOrigins: ReadonlySet<string>): boolean {
   if (SAFE_METHODS.has(request.method)) return true;
+  // Payment-provider webhooks carry no cookie and are authenticated by their signature.
+  if (request.routeOptions.config.webhook === true) return true;
   if (request.headers['sec-fetch-site'] === 'cross-site') return false;
   const origin = request.headers.origin;
   if (origin !== undefined && !allowedOrigins.has(origin)) return false;

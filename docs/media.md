@@ -19,6 +19,10 @@ Status: NEEDS-SECURITY-REVIEW (S-05) · Decisions: ADR-013, **043**
 
 ## 1. Types and limits (FREE tier; higher tiers via entitlements)
 
+Paid plans raise the per-file limit for videos and documents to 1 GiB and the daily volume
+(`media.*` entitlements, [billing.md](billing.md) §2); the server enforces the account's own
+limit, the database the absolute cap.
+
 | Type | Max size | Client processing before encryption |
 |---|---|---|
 | Image (JPEG, PNG, WebP, HEIC→JPEG, GIF) | 25 MiB | EXIF/GPS stripped by re-encoding (canvas/OffscreenCanvas); thumbnail 320px |

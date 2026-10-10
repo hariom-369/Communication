@@ -70,6 +70,16 @@ export function PersonPage(): ReactNode {
             </dd>
             <dt>Created</dt>
             <dd>{dateTime(person.createdAt)}</dd>
+            <dt>Plan</dt>
+            <dd>
+              {person.billing.tier}
+              {person.billing.status === null
+                ? ''
+                : ` · ${person.billing.planName ?? ''} (${person.billing.status}${person.billing.cancelAtPeriodEnd ? ', cancelled' : ''}) via ${person.billing.provider ?? ''}`}
+              {person.billing.currentPeriodEnd === null
+                ? ''
+                : ` · period ends ${dateTime(person.billing.currentPeriodEnd)}`}
+            </dd>
             <dt>Sign-in methods</dt>
             <dd>
               {person.credentials.hasPassword ? 'password' : 'no password'} ·{' '}

@@ -109,6 +109,15 @@ export const adminUserDetailSchema = adminUserSummarySchema.extend({
     }),
   ),
   standing: z.object({ status: z.string(), suspendedUntil: z.string().nullable() }),
+  /** Plan only: no payment details exist at Tessera (they stay with the provider). */
+  billing: z.object({
+    tier: z.string(),
+    planName: z.string().nullable(),
+    status: z.string().nullable(),
+    provider: z.string().nullable(),
+    cancelAtPeriodEnd: z.boolean(),
+    currentPeriodEnd: z.string().nullable(),
+  }),
 });
 export type AdminUserDetail = z.infer<typeof adminUserDetailSchema>;
 

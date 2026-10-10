@@ -21,10 +21,34 @@ import { S3ObjectStore } from '../platform/object-store.js';
 import { ValkeyRateLimiter } from '../platform/rate-limit.js';
 import { createValkey } from '../platform/valkey.js';
 
+import type { FakePayments } from './fake-payments.js';
 import { requireEnv } from './integration-env.js';
 import webpush from 'web-push';
 
 export const ORIGIN = 'https://app.tessera.test';
+
+/** Billing configured against the payment stand-in; the seller is registered in Karnataka. */
+export function billingTestConfig(payments: FakePayments) {
+  const { credentials, url: standInUrl } = payments;
+  return {
+    STRIPE_SECRET_KEY: credentials.stripeSecretKey,
+    STRIPE_WEBHOOK_SECRET: credentials.stripeWebhookSecret,
+    STRIPE_PRICES:
+      'premium_monthly=price_premium_monthly,premium_yearly=price_premium_yearly,creator_monthly=price_creator_monthly',
+    STRIPE_API_URL: standInUrl,
+    RAZORPAY_KEY_ID: credentials.razorpayKeyId,
+    RAZORPAY_KEY_SECRET: credentials.razorpayKeySecret,
+    RAZORPAY_WEBHOOK_SECRET: credentials.razorpayWebhookSecret,
+    RAZORPAY_PLANS:
+      'premium_monthly=plan_premium_monthly,premium_yearly=plan_premium_yearly,creator_monthly=plan_creator_monthly',
+    RAZORPAY_API_URL: standInUrl,
+    BILLING_SELLER_NAME: 'Tessera Test Private Limited',
+    BILLING_SELLER_ADDRESS: '1 Test Road, Bengaluru 560001',
+    BILLING_SELLER_GSTIN: '29ABCDE1234F1Z5',
+    BILLING_SELLER_STATE: 'KA',
+    BILLING_SAC_CODE: '998439',
+  };
+}
 export const TEST_TURN_SECRET = 'turn-secret-for-integration-tests-only-0123456789';
 export const TEST_LIVEKIT_SECRET = 'livekit-secret-for-integration-tests-only-0123456789';
 export const RP_ID = 'app.tessera.test';
@@ -76,7 +100,11 @@ export interface IntegrationApp {
 export const TEST_VAPID = webpush.generateVAPIDKeys();
 
 export async function startIntegrationApp(
-  options: { pushTestOrigin?: string } = {},
+  options: {
+    pushTestOrigin?: string;
+    /** Billing against a stand-in for both payment providers (src/test/fake-payments.ts). */
+    payments?: FakePayments;
+  } = {},
 ): Promise<IntegrationApp> {
   const adminUrl = requireEnv('TEST_DATABASE_URL');
   const name = `tessera_app_${randomBytes(6).toString('hex')}`;
@@ -155,6 +183,7 @@ export async function startIntegrationApp(
       SECURITY_ALERT_RETENTION_DAYS: 180,
       FRANKING_KEYS: `f1:${key()}`,
       EVIDENCE_RETENTION_DAYS: 365,
+      ...(options.payments === undefined ? {} : billingTestConfig(options.payments)),
     },
     { db, valkey, mailer, logger, media, moderationKey },
   );

@@ -99,6 +99,7 @@ export default tseslint.config(
     files: [
       'apps/web/src/api/endpoints.ts',
       'apps/web/src/api/moderation-endpoints.ts',
+      'apps/web/src/api/billing-endpoints.ts',
       'apps/admin/src/endpoints.ts',
     ],
     rules: { '@typescript-eslint/explicit-module-boundary-types': 'off' },

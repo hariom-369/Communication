@@ -209,6 +209,45 @@ describe('admin console settings', () => {
   });
 });
 
+describe('billing settings', () => {
+  // Built at run time: shapes only, never key-like literals in the repository.
+  const fake = (prefix: string) => `${prefix}_${'x'.repeat(24)}`;
+  const stripe = {
+    STRIPE_SECRET_KEY: fake('sk_live'),
+    STRIPE_WEBHOOK_SECRET: fake('whsec'),
+    STRIPE_PRICES: 'premium_monthly=price_1',
+  };
+  const seller = {
+    BILLING_SELLER_NAME: 'Tessera Private Limited',
+    BILLING_SELLER_ADDRESS: 'Bengaluru',
+    BILLING_SELLER_STATE: 'KA',
+    BILLING_SELLER_GSTIN: '29ABCDE1234F1Z5',
+  };
+
+  it('configures a provider completely or not at all, with a seller for invoices', () => {
+    expect(issueKeys({ ...base, ...stripe, ...seller })).toEqual([]);
+    const { STRIPE_PRICES: _p, ...partial } = stripe;
+    expect(issueKeys({ ...base, ...partial, ...seller })).toEqual(['STRIPE_SECRET_KEY']);
+    expect(issueKeys({ ...base, ...stripe })).toEqual(['BILLING_SELLER_NAME']);
+    expect(issueKeys({ ...base, ...stripe, ...seller, BILLING_SELLER_STATE: 'MH' })).toEqual([
+      'BILLING_SELLER_GSTIN',
+    ]);
+  });
+
+  it('refuses stand-in provider URLs and test-mode keys in production', () => {
+    expect(issueKeys({ ...production, ...stripe, ...seller })).toEqual([]);
+    expect(
+      issueKeys({
+        ...production,
+        ...stripe,
+        ...seller,
+        STRIPE_SECRET_KEY: fake('sk_test'),
+        RAZORPAY_API_URL: 'http://127.0.0.1:58997',
+      }).sort(),
+    ).toEqual(['RAZORPAY_API_URL', 'STRIPE_SECRET_KEY']);
+  });
+});
+
 describe('push notification settings', () => {
   const vapid = {
     VAPID_PUBLIC_KEY: Buffer.alloc(65, 4).toString('base64url'),

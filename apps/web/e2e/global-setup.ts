@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { createECDH } from 'node:crypto';
+import { createECDH, randomBytes } from 'node:crypto';
 import { createWriteStream, existsSync, readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import path from 'node:path';
@@ -23,6 +23,28 @@ export const INBOX_PORT = 58026;
 const API_PORT = 58080;
 export const TURN_PORT = 53478;
 const SFU_PORT = 57880;
+/** The stand-in for Stripe's and Razorpay's APIs and payment pages (billing.spec.ts). */
+export const PAYMENTS_PORT = 58997;
+/**
+ * Billing against the payment stand-in, with credentials made up for this run (the stand-in
+ * accepts and signs with the same ones; test-mode prefixes, refused in production).
+ */
+const randomSecret = () => randomBytes(18).toString('base64url');
+const PAYMENTS_ENV = {
+  STRIPE_SECRET_KEY: `sk_test_${randomSecret()}`,
+  STRIPE_WEBHOOK_SECRET: `whsec_${randomSecret()}`,
+  STRIPE_PRICES: 'premium_monthly=price_premium_monthly,creator_monthly=price_creator_monthly',
+  STRIPE_API_URL: `http://127.0.0.1:${String(PAYMENTS_PORT)}`,
+  RAZORPAY_KEY_ID: `rzp_test_${randomBytes(6).toString('hex')}`,
+  RAZORPAY_KEY_SECRET: randomSecret(),
+  RAZORPAY_WEBHOOK_SECRET: randomSecret(),
+  RAZORPAY_PLANS: 'premium_monthly=plan_premium_monthly,creator_monthly=plan_creator_monthly',
+  RAZORPAY_API_URL: `http://127.0.0.1:${String(PAYMENTS_PORT)}`,
+  BILLING_SELLER_NAME: 'Tessera Test Private Limited',
+  BILLING_SELLER_ADDRESS: '1 Test Road, Bengaluru 560001',
+  BILLING_SELLER_GSTIN: '29ABCDE1234F1Z5',
+  BILLING_SELLER_STATE: 'KA',
+};
 /** The stand-in push service the API delivers to (notifications.spec.ts runs it). */
 export const PUSH_PORT = 58998;
 
@@ -113,7 +135,17 @@ function start(
     env: { ...process.env, ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  child.stderr.on('data', (chunk: Buffer) => process.stderr.write(chunk));
+  // Prefixed, so a message can be traced to the process that wrote it.
+  const tag = `[${path.basename(args[0] ?? command)}] `;
+  child.stderr.on('data', (chunk: Buffer) =>
+    process.stderr.write(
+      chunk
+        .toString()
+        .split('\n')
+        .map((line) => (line === '' ? line : tag + line))
+        .join('\n'),
+    ),
+  );
   // Always drain stdout: a full pipe would stall the process.
   if (logFile === undefined) child.stdout.resume();
   else child.stdout.pipe(createWriteStream(logFile));
@@ -298,6 +330,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     FRANKING_KEYS: `f1:${key()}`,
     MODERATION_HPKE_PUBLIC_KEY: moderationKey.getPublicKey().toString('base64url'),
     MODERATION_HPKE_PRIVATE_KEY: moderationKey.getPrivateKey().toString('base64url'),
+    // Billing against the payment-provider stand-in.
+    ...PAYMENTS_ENV,
   };
   process.env['E2E_VAPID_PUBLIC_KEY'] = vapid.publicKey;
   // Test workers use it to reset the per-IP sign-up limit between spec files (support.ts).
@@ -306,6 +340,20 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const migrate = start('node', ['dist/cli/migrate.js'], apiEnv, apiDir);
   const migrateCode = await new Promise<number | null>((resolve) => migrate.on('exit', resolve));
   if (migrateCode !== 0) throw new Error('E2E database migration failed');
+
+  const payments = start(
+    'node',
+    ['scripts/fake-payments.mjs'],
+    {
+      FAKE_PAYMENTS_PORT: String(PAYMENTS_PORT),
+      FAKE_PAYMENTS_WEBHOOKS: `http://127.0.0.1:${String(API_PORT)}/api/v1/billing/webhooks`,
+      FAKE_PAYMENTS_RETURN_URL: 'http://localhost:4173/settings/plan?checkout=return',
+      ...PAYMENTS_ENV,
+    },
+    apiDir,
+    path.join(logs, 'tessera-e2e-payments.log'),
+  );
+  await waitForPort(PAYMENTS_PORT);
 
   const api = start('node', ['dist/server.js'], apiEnv, apiDir);
   await waitFor('http://127.0.0.1:59090/readyz');
@@ -351,6 +399,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     web.kill('SIGTERM');
     realtime.kill('SIGTERM');
     api.kill('SIGTERM');
+    payments.kill('SIGTERM');
     // The next run binds the same ports: wait until the SFU and relay are really gone.
     await Promise.all([stop(sfu), stop(turn)]);
     try {

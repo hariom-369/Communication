@@ -88,6 +88,7 @@ export interface AdminPorts {
     revokeStaff(userId: string, role: 'moderator' | 'senior_moderator' | 'legal'): Promise<boolean>;
   };
   readonly messaging: { countSince(since: Date): Promise<number> };
+  readonly billing: { summary(userId: string): Promise<AdminUserDetail['billing']> };
   readonly notifications: { queueDepth(): Promise<number> };
   readonly flags: {
     list(): Promise<
@@ -231,12 +232,13 @@ export class AdminService {
     await this.#countLookup(principal.adminId);
     const account = await this.#ports.accounts.byId(userId);
     if (account === null) throw new AppError('NOT_FOUND');
-    const [credentials, devices, sessions, loginEvents, standing] = await Promise.all([
+    const [credentials, devices, sessions, loginEvents, standing, billing] = await Promise.all([
       this.#ports.auth.summary(userId),
       this.#ports.devices.list(userId),
       this.#ports.auth.sessions(userId),
       this.#ports.auth.loginEvents(userId),
       this.#ports.moderation.standing(userId),
+      this.#ports.billing.summary(userId),
     ]);
     return {
       ...account,
@@ -250,6 +252,7 @@ export class AdminService {
       })),
       loginEvents: loginEvents.map((e) => ({ ...e, createdAt: e.createdAt.toISOString() })),
       standing,
+      billing,
     };
   }
 

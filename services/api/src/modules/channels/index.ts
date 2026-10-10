@@ -1,6 +1,7 @@
 export {
   ChannelsService,
   type ChannelDirectory,
+  type ChannelEntitlementsPort,
   type ChannelLinkGuard,
   type ChannelNotifier,
   type ChannelSnapshot,

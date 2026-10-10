@@ -25,6 +25,8 @@ import { AccountPage } from './pages/settings/AccountPage.js';
 import { AccountStatusPage, SuspendedScreen } from './pages/settings/AccountStatusPage.js';
 import { DevicesPage } from './pages/settings/DevicesPage.js';
 import { NotificationsPage } from './pages/settings/NotificationsPage.js';
+import { InvoicePage } from './pages/settings/InvoicePage.js';
+import { PlanPage } from './pages/settings/PlanPage.js';
 import { PrivacyPage } from './pages/settings/PrivacyPage.js';
 import { SecurityPage } from './pages/settings/SecurityPage.js';
 import { SetupCredentialPage } from './pages/SetupCredentialPage.js';
@@ -149,6 +151,8 @@ const router = createBrowserRouter([
       { path: '/settings/notifications', element: <NotificationsPage /> },
       { path: '/settings/account', element: <AccountPage /> },
       { path: '/settings/status', element: <AccountStatusPage /> },
+      { path: '/settings/plan', element: <PlanPage /> },
+      { path: '/settings/plan/invoices/:invoiceId', element: <InvoicePage /> },
       { path: '/moderation', element: <ModerationPage /> },
       { path: '/moderation/cases/:caseId', element: <CaseView /> },
       { path: '/chats', element: <ChatsPage /> },

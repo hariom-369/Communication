@@ -1524,3 +1524,43 @@ audio {
 .evidence-file__image--hidden {
   filter: blur(24px);
 }
+
+/* Tax invoices (settings → plan): readable on screen, clean when printed or saved as PDF. */
+.invoice__parties {
+  display: grid;
+  gap: var(--t-space-4);
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+}
+.invoice__parties h2 {
+  font-size: var(--t-text-md);
+}
+.invoice__facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--t-space-1) var(--t-space-4);
+  margin: 0;
+}
+.invoice__facts dd {
+  margin: 0;
+}
+.invoice__lines {
+  width: 100%;
+  border-collapse: collapse;
+}
+.invoice__lines th,
+.invoice__lines td {
+  padding: var(--t-space-2);
+  border-bottom: 1px solid var(--t-color-border);
+  text-align: left;
+}
+.invoice__lines td:last-child,
+.invoice__lines th:last-child {
+  text-align: right;
+}
+@media print {
+  .no-print,
+  nav,
+  .app-shell__nav {
+    display: none !important;
+  }
+}

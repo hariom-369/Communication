@@ -178,9 +178,14 @@ describe("'media.create_upload', 'media.upload_parts', 'media.complete_upload', 
         .where('id', '=', created.blobId)
         .execute(),
     ).toEqual([]);
-    // Sizes beyond the attachment limit are rejected before anything is stored.
+    // Sizes beyond the account's plan (200 MB free) are rejected before anything is stored;
+    // sizes beyond any plan fail validation.
+    const overPlan = await alice.client.post('/api/v1/media/uploads', { size: 300 * 1024 * 1024 });
+    expect(overPlan.statusCode).toBe(413);
+    expect(overPlan.json<{ detail: string }>().detail).toMatch(/200 MB on your plan/);
     expect(
-      (await alice.client.post('/api/v1/media/uploads', { size: 300 * 1024 * 1024 })).statusCode,
+      (await alice.client.post('/api/v1/media/uploads', { size: 2 * 1024 * 1024 * 1024 }))
+        .statusCode,
     ).toBe(400);
   });
 });
@@ -321,6 +326,7 @@ describe('limits and expiry', () => {
       maxUploading: 2,
       dailyBytes: 1000,
       dailyUploads: 3,
+      maxFileBytes: 200 * 1024 * 1024,
     });
     await media.createUpload(alice.id, 100);
     await media.createUpload(alice.id, 100);

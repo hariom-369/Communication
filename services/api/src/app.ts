@@ -55,6 +55,17 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
 
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
+  // JSON as usual (prototype and constructor poisoning refused), except that webhook routes get
+  // the exact bytes received: their signatures are computed over the raw body.
+  const json = app.getDefaultJsonParser('error', 'error');
+  app.removeContentTypeParser('application/json');
+  app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (request, body, done) => {
+    if (request.routeOptions.config.webhook === true) {
+      done(null, body);
+      return;
+    }
+    void json(request, (body as Buffer).toString('utf8'), done);
+  });
 
   installErrorHandling(app, options.logger);
   installSecurityHeaders(app, { hsts: options.hsts });

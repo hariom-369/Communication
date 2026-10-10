@@ -117,6 +117,12 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     path.join(logs, 'identity-provider.log'),
   );
   await waitFor(`${idp.issuer}/.well-known/openid-configuration`);
+  // A provider left over from an earlier run would answer instead (with another secret).
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  if (idpProcess.exitCode !== null)
+    throw new Error(
+      `The test identity provider could not start (port ${String(IDP_PORT)} in use?)`,
+    );
   const key = () => randomBytes(32).toString('base64');
   const env = {
     NODE_ENV: 'development',

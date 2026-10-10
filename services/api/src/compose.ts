@@ -29,6 +29,15 @@ import {
   groupRoutes,
   messagingRoutes,
 } from './modules/messaging/index.js';
+import {
+  BillingService,
+  RazorpayProvider,
+  StripeProvider,
+  billingRoutes,
+  parsePriceMap,
+  type PaymentProvider,
+} from './modules/billing/index.js';
+import { EntitlementsService, entitlementRoutes } from './modules/entitlements/index.js';
 import { FlagsService, flagRoutes } from './modules/flags/index.js';
 import { metaRoutes } from './modules/meta/index.js';
 import {
@@ -87,7 +96,26 @@ export type ModuleConfig = Pick<
   | 'SECURITY_ALERT_RETENTION_DAYS'
   | 'FRANKING_KEYS'
   | 'EVIDENCE_RETENTION_DAYS'
->;
+> &
+  Partial<
+    Pick<
+      ApiConfig,
+      | 'STRIPE_SECRET_KEY'
+      | 'STRIPE_WEBHOOK_SECRET'
+      | 'STRIPE_PRICES'
+      | 'STRIPE_API_URL'
+      | 'RAZORPAY_KEY_ID'
+      | 'RAZORPAY_KEY_SECRET'
+      | 'RAZORPAY_WEBHOOK_SECRET'
+      | 'RAZORPAY_PLANS'
+      | 'RAZORPAY_API_URL'
+      | 'BILLING_SELLER_NAME'
+      | 'BILLING_SELLER_ADDRESS'
+      | 'BILLING_SELLER_GSTIN'
+      | 'BILLING_SELLER_STATE'
+      | 'BILLING_SAC_CODE'
+    >
+  >;
 
 export interface ModuleInfrastructure {
   readonly db: Kysely<Database>;
@@ -117,6 +145,8 @@ export interface Modules {
   readonly loginEvents: LoginEvents;
   readonly flags: FlagsService;
   readonly notifyQueue: NotifyQueue;
+  readonly entitlements: EntitlementsService;
+  readonly billing: BillingService;
 }
 
 const DAY_MS = 24 * 60 * 60_000;
@@ -328,6 +358,83 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
   const flags = new FlagsService(infra.db);
   calls.useSwitch((userId) => flags.enabled('group_calls', userId));
   previews.useSwitch(() => flags.enabled('link_previews'));
+
+  // Billing and entitlements (docs/billing.md): other modules ask entitlements, never billing.
+  const entitlements = new EntitlementsService(
+    infra.db,
+    infra.valkey,
+    config.VALKEY_KEY_PREFIX,
+    infra.logger,
+  );
+  media.useEntitlements({
+    limits: async (userId) => {
+      const { limits } = await entitlements.forUser(userId);
+      return {
+        maxFileBytes: limits['media.max_file_bytes'],
+        dailyBytes: limits['media.daily_bytes'],
+        dailyUploads: limits['media.daily_uploads'],
+      };
+    },
+  });
+  channels.useEntitlements({
+    limits: async (userId) => {
+      const { limits } = await entitlements.forUser(userId);
+      return {
+        maxOwned: limits['channels.max_owned'],
+        scheduleDays: limits['channels.schedule_days'],
+      };
+    },
+  });
+  const providers: PaymentProvider[] = [];
+  if (
+    config.STRIPE_SECRET_KEY !== undefined &&
+    config.STRIPE_WEBHOOK_SECRET !== undefined &&
+    config.STRIPE_PRICES !== undefined
+  )
+    providers.push(
+      new StripeProvider({
+        secretKey: config.STRIPE_SECRET_KEY,
+        webhookSecret: config.STRIPE_WEBHOOK_SECRET,
+        prices: parsePriceMap(config.STRIPE_PRICES),
+        apiUrl: config.STRIPE_API_URL ?? 'https://api.stripe.com',
+      }),
+    );
+  if (
+    config.RAZORPAY_KEY_ID !== undefined &&
+    config.RAZORPAY_KEY_SECRET !== undefined &&
+    config.RAZORPAY_WEBHOOK_SECRET !== undefined &&
+    config.RAZORPAY_PLANS !== undefined
+  )
+    providers.push(
+      new RazorpayProvider({
+        keyId: config.RAZORPAY_KEY_ID,
+        keySecret: config.RAZORPAY_KEY_SECRET,
+        webhookSecret: config.RAZORPAY_WEBHOOK_SECRET,
+        plans: parsePriceMap(config.RAZORPAY_PLANS),
+        apiUrl: config.RAZORPAY_API_URL ?? 'https://api.razorpay.com',
+      }),
+    );
+  const billing = new BillingService({
+    db: infra.db,
+    providers,
+    entitlements,
+    audit,
+    seller:
+      config.BILLING_SELLER_NAME !== undefined &&
+      config.BILLING_SELLER_ADDRESS !== undefined &&
+      config.BILLING_SELLER_STATE !== undefined
+        ? {
+            name: config.BILLING_SELLER_NAME,
+            address: config.BILLING_SELLER_ADDRESS,
+            gstin: config.BILLING_SELLER_GSTIN ?? null,
+            state: config.BILLING_SELLER_STATE,
+            sacCode: config.BILLING_SAC_CODE ?? '998439',
+          }
+        : null,
+    returnUrl: new URL('/settings/plan?checkout=return', config.PUBLIC_WEB_URL).href,
+    checkoutEnabled: () => flags.enabled('billing'),
+    logger: infra.logger,
+  });
   channels.useNotifier(notifications);
   auth.useAlerts(notifications);
   sessions.onRotated((from, to) => {
@@ -351,6 +458,8 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
       ...realtimeRoutes({ realtime, websocketPath: config.REALTIME_WS_PATH }),
       ...moderationRoutes({ moderation }),
       ...flagRoutes({ flags }),
+      ...entitlementRoutes({ entitlements }),
+      ...billingRoutes({ billing }),
     ],
     sessions,
     audit,
@@ -367,5 +476,7 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
     loginEvents,
     flags,
     notifyQueue,
+    entitlements,
+    billing,
   };
 }

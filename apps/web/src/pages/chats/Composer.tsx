@@ -15,6 +15,7 @@ import {
   prepareAttachment,
   prepareVoiceNote,
 } from '../../messaging/attachments.js';
+import { maxFileBytes } from '../../billing/limits.js';
 import { MAX_TEXT_LENGTH } from '../../messaging/content.js';
 import type { OutgoingAttachment } from '../../messaging/store.js';
 
@@ -66,7 +67,7 @@ export function Composer({
     setPreparing((n) => n + accepted.length);
     for (const file of accepted) {
       try {
-        const prepared = await prepareAttachment(file);
+        const prepared = await prepareAttachment(file, await maxFileBytes());
         setAttachments((current) => [...current, prepared]);
       } catch (caught) {
         setError(

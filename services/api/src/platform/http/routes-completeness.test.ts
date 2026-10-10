@@ -41,7 +41,9 @@ describe('route completeness', () => {
       if (route.audit.kind === 'none') expect(route.audit.reason.length).toBeGreaterThan(0);
       else expect(route.audit.actions.length).toBeGreaterThan(0);
       if (route.method === 'POST' || route.method === 'PUT' || route.method === 'PATCH') {
-        expect(route.schema.body).toBeDefined();
+        // Webhooks take the raw body: their handler verifies the signature, then parses it.
+        if (route.auth.kind === 'webhook') expect(route.schema.body).toBeUndefined();
+        else expect(route.schema.body).toBeDefined();
       }
     },
   );

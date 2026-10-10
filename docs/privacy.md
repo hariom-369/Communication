@@ -80,3 +80,7 @@ no advertising profiling at launch.
 | Support tickets (help-desk reference, the person, what they asked for) | Yes | while open + per audit policy | the purpose under which support staff may look at an account |
 | Feature-flag rollout bucket | Derived (SHA-256 of flag and account id), not stored | — | the same person always gets the same answer for a staged rollout |
 | Staff identities (admins: work email, name, identity-provider subject, security-key public keys, sessions with full client address) | Yes | while employed + audit policy | staff, not users; full addresses for accountability of privileged access |
+| Plan and subscription (tier, provider, provider reference, status, period) | Yes | while the account exists; ended subscriptions kept with the invoices | card and UPI details stay with the payment provider (never sent to Tessera) |
+| Billing details (name for invoices, country, Indian state, optional GSTIN) | Yes | while the account exists; snapshotted on each invoice | needed for GST place of supply ([billing.md](billing.md)) |
+| Tax invoices (number, amounts, GST split, buyer and seller details) | Yes | as tax law requires (typically 8 years — L-11) | issued per payment |
+| Payment webhook events (provider, event id, type, time) | Yes | with the subscription | idempotency only; no payload stored |

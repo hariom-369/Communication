@@ -1137,3 +1137,48 @@ of staff (accountability), unlike user-facing records (prefixes).
 
 **Status.** PROPOSED — implemented; NEEDS-SECURITY-REVIEW S-14 (admin plane: OIDC client,
 WebAuthn policy and attestation checks, authorization matrix, approval races).
+
+## ADR-051 — Billing as built: hosted checkout, signed idempotent webhooks applied from the provider's current state, entitlements as the only interface (Phase 13)
+
+**Context.** ADR-024 set the module split (billing owns plans, subscriptions and invoices;
+entitlements answers "what may this account do") and the providers (Razorpay in India, Stripe
+elsewhere). Building it raised: how to keep card data out of scope; how to make webhooks safe
+against forgery, duplicates, concurrency and out-of-order delivery; how quickly a payment must
+change limits; what to sell when most "premium" ideas did not exist; and how to issue invoices
+that satisfy GST.
+
+**Decision.**
+- **Hosted checkout only** (Stripe Checkout sessions; Razorpay subscription links). Tessera
+  stores provider references, never card or UPI data (SAQ-A). The billing country picks the
+  provider and currency and is fixed while a plan runs.
+- **No provider SDKs:** small adapters over the documented REST APIs, Stripe API version pinned
+  (`2024-06-20`), responses validated with Zod, provider errors never forwarded.
+- **Webhooks** through a new `webhook` auth kind in the route pipeline: no cookie session, no
+  browser CSRF check, raw body. Verified with the providers' documented HMAC-SHA256 schemes
+  (`node:crypto`, constant-time compare; Stripe's signed timestamp within 5 minutes; Razorpay's
+  event id required). Each event id is inserted in the same transaction as its effect
+  (idempotency), under a per-subscription advisory lock; the state applied is fetched from the
+  provider inside that lock, so the order of deliveries is irrelevant. Refund totals only grow.
+- **Entitlements:** `account_tiers(user, tier, valid_until, subscription)`, written by billing in
+  its transaction; read through a 60-second Valkey cache that billing invalidates after commit;
+  a cached tier never outlives `valid_until`. Only the subscription that granted a tier can
+  remove it. Media and channels read limits through ports; the free tier equals the limits that
+  existed before (nothing removed to be sold back); security and privacy features are never
+  tiered.
+- **States and grace:** active → until period end + 1 day; past due → 7 days from the first
+  failed renewal; cancellation at period end in one step; one plan in force per account (partial
+  unique index), a second paid checkout is ended at the provider and flagged for a refund.
+- **GST invoices** per payment with gapless per-financial-year numbering inside the payment
+  transaction; CGST+SGST within the seller's state, IGST otherwise, exports zero-rated (L-11).
+- **Kill switch** `billing` (feature flag) pauses new checkouts only.
+- **Admin:** the account view shows the plan (tier, status, period end, provider) — never payment
+  data. Refunds and disputes are handled in the providers' dashboards and recorded from their
+  events.
+
+**Consequences.** A forged or replayed webhook cannot grant a plan; a stale one cannot revoke
+it; a paid plan applies on the next request. Every webhook costs one provider API call (bounded,
+retried by the provider on failure). The provider is trusted for payment truth. 1 GB is the
+paid attachment limit until uploads stream (memory), not 2 GB as first proposed. Prices, SAC
+code, export treatment, credit notes and refund policy await the tax adviser and counsel (L-11).
+
+**Status.** PROPOSED — implemented; NEEDS-LEGAL-REVIEW L-11.

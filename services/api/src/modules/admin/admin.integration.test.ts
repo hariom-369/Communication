@@ -329,6 +329,7 @@ describe('purpose binding', () => {
     expect(detail.json()).toMatchObject({
       credentials: { hasPassword: true },
       standing: { status: 'good' },
+      billing: { tier: 'free', status: null },
     });
 
     // The purpose is recorded with each look.
