@@ -249,7 +249,7 @@ describe('billing settings', () => {
         ...stripe,
         ...seller,
         STRIPE_SECRET_KEY: fake('sk_test'),
-        RAZORPAY_API_URL: 'http://127.0.0.1:58997',
+        RAZORPAY_API_URL: 'http://127.0.0.1:28997',
       }).sort(),
     ).toEqual(['RAZORPAY_API_URL', 'STRIPE_SECRET_KEY']);
   });

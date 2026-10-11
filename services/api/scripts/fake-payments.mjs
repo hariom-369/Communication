@@ -1,6 +1,6 @@
 // Test only: runs the payment-provider stand-in (src/test/fake-payments.ts) as a process for the
 // web app's E2E tests (apps/web/e2e/global-setup.ts). Never part of a build or deployment.
-//   FAKE_PAYMENTS_PORT=58997 FAKE_PAYMENTS_WEBHOOKS=http://127.0.0.1:58080/api/v1/billing/webhooks \
+//   FAKE_PAYMENTS_PORT=28997 FAKE_PAYMENTS_WEBHOOKS=http://127.0.0.1:28080/api/v1/billing/webhooks \
 //   FAKE_PAYMENTS_RETURN_URL=http://localhost:4173/settings/plan?checkout=return node scripts/fake-payments.mjs
 const { FakePayments } = await import('../src/test/fake-payments.ts');
 

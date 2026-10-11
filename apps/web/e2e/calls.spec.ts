@@ -362,7 +362,7 @@ async function inspector(browser: Browser, callId: string) {
     new URL('../node_modules/livekit-client/dist/livekit-client.umd.js', import.meta.url),
     'utf8',
   );
-  await page.route('http://localhost:58997/**', (route) =>
+  await page.route('http://localhost:28997/**', (route) =>
     route.request().url().endsWith('/livekit.js')
       ? route.fulfill({ contentType: 'text/javascript', body: client })
       : route.fulfill({
@@ -370,7 +370,7 @@ async function inspector(browser: Browser, callId: string) {
           body: '<!doctype html><title>inspector</title><script src="/livekit.js"></script>',
         }),
   );
-  await page.goto('http://localhost:58997/');
+  await page.goto('http://localhost:28997/');
   await page.evaluate(
     async ({ url, token }) => {
       const lk = (window as unknown as { LivekitClient: typeof LivekitClient }).LivekitClient;

@@ -99,7 +99,11 @@ the WebSocket frame too (`routeWebSocket`) — the client still refuses the forg
 password-timing unit test takes nine samples instead of five (it failed once while every
 package's tests ran in parallel; it still fails when the dummy hash is skipped). End-to-end runs
 interrupted mid-gate left a coturn, two test identity providers and a Chromium behind, which made
-the next runs fail at port binding; they were killed and the reruns record leftover processes.
+the next runs fail at port binding; they were killed and the reruns record leftover processes. Separately, every fixed end-to-end port
+(API, inbox, push and payment stand-ins, health ports, coturn, LiveKit) and CI's S3 stand-in sat
+inside Linux's ephemeral port range (32768–60999), so an outgoing connection could take a test
+listener's port: one run failed on the push stand-in's port, one admin run on its health port.
+They moved below 32768 (the load harness already used such ports).
 
 ## Security implications (threat-model delta)
 

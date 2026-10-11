@@ -5,7 +5,7 @@ import type { CDPSession, Page } from '@playwright/test';
 import { Secret, TOTP } from 'otpauth';
 import pg from 'pg';
 
-const INBOX = 'http://127.0.0.1:58026';
+const INBOX = 'http://127.0.0.1:28026';
 
 export interface Mail {
   to: string;

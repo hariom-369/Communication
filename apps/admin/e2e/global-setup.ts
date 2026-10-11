@@ -10,13 +10,13 @@ import pg from 'pg';
  * Starts the admin stack for E2E tests:
  *   PostgreSQL database `tessera_admin_e2e` (fresh, migrated, with a few user accounts) · Valkey
  *   (existing) · test identity provider on a free port of 127.0.0.1 · admin API (`admin-server`) on
- *   :58082 · admin console preview on :4174.
+ *   :28082 · admin console preview on :4174.
  * Requires TEST_DATABASE_URL, TEST_VALKEY_URL and TEST_S3_URL, like the integration tests.
  */
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-const ADMIN_PORT = 58082;
-const ADMIN_HEALTH_PORT = 59092;
+const ADMIN_PORT = 28082;
+const ADMIN_HEALTH_PORT = 29092;
 export const ADMIN_ORIGIN = 'http://localhost:4174';
 
 /** Staff the operator command creates before the suite (break glass, as in production). */

@@ -44,8 +44,8 @@ export TEST_DATABASE_URL=postgres://tessera:tessera-local-only@localhost:5432/te
 export TEST_VALKEY_URL=redis://localhost:6379
 # S3-compatible store for encrypted attachments. Tests create their own buckets, which the
 # moto emulator allows without credentials (CI uses it too):
-#   python3 -m pip install --user "moto[server]==5.2.3" && moto_server -H 127.0.0.1 -p 59500
-export TEST_S3_URL=http://127.0.0.1:59500
+#   python3 -m pip install --user "moto[server]==5.2.3" && moto_server -H 127.0.0.1 -p 29500
+export TEST_S3_URL=http://127.0.0.1:29500
 ```
 
 The local MinIO in the compose file (console at http://127.0.0.1:9001) backs the dev API

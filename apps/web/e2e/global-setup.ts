@@ -11,20 +11,23 @@ import { SMTPServer } from 'smtp-server';
 /**
  * Starts the full stack for E2E tests:
  *   PostgreSQL database `tessera_e2e` (fresh, migrated) · Valkey (existing) · SMTP capture on
- *   127.0.0.1:58025 with an HTTP inbox on :58026 · API on :58080 · web preview on :4173 ·
- *   coturn on :53478 (infra/calls/turnserver.conf) · LiveKit SFU on :57880.
+ *   127.0.0.1:28025 with an HTTP inbox on :28026 · API on :28080 · web preview on :4173 ·
+ *   coturn on :23478 (infra/calls/turnserver.conf) · LiveKit SFU on :27880.
+ * Every fixed port is below 32768, outside Linux's ephemeral range (32768–60999): a listener
+ * there could find its port already taken by some process's outgoing connection (EADDRINUSE —
+ * seen for the push stand-in on the old 58998 and the admin health port on 59092).
  * Requires TEST_DATABASE_URL, TEST_VALKEY_URL and TEST_S3_URL (S3-compatible store for encrypted
  * attachments), like the integration tests (never skipped).
  */
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-export const SMTP_PORT = 58025;
-export const INBOX_PORT = 58026;
-const API_PORT = 58080;
-export const TURN_PORT = 53478;
-const SFU_PORT = 57880;
+export const SMTP_PORT = 28025;
+export const INBOX_PORT = 28026;
+const API_PORT = 28080;
+export const TURN_PORT = 23478;
+const SFU_PORT = 27880;
 /** The stand-in for Stripe's and Razorpay's APIs and payment pages (billing.spec.ts). */
-export const PAYMENTS_PORT = 58997;
+export const PAYMENTS_PORT = 28997;
 /**
  * Billing against the payment stand-in, with credentials made up for this run (the stand-in
  * accepts and signs with the same ones; test-mode prefixes, refused in production).
@@ -46,7 +49,7 @@ const PAYMENTS_ENV = {
   BILLING_SELLER_STATE: 'KA',
 };
 /** The stand-in push service the API delivers to (notifications.spec.ts runs it). */
-export const PUSH_PORT = 58998;
+export const PUSH_PORT = 28998;
 
 /** coturn and LiveKit binaries (CI installs both; locally they may live elsewhere). */
 function binary(name: string, envName: string): string {
@@ -254,8 +257,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
         'bind_addresses: ["127.0.0.1"]',
         'rtc:',
         `  tcp_port: ${SFU_PORT + 1}`,
-        '  port_range_start: 50000',
-        '  port_range_end: 50200',
+        '  port_range_start: 20000',
+        '  port_range_end: 20200',
         '  use_external_ip: false',
         '  node_ip: 127.0.0.1',
         'room:',
@@ -288,7 +291,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const apiEnv = {
     NODE_ENV: 'development',
     PORT: String(API_PORT),
-    HEALTH_PORT: '59090',
+    HEALTH_PORT: '29090',
     HOST: '127.0.0.1',
     LOG_LEVEL: 'warn',
     DATABASE_URL: databaseUrl.toString(),
@@ -356,7 +359,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   await waitForPort(PAYMENTS_PORT);
 
   const api = start('node', ['dist/server.js'], apiEnv, apiDir);
-  await waitFor('http://127.0.0.1:59090/readyz');
+  await waitFor('http://127.0.0.1:29090/readyz');
 
   const realtime = start(
     'node',
@@ -364,8 +367,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     {
       NODE_ENV: 'development',
       HOST: '127.0.0.1',
-      PORT: '58081',
-      HEALTH_PORT: '59091',
+      PORT: '28081',
+      HEALTH_PORT: '29091',
       LOG_LEVEL: 'warn',
       DATABASE_URL: databaseUrl.toString(),
       VALKEY_URL: valkeyUrl,
@@ -375,7 +378,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     },
     path.join(ROOT, 'services/realtime'),
   );
-  await waitFor('http://127.0.0.1:59091/readyz');
+  await waitFor('http://127.0.0.1:29091/readyz');
 
   // The production build, exactly as deployed (strict CSP applied by `vite preview`).
   const webDir = path.join(ROOT, 'apps/web');
@@ -387,7 +390,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     ['exec', 'vite', 'preview', '--host', 'localhost'],
     {
       TESSERA_API_URL: `http://127.0.0.1:${API_PORT}`,
-      TESSERA_REALTIME_URL: 'ws://127.0.0.1:58081',
+      TESSERA_REALTIME_URL: 'ws://127.0.0.1:28081',
       TESSERA_MEDIA_ORIGIN: s3.origin,
       TESSERA_SFU_URL: `ws://127.0.0.1:${SFU_PORT}`,
     },
