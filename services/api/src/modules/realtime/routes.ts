@@ -1,3 +1,4 @@
+import { AppError } from '@tessera/platform';
 import { idSchema, presenceSchema, realtimeTicketSchema } from '@tessera/validation';
 import { z } from 'zod';
 
@@ -17,6 +18,23 @@ export interface RealtimeModuleDeps {
    */
   readonly ticketsPerSecond?: number;
 }
+
+/**
+ * A refused ticket asks the client to come back after 1–10 s, chosen at random: a whole pod's
+ * clients refused together then return spread out instead of together, each time (with the
+ * limiter's own value — under a second — they all came back at once; docs/capacity.md §4).
+ */
+export function admissionRetryAfterSeconds(random: () => number = Math.random): number {
+  return (
+    1 +
+    Math.min(
+      ADMISSION_RETRY_SPREAD_SECONDS - 1,
+      Math.floor(random() * ADMISSION_RETRY_SPREAD_SECONDS),
+    )
+  );
+}
+
+const ADMISSION_RETRY_SPREAD_SECONDS = 10;
 
 export function realtimeRoutes(deps: RealtimeModuleDeps): RouteDefinition[] {
   const admission =
@@ -51,7 +69,11 @@ export function realtimeRoutes(deps: RealtimeModuleDeps): RouteDefinition[] {
       successStatus: 201,
       handler: async (_input, context) => {
         // One shared budget for the whole cluster (the subject is the same for everyone).
-        if (admission !== null) await context.rateLimit(admission, 'cluster');
+        if (admission !== null)
+          await context.rateLimit(admission, 'cluster').catch((error: unknown) => {
+            if (!(error instanceof AppError) || error.code !== 'RATE_LIMITED') throw error;
+            throw new AppError('RATE_LIMITED', { retryAfterSeconds: admissionRetryAfterSeconds() });
+          });
         return {
           ticket: await deps.realtime.issueTicket(context.session.userId, context.session.id),
           url: deps.websocketPath,

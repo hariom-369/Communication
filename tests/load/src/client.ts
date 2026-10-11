@@ -6,6 +6,7 @@ import { REALTIME_SUBPROTOCOL } from '@tessera/validation';
 import WebSocket from 'ws';
 
 import { ackDelayMs } from '../../../apps/web/src/messaging/ack-delay.js';
+import { UNEXPECTED_CLOSE_SPREAD_MS } from '../../../apps/web/src/messaging/realtime-client.js';
 
 import type { Counters, Histogram } from './metrics.js';
 import type { SeededUser } from './seed.js';
@@ -286,7 +287,11 @@ export class VirtualUser {
           this.#disconnectedAt ??= Date.now();
           this.#nextPod();
         }
-        if (this.reconnect && wasReady) this.#scheduleReconnect(this.#backoff());
+        // As the app: the first attempt after a drop without warning is spread over 5 s.
+        if (this.reconnect && wasReady)
+          this.#scheduleReconnect(
+            Math.max(this.#backoff(), Math.random() * UNEXPECTED_CLOSE_SPREAD_MS),
+          );
       });
       socket.on('error', () => {
         this.#metrics.counters.add('socket_error');

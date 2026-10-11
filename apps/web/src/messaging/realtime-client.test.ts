@@ -27,7 +27,10 @@ class FakeSocket {
 
 const ticket = () => Promise.resolve({ ticket: 't'.repeat(43), url: '/rt/v1/ws' });
 
-function setup(getTicket: () => Promise<{ ticket: string; url: string }> = ticket) {
+function setup(
+  getTicket: () => Promise<{ ticket: string; url: string }> = ticket,
+  random: () => number = () => 0,
+) {
   const sockets: FakeSocket[] = [];
   const statuses: ConnectionStatus[] = [];
   const onReady = vi.fn();
@@ -37,7 +40,7 @@ function setup(getTicket: () => Promise<{ ticket: string; url: string }> = ticke
     onStatus: (status) => statuses.push(status),
     onReady,
     websocketBase: 'ws://test',
-    random: () => 0,
+    random,
     createSocket: () => {
       const socket = new FakeSocket();
       sockets.push(socket);
@@ -133,6 +136,31 @@ describe('RealtimeClient', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(getTicket).toHaveBeenCalledTimes(2);
     expect(sockets).toHaveLength(1);
+    client.stop();
+  });
+
+  it('spreads the first reconnect after a connection drops without warning', async () => {
+    const { client, sockets } = setup(ticket, () => 0.5);
+    client.start();
+    await vi.advanceTimersByTimeAsync(0);
+    sockets[0]!.open();
+    sockets[0]!.onclose?.({ code: 1006 });
+    // Up to 5 s at random (here half of it), not the backoff's first 500 ms.
+    await vi.advanceTimersByTimeAsync(2_499);
+    expect(sockets).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sockets).toHaveLength(2);
+    client.stop();
+  });
+
+  it('does not spread a retry after a connection that never became ready', async () => {
+    const { client, sockets } = setup(ticket, () => 0.5);
+    client.start();
+    await vi.advanceTimersByTimeAsync(0);
+    sockets[0]!.onclose?.({ code: 1006 });
+    // The backoff alone: random 0.5 of the first 500 ms.
+    await vi.advanceTimersByTimeAsync(250);
+    expect(sockets).toHaveLength(2);
     client.stop();
   });
 });

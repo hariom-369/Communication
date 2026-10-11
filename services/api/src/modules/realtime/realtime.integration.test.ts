@@ -29,8 +29,16 @@ describe('realtime ticket admission', () => {
     );
     const statuses = responses.map((response) => response.statusCode).sort();
     expect(statuses).toEqual([201, 201, 201, 429, 429, 429]);
-    for (const refused of responses.filter((response) => response.statusCode === 429))
-      expect(Number(refused.headers['retry-after'])).toBeGreaterThanOrEqual(1);
+    // Refused together, told to come back at different times (1–10 s), so they do not return
+    // together.
+    const waits = responses
+      .filter((response) => response.statusCode === 429)
+      .map((response) => Number(response.headers['retry-after']));
+    for (const wait of waits) {
+      expect(Number.isInteger(wait)).toBe(true);
+      expect(wait).toBeGreaterThanOrEqual(1);
+      expect(wait).toBeLessThanOrEqual(10);
+    }
     // The budget refills: a refused user gets a ticket shortly after.
     await new Promise((resolve) => setTimeout(resolve, 1100));
     const retry = await users[5]!.client.post('/api/v1/realtime/ticket', {});

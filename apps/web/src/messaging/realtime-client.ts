@@ -27,6 +27,14 @@ export interface RealtimeClientOptions {
 const BASE_DELAY_MS = 500;
 const MAX_DELAY_MS = 30_000;
 const STABLE_AFTER_MS = 60_000;
+/**
+ * When an established connection drops without warning, the first attempt waits up to this
+ * long (at random). A realtime pod that crashes drops all of its clients at the same instant;
+ * with only the backoff's first 500 ms they all hit the API within half a second, and the users
+ * still connected waited seconds for their messages to send (docs/capacity.md §4). Coming back
+ * online (`reconnectNow`) and deploy hints are not delayed.
+ */
+export const UNEXPECTED_CLOSE_SPREAD_MS = 5000;
 
 /** Close codes after which retrying cannot help until the user signs in again. */
 const FATAL_CLOSE_CODES = new Set([4401, 4403]);
@@ -122,6 +130,7 @@ export class RealtimeClient {
     const socket = create(`${base}${ticket.url}`, REALTIME_SUBPROTOCOL);
     this.#socket = socket;
 
+    let established = false;
     socket.onopen = () => {
       socket.send(JSON.stringify({ type: 'auth', id: this.#nextId(), ticket: ticket.ticket }));
     };
@@ -136,6 +145,7 @@ export class RealtimeClient {
       const frame = serverFrameSchema.safeParse(parsed);
       if (!frame.success) return;
       if (frame.data.type === 'ready') {
+        established = true;
         this.#options.onStatus('online');
         this.#stableTimer = setTimeout(() => {
           this.#attempt = 0;
@@ -160,8 +170,11 @@ export class RealtimeClient {
         // Ticket or session rejected: a fresh ticket may still work (e.g. rotated session),
         // but back off fully so an expired session does not spin.
         this.#attempt = Math.max(this.#attempt, 5);
+        this.#scheduleReconnect();
+        return;
       }
-      this.#scheduleReconnect();
+      const random = this.#options.random ?? Math.random;
+      this.#scheduleReconnect(established ? random() * UNEXPECTED_CLOSE_SPREAD_MS : 0);
     };
   }
 
