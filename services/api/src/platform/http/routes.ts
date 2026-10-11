@@ -21,7 +21,8 @@ export type SessionStage = 'credential_setup' | 'mfa_pending' | 'active';
  * Authentication requirement (docs/authentication.md §4).
  * - `public`: no session needed (a session, if present, is still resolved).
  * - `session`: a valid session in one of `stages` (default: `active`). `stepUp` additionally
- *   requires re-authentication within the last STEP_UP_WINDOW_MS.
+ *   requires re-authentication within the last STEP_UP_WINDOW_MS; `'when-active'` only for
+ *   `active` sessions (a new account setting up its first credential has none to re-confirm).
  */
 export type AuthRequirement =
   | { readonly kind: 'public' }
@@ -34,7 +35,7 @@ export type AuthRequirement =
   | {
       readonly kind: 'session';
       readonly stages?: readonly SessionStage[];
-      readonly stepUp?: boolean;
+      readonly stepUp?: boolean | 'when-active';
       /**
        * Reachable while the account is suspended or banned (its status, appeals, signing out).
        * Every other signed-in route answers ACCOUNT_SUSPENDED (docs/moderation.md §5).
@@ -333,7 +334,10 @@ async function authenticate(
   if (session === null) throw new AppError('UNAUTHENTICATED');
   const stages = requirement.stages ?? ['active'];
   if (!stages.includes(session.stage)) throw new AppError('FORBIDDEN');
-  if (requirement.stepUp === true) {
+  if (
+    requirement.stepUp === true ||
+    (requirement.stepUp === 'when-active' && session.stage === 'active')
+  ) {
     const recent =
       session.reauthenticatedAt !== null &&
       Date.now() - session.reauthenticatedAt.getTime() <= STEP_UP_WINDOW_MS;

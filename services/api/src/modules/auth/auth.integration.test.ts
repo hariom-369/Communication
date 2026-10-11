@@ -208,6 +208,29 @@ describe("'auth.reauth_password' and step-up", () => {
   });
 });
 
+describe("'auth.passkey_register_options' on an active account", () => {
+  it('needs a recent re-authentication, so a stolen session cannot add its own passkey', async () => {
+    const user = await createActiveUser(env);
+    await env.db
+      .updateTable('sessions')
+      .set({ reauthenticated_at: new Date(Date.now() - 11 * 60_000) })
+      .execute();
+    const stale = await user.client.post('/api/v1/auth/passkeys/register/options', {});
+    expect(stale.json()).toMatchObject({ code: 'STEP_UP_REQUIRED', status: 403 });
+    const verify = await user.client.post('/api/v1/auth/passkeys/register/verify', {
+      flowId: '00000000-0000-7000-8000-000000000000',
+      name: 'attacker key',
+      response: {},
+    });
+    // Refused before the body is even looked at (authentication runs first).
+    expect(verify.json()).toMatchObject({ code: 'STEP_UP_REQUIRED', status: 403 });
+    await reauth(user.client, user.password);
+    expect((await user.client.post('/api/v1/auth/passkeys/register/options', {})).statusCode).toBe(
+      200,
+    );
+  });
+});
+
 describe("'auth.password_change'", () => {
   it('signs out every other session and notifies the user', async () => {
     const user = await createActiveUser(env);

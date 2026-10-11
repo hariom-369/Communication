@@ -33,7 +33,7 @@ const plainText = (min: number, max: number) =>
   z
     .string()
     .max(max)
-    .refine((value) => !/(?![\n\r\t])\p{Cc}|[‪-‮⁦-⁩]/u.test(value), {
+    .refine((value) => !/(?![\n\r\t])\p{Cc}|[\u202A-\u202E\u2066-\u2069]/u.test(value), {
       message: 'Remove control or direction-override characters',
     })
     .transform((value) => value.replace(/\r\n?/g, '\n').trim())

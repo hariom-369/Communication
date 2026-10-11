@@ -66,7 +66,13 @@ export function renderMatrix(
 function userAuth(auth: RouteDefinition['auth']): string {
   if (auth.kind !== 'session') return auth.kind;
   const stages = auth.stages === undefined ? '' : ` (${auth.stages.join('/')})`;
-  return `session${stages}${auth.stepUp === true ? ', step-up' : ''}`;
+  const stepUp =
+    auth.stepUp === true
+      ? ', step-up'
+      : auth.stepUp === 'when-active'
+        ? ', step-up when active'
+        : '';
+  return `session${stages}${stepUp}`;
 }
 
 function limit(policy: RateLimitPolicy): string {

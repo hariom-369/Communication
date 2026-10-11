@@ -317,7 +317,10 @@ export function authRoutes(deps: AuthModuleDeps): RouteDefinition[] {
       url: '/api/v1/auth/passkeys/register/options',
       summary: 'WebAuthn options to create a passkey',
       tags: ['auth', 'passkeys'],
-      auth: { kind: 'session', stages: ['credential_setup', 'active'] },
+      // Adding a factor to an active account needs a recent re-authentication: otherwise a stolen
+      // session could register its own passkey and outlive sign-out and a password change
+      // (security review F-11).
+      auth: { kind: 'session', stages: ['credential_setup', 'active'], stepUp: 'when-active' },
       authorize: {
         name: 'setup_or_recent_reauth',
         allows: (context) =>
@@ -340,7 +343,10 @@ export function authRoutes(deps: AuthModuleDeps): RouteDefinition[] {
       url: '/api/v1/auth/passkeys/register/verify',
       summary: 'Save a new passkey',
       tags: ['auth', 'passkeys'],
-      auth: { kind: 'session', stages: ['credential_setup', 'active'] },
+      // Adding a factor to an active account needs a recent re-authentication: otherwise a stolen
+      // session could register its own passkey and outlive sign-out and a password change
+      // (security review F-11).
+      auth: { kind: 'session', stages: ['credential_setup', 'active'], stepUp: 'when-active' },
       authorize: ownAccount,
       rateLimit: limits.credentialChange,
       audit: { kind: 'records', actions: ['auth.passkey_added', 'account.activated'] },

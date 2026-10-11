@@ -12,14 +12,15 @@ import {
   type DeviceStatus,
 } from './e2ee.js';
 import { MessagingStore, type SecurityPort, type StoreOptions } from './store.js';
+import { testId } from '../test/ids.js';
 
 /**
  * Transport and state rules of the messaging store. Encryption is replaced by a test double
  * (base64 JSON) — the real MLS path is covered by crypto/engine.test.ts and the E2E suite.
  */
 
-const ME = 'me';
-const PEER = 'peer';
+const ME = testId('me');
+const PEER = testId('peer');
 const CONVERSATION = 'c1';
 
 function meta(overrides: Partial<Conversation> = {}): Conversation {
@@ -56,14 +57,14 @@ function mailbox(
   seq: number,
   senderUserId: string,
   body: MessageContent['body'] | null,
-  id = `m${seq}`,
+  id = testId(`m${String(seq)}`),
 ): MailboxMessage {
   return {
     seq,
     kind: body === null ? 'commit' : 'application',
     clientMessageId: id,
     senderUserId,
-    senderDeviceId: `${senderUserId}-device`,
+    senderDeviceId: testId(`${senderUserId}-device`),
     epoch: 1,
     ciphertext: body === null ? 'commit' : encode({ v: 1, id, sentAt: seq, body }),
     serverTime: new Date(seq * 1000).toISOString(),
@@ -281,12 +282,12 @@ describe('MessagingStore', () => {
       {
         seq: 1,
         senderUserId: PEER,
-        senderDeviceId: 'peer-device',
+        senderDeviceId: testId(`${PEER}-device`),
         serverTime: new Date(1000).toISOString(),
-        clientMessageId: 'old',
+        clientMessageId: testId('old'),
         content: JSON.stringify({
           v: 1,
-          id: 'old',
+          id: testId('old'),
           sentAt: 1,
           body: { kind: 'text', text: 'from last week' },
         }),

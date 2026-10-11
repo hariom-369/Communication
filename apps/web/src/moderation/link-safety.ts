@@ -1,3 +1,4 @@
+import { bareDomainsIn } from '@tessera/shared';
 import { useEffect, useState } from 'react';
 
 import { moderationEndpoints } from '../api/moderation-endpoints.js';
@@ -10,7 +11,6 @@ import { moderationEndpoints } from '../api/moderation-endpoints.js';
  */
 
 const URL_PATTERN = /\bhttps?:\/\/[^\s<>"']+/gi;
-const BARE_DOMAIN = /\b((?:[a-z0-9-]+\.)+[a-z]{2,63})(?=[/\s]|$)/gi;
 const REFRESH_MS = 30 * 60_000;
 
 function canonicalHost(host: string): string {
@@ -30,10 +30,8 @@ export function hostsIn(text: string): string[] {
       // Not a URL after all.
     }
   }
-  for (const match of text.matchAll(BARE_DOMAIN)) {
-    const host = match[1];
-    if (host !== undefined) hosts.add(canonicalHost(host));
-  }
+  // Linear-time scan (security review F-12: the single regex it replaces was quadratic).
+  for (const host of bareDomainsIn(text)) hosts.add(canonicalHost(host));
   return [...hosts];
 }
 

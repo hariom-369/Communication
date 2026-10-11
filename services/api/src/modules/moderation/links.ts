@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 
+import { bareDomainsIn } from '@tessera/shared';
+
 /**
  * Harmful-link checks (docs/moderation.md §4). Hosts are compared by SHA-256; clients look up a
  * 4-byte prefix first and fetch the full hashes for it, so the server never learns which link a
@@ -29,7 +31,6 @@ export function hostVariants(host: string): string[] {
 }
 
 const URL_PATTERN = /\bhttps?:\/\/[^\s<>"']+/gi;
-const BARE_DOMAIN = /\b((?:[a-z0-9-]+\.)+[a-z]{2,63})(?=[/\s]|$)/gi;
 
 /** Hosts mentioned in text, as links or bare domains (example.com/path). */
 export function hostsIn(text: string): string[] {
@@ -41,9 +42,7 @@ export function hostsIn(text: string): string[] {
       // Not a URL after all.
     }
   }
-  for (const match of text.matchAll(BARE_DOMAIN)) {
-    const host = match[1];
-    if (host !== undefined) hosts.add(canonicalHost(host));
-  }
+  // Linear-time scan (security review F-12: the single regex it replaces was quadratic).
+  for (const host of bareDomainsIn(text)) hosts.add(canonicalHost(host));
   return [...hosts];
 }

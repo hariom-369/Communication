@@ -5,6 +5,7 @@ import type { HistoryRecord, SenderAuthority } from '../crypto/protocol.js';
 import { contentSchema, type MessageBody } from './content.js';
 import { INTENT_TTL_MS, intendedMembers } from './group-intents.js';
 import { applyIncoming, emptyTimeline, MAX_PINS, type TimelineState } from './timeline.js';
+import { testId } from '../test/ids.js';
 
 /** Group rules every client enforces on decrypted content (docs/groups.md). */
 
@@ -39,13 +40,13 @@ function apply(
 
 describe('group content', () => {
   it('validates the new kinds strictly', () => {
-    const base = { v: 1, id: 'x', sentAt: 1 };
+    const base = { v: 1, id: testId('x'), sentAt: 1 };
     const ok = [
       { kind: 'group_info', name: 'Team', description: '' },
       { kind: 'group_members', add: [ALICE], remove: [] },
-      { kind: 'pin', target: 'm', pinned: true },
+      { kind: 'pin', target: testId('m'), pinned: true },
       { kind: 'poll', question: 'Lunch?', options: ['Yes', 'No'], multiple: false },
-      { kind: 'vote', target: 'p', choices: [1] },
+      { kind: 'vote', target: testId('p'), choices: [1] },
       { kind: 'text', text: 'hi @bob', mentions: [BOB] },
     ];
     for (const body of ok) expect(contentSchema.safeParse({ ...base, body }).success).toBe(true);
@@ -54,7 +55,7 @@ describe('group content', () => {
       { kind: 'group_info', name: 'x'.repeat(81), description: '' },
       { kind: 'group_members', add: ['not-a-uuid'], remove: [] },
       { kind: 'poll', question: 'Q', options: ['only one'], multiple: false },
-      { kind: 'vote', target: 'p', choices: [99] },
+      { kind: 'vote', target: testId('p'), choices: [99] },
       { kind: 'text', text: 'hi', mentions: ['bob'] },
     ];
     for (const body of bad)
@@ -170,8 +171,8 @@ describe('membership intents', () => {
     senderUserId: ALICE,
     senderDeviceId: 'd',
     serverTime: new Date(serverTime).toISOString(),
-    clientMessageId: `c${seqNo}`,
-    content: JSON.stringify({ v: 1, id: `c${seqNo}`, sentAt: serverTime, body }),
+    clientMessageId: testId(`c${String(seqNo)}`),
+    content: JSON.stringify({ v: 1, id: testId(`c${String(seqNo)}`), sentAt: serverTime, body }),
     ...(authority === undefined ? {} : { authority }),
   });
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { isDangerousFile, safeFileName } from './attachments.js';
 import { contentSchema } from './content.js';
+import { testId } from '../test/ids.js';
 
 const b64 = (bytes: number) => btoa('x'.repeat(bytes));
 const reference = {
@@ -12,7 +13,7 @@ const reference = {
   plaintextSize: 10,
   ciphertextSize: 49,
 };
-const base = { v: 1, id: 'id-1', sentAt: 1 };
+const base = { v: 1, id: testId('id-1'), sentAt: 1 };
 const media = (attachment: Record<string, unknown>) => ({
   ...base,
   body: {

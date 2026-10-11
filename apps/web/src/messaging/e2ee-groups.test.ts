@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GroupPolicy, HistoryRecord, Identity } from '../crypto/protocol.js';
 
 import { E2eeSession, type CryptoConnection } from './e2ee.js';
+import { testId } from '../test/ids.js';
 
 /**
  * Group orchestration (docs/groups.md §4): who creates the group, who gets added, who gets
@@ -60,10 +61,10 @@ const intent = (seq: number, add: string[], remove: string[] = []): HistoryRecor
   senderUserId: ME,
   senderDeviceId: DEVICE,
   serverTime: new Date().toISOString(),
-  clientMessageId: `i${seq}`,
+  clientMessageId: testId(`i${String(seq)}`),
   content: JSON.stringify({
     v: 1,
-    id: `i${seq}`,
+    id: testId(`i${String(seq)}`),
     sentAt: 1,
     body: { kind: 'group_members', add, remove },
   }),

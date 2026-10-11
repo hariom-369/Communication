@@ -1,4 +1,4 @@
-import { mediaReferenceSchema } from '@tessera/validation';
+import { idStringSchema, mediaReferenceSchema } from '@tessera/validation';
 import { z } from 'zod';
 
 /**
@@ -11,7 +11,9 @@ import { z } from 'zod';
  */
 export const MAX_TEXT_LENGTH = 16_000;
 
-const messageRef = z.string().min(1).max(64);
+// Message ids are UUIDs (newId); anything else — `__proto__` included — is refused before it can
+// become a key of the timeline's maps (security review F-13).
+const messageRef = idStringSchema;
 
 export const MEDIA_CATEGORIES = ['image', 'video', 'audio', 'voice', 'file'] as const;
 /** Inline JPEG preview (base64), small enough to keep media messages under the padding cap. */

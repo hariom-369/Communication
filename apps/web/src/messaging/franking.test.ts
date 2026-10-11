@@ -4,8 +4,14 @@ import { describe, expect, it } from 'vitest';
 
 import { contentSchema, type MessageContent } from './content.js';
 import { frank } from './franking.js';
+import { testId } from '../test/ids.js';
 
-const content: MessageContent = { v: 1, id: 'm1', sentAt: 1, body: { kind: 'text', text: 'hi' } };
+const content: MessageContent = {
+  v: 1,
+  id: testId('m1'),
+  sentAt: 1,
+  body: { kind: 'text', text: 'hi' },
+};
 
 describe('message franking, sender side (ADR-021)', () => {
   it('commits to the exact JSON with a fresh key carried inside it', async () => {

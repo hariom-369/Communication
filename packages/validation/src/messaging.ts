@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { idSchema } from './common.js';
+import { idSchema, idStringSchema } from './common.js';
 
 /**
  * Messaging wire contracts (docs/messaging.md). The server only ever sees `ciphertext`: opaque
@@ -159,9 +159,11 @@ export const mailboxMessageSchema = z.object({
   seq: z.number().int().positive(),
   /** `commit` messages are MLS handshakes every member device must process in order. */
   kind: z.enum(['application', 'commit']),
-  clientMessageId: z.string(),
-  senderUserId: z.string(),
-  senderDeviceId: z.string(),
+  // Ids, validated even though the server sends them: clients key their state by them
+  // (security review F-13).
+  clientMessageId: idStringSchema,
+  senderUserId: idStringSchema,
+  senderDeviceId: idStringSchema,
   epoch: z.number().int().nonnegative(),
   ciphertext: z.string(),
   serverTime: z.iso.datetime(),

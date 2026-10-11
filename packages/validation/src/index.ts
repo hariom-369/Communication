@@ -49,7 +49,7 @@ export {
   type SessionState,
   type SessionSummary,
 } from './auth.js';
-export { idSchema } from './common.js';
+export { idSchema, idStringSchema } from './common.js';
 export { versionResponseSchema, type VersionResponse } from './meta.js';
 export {
   problemCodes,
