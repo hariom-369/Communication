@@ -13,6 +13,7 @@ import type { AuditLog } from '../audit/index.js';
 import { newSignInLines, passwordResetEmail, securityNoticeEmail } from './emails.js';
 import type { LoginEvents, LoginMethod } from './login-events.js';
 import type { PasskeyService } from './passkeys.js';
+import type { BreachedPasswords } from './breached.js';
 import { assertStrongPassword, type PasswordHasher } from './passwords.js';
 import {
   formatRecoveryCode,
@@ -42,6 +43,8 @@ export interface AuthServiceDeps {
   readonly mailer: Mailer;
   readonly logger: Logger;
   readonly publicWebUrl: string;
+  /** Breached-password corpus (required in production; config PWNED_PASSWORDS_URL). */
+  readonly breached?: BreachedPasswords;
 }
 
 const RESET_TTL_MS = 30 * 60_000;
@@ -71,6 +74,14 @@ export class AuthService {
 
   useAlerts(alerts: SecurityAlertSink): void {
     this.#alerts = alerts;
+  }
+
+  async #refuseBreached(password: string): Promise<void> {
+    if (this.#d.breached === undefined || !(await this.#d.breached.isBreached(password))) return;
+    throw new AppError('WEAK_PASSWORD', {
+      detail:
+        'This password has appeared in a data breach, so attackers try it first. Choose a different one.',
+    });
   }
 
   // ---- sessions for other modules ------------------------------------------------------------
@@ -129,6 +140,7 @@ export class AuthService {
   ): Promise<IssuedSession> {
     const account = await this.#requireAccount(session.userId);
     assertStrongPassword(password, [account.username, account.email]);
+    await this.#refuseBreached(password);
     const hashed = await this.#d.passwords.hash(password);
     const firstCredential = session.stage === 'credential_setup';
 
@@ -538,6 +550,7 @@ export class AuthService {
         }
       }
       assertStrongPassword(password, [owner.username, owner.email]);
+      await this.#refuseBreached(password);
       const hashed = await this.#d.passwords.hash(password);
       await trx
         .insertInto('password_credentials')

@@ -30,6 +30,7 @@ const production = {
   LOG_ERROR_DETAILS: 'false',
   // Shapes only (not real keys): franking key ring, moderation HPKE key pair.
   FRANKING_KEYS: `f1:${Buffer.alloc(32, 7).toString('base64')}`,
+  PWNED_PASSWORDS_URL: 'https://pwned.internal.example',
   MODERATION_HPKE_PUBLIC_KEY: Buffer.alloc(65, 4).toString('base64url'),
   MODERATION_HPKE_PRIVATE_KEY: Buffer.alloc(32, 9).toString('base64url'),
 };
@@ -70,6 +71,11 @@ describe('api config', () => {
     expect(issueKeys({ ...publicOnly, NODE_ENV: 'development' })).toEqual([
       'MODERATION_HPKE_PUBLIC_KEY',
     ]);
+  });
+
+  it('requires the breached-password check in production', () => {
+    const { PWNED_PASSWORDS_URL: _url, ...rest } = production;
+    expect(issueKeys(rest)).toEqual(['PWNED_PASSWORDS_URL']);
   });
 
   it('rejects insecure production settings', () => {

@@ -1,3 +1,4 @@
+export { RangeApiBreachedPasswords, type BreachedPasswords } from './breached.js';
 export { ChallengeStore } from './challenges.js';
 export { LoginEvents } from './login-events.js';
 export { PasskeyService, type WebAuthnConfig } from './passkeys.js';

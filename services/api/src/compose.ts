@@ -19,6 +19,7 @@ import {
   PasskeyService,
   PasswordHasher,
   parsePepper,
+  RangeApiBreachedPasswords,
   SessionService,
 } from './modules/auth/index.js';
 import { KeysService, keysRoutes } from './modules/keys/index.js';
@@ -115,6 +116,7 @@ export type ModuleConfig = Pick<
       | 'BILLING_SELLER_GSTIN'
       | 'BILLING_SELLER_STATE'
       | 'BILLING_SAC_CODE'
+      | 'PWNED_PASSWORDS_URL'
     >
   >;
 
@@ -193,6 +195,14 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
     mailer: infra.mailer,
     logger: infra.logger,
     publicWebUrl: config.PUBLIC_WEB_URL,
+    ...(config.PWNED_PASSWORDS_URL === undefined
+      ? {}
+      : {
+          breached: new RangeApiBreachedPasswords({
+            baseUrl: config.PWNED_PASSWORDS_URL,
+            logger: infra.logger,
+          }),
+        }),
   });
 
   const messaging = new MessagingService(

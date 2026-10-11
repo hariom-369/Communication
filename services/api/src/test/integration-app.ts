@@ -106,6 +106,8 @@ export async function startIntegrationApp(
     payments?: FakePayments;
     /** Realtime ticket admission (tickets per second, cluster-wide); default unlimited. */
     ticketsPerSecond?: number;
+    /** Breached-password mirror (range API); default none. */
+    pwnedPasswordsUrl?: string;
   } = {},
 ): Promise<IntegrationApp> {
   const adminUrl = requireEnv('TEST_DATABASE_URL');
@@ -186,6 +188,9 @@ export async function startIntegrationApp(
       FRANKING_KEYS: `f1:${key()}`,
       EVIDENCE_RETENTION_DAYS: 365,
       REALTIME_TICKETS_PER_SECOND: options.ticketsPerSecond ?? 0,
+      ...(options.pwnedPasswordsUrl === undefined
+        ? {}
+        : { PWNED_PASSWORDS_URL: options.pwnedPasswordsUrl }),
       ...(options.payments === undefined ? {} : billingTestConfig(options.payments)),
     },
     { db, valkey, mailer, logger, media, moderationKey },

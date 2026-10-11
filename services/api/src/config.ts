@@ -66,6 +66,8 @@ const schema = z
     // Node's default of 511 overflowed during reconnect storms: dropped SYNs cost clients 1–3 s
     // retransmission delays while the process was mostly idle (docs/capacity.md §4).
     LISTEN_BACKLOG: env.positiveInt(4096),
+    // Mirror of the Pwned Passwords range API (docs/authentication.md §2.1); required in production.
+    PWNED_PASSWORDS_URL: env.url(['https:', 'http:']).optional(),
     // Realtime tickets per second across the cluster (0 = unlimited, the default). Off by default
     // because the load tests showed it does not protect connected users when a realtime pod
     // crashes — a refused ticket costs the API about as much as a granted one — while it slows
@@ -360,6 +362,12 @@ const schema = z
       });
     }
     if (config.NODE_ENV !== 'production') return;
+    if (config.PWNED_PASSWORDS_URL === undefined)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['PWNED_PASSWORDS_URL'],
+        message: 'Required in production (new passwords are checked against breached passwords)',
+      });
     for (const required of ['FRANKING_KEYS', 'MODERATION_HPKE_PUBLIC_KEY'] as const) {
       if (config[required] === undefined)
         ctx.addIssue({
