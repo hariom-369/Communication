@@ -10,6 +10,7 @@ import { ApiError } from '../api/client.js';
 import type { endpoints as Endpoints } from '../api/endpoints.js';
 import type { GroupPolicy, HistoryRecord, IngestResult } from '../crypto/protocol.js';
 
+import { ackDelayMs } from './ack-delay.js';
 import { backoffDelay } from './backoff.js';
 import {
   contentSchema,
@@ -244,7 +245,6 @@ const TYPING_TTL_MS = 6000;
 const OUTBOX_GIVE_UP_MS = 24 * 60 * 60_000;
 /** A call signal that cannot be sent quickly is useless: the call has moved on. */
 const CALL_SIGNAL_GIVE_UP_MS = 30_000;
-const ACK_DELAY_MS = 150;
 const MAX_CONFLICT_RETRIES = 3;
 
 /** Messages decrypted and notified about while no tab was open (notifications/device-prefs). */
@@ -707,7 +707,7 @@ export class MessagingStore {
     return complete;
   }
 
-  /** Delivery acknowledgement: this device has stored the messages (coalesced). */
+  /** Delivery acknowledgement: this device has stored the messages (coalesced, ack-delay.ts). */
   #scheduleAck(conversation: MutableConversation, seq: number): void {
     if (seq <= conversation.ackedLocally) return;
     conversation.ackedLocally = seq;
@@ -717,7 +717,7 @@ export class MessagingStore {
       this.#options.api.ack(conversation.meta.id, conversation.ackedLocally).catch(() => {
         conversation.ackedLocally = Math.min(conversation.ackedLocally, conversation.meta.ackedSeq);
       });
-    }, ACK_DELAY_MS);
+    }, ackDelayMs(conversation.meta.members.length));
   }
 
   async #onFrame(frame: ServerFrame): Promise<void> {

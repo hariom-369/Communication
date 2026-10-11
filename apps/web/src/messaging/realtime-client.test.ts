@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ApiError } from '../api/client.js';
+
 import { RealtimeClient, type ConnectionStatus } from './realtime-client.js';
 
 class FakeSocket {
@@ -23,12 +25,14 @@ class FakeSocket {
   }
 }
 
-function setup() {
+const ticket = () => Promise.resolve({ ticket: 't'.repeat(43), url: '/rt/v1/ws' });
+
+function setup(getTicket: () => Promise<{ ticket: string; url: string }> = ticket) {
   const sockets: FakeSocket[] = [];
   const statuses: ConnectionStatus[] = [];
   const onReady = vi.fn();
   const client = new RealtimeClient({
-    getTicket: () => Promise.resolve({ ticket: 't'.repeat(43), url: '/rt/v1/ws' }),
+    getTicket,
     onFrame: vi.fn(),
     onStatus: (status) => statuses.push(status),
     onReady,
@@ -86,5 +90,49 @@ describe('RealtimeClient', () => {
     client.interrupt();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(sockets).toHaveLength(1);
+  });
+
+  it('waits as long as a refused ticket asks before trying again', async () => {
+    let refusals = 2;
+    const getTicket = vi.fn(() =>
+      refusals-- > 0
+        ? Promise.reject(
+            new ApiError({
+              type: 't',
+              code: 'RATE_LIMITED',
+              title: 'Too many requests',
+              status: 429,
+              retryAfterSeconds: 3,
+            }),
+          )
+        : ticket(),
+    );
+    const { client, sockets } = setup(getTicket);
+    client.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getTicket).toHaveBeenCalledTimes(1);
+    // The backoff alone (random() = 0) would retry at once.
+    await vi.advanceTimersByTimeAsync(2_999);
+    expect(getTicket).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(getTicket).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(getTicket).toHaveBeenCalledTimes(3);
+    expect(sockets).toHaveLength(1);
+    client.stop();
+  });
+
+  it('retries other ticket failures on the backoff alone', async () => {
+    let failures = 1;
+    const getTicket = vi.fn(() =>
+      failures-- > 0 ? Promise.reject(new Error('network')) : ticket(),
+    );
+    const { client, sockets } = setup(getTicket);
+    client.start();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getTicket).toHaveBeenCalledTimes(2);
+    expect(sockets).toHaveLength(1);
+    client.stop();
   });
 });

@@ -247,7 +247,7 @@ harness runs only against a disposable local stack and seeds its own database. A
 [phase-reports/phase-15.md](phase-reports/phase-15.md) and [capacity.md](capacity.md). T-18
 (DDoS) and self-inflicted overload, now measured: a realtime pod crashing sends all its clients
 back at once — **cluster-wide ticket admission** (`REALTIME_TICKETS_PER_SECOND`, 429 +
-`Retry-After`, the client's backoff honours it) keeps the API serving users who are connected
+`Retry-After`, which the web client now waits out before retrying) keeps the API serving users who are connected
 (integration-tested, mutation-checked); a deploy spreads reconnects over a 30 s drain window; a
 **listen backlog of 4096** stops dropped SYNs during bursts; a full survivor pod refuses upgrades
 (503) rather than degrading every socket, so the realtime tier is sized N+1; quadratic group

@@ -594,41 +594,66 @@ export class MessagingService {
   /** Records that the caller's client has stored messages up to `seq` (delivery acknowledgement). */
   async acknowledge(userId: string, conversationId: string, seq: number): Promise<void> {
     // The common case in one statement (acks are most of the write traffic, docs/capacity.md §3):
-    // a member moves its delivery position forward to a message that exists. The members to
-    // notify, and the group's lowest position before and after, come back with it.
+    // a member moves its delivery position forward to a message that exists.
+    //
+    // Direct conversations: the receipt goes to both members. Groups: one receipt per message,
+    // when the last member has it ("delivered to everyone"), instead of one per member (that
+    // was members² frames per message). The group's lowest position moves only when this member
+    // was strictly behind everyone else, which NOT EXISTS answers by stopping at the first
+    // other member at or behind it — usually within a row or two — instead of reading all
+    // members on every ack (members² row reads per message). (Two laggards acknowledging at the
+    // same instant can each still see the other behind: that receipt then comes with the next
+    // message.)
     const advanced = await sql<{
       kind: string;
-      members: string[];
-      before_min: string;
-      after_min: string;
+      members: string[] | null;
+      was_last: boolean | null;
     }>`
-      WITH moved AS (
+      WITH prev AS (
+        SELECT acked_seq AS old FROM conversation_members
+         WHERE conversation_id = ${conversationId} AND user_id = ${userId} AND left_at IS NULL
+      ), moved AS (
         UPDATE conversation_members AS m SET acked_seq = ${seq}
-        FROM conversations AS c
+        FROM conversations AS c, prev
         WHERE m.conversation_id = ${conversationId} AND m.user_id = ${userId}
           AND m.left_at IS NULL AND m.acked_seq < ${seq}
           AND c.id = m.conversation_id AND c.last_seq >= ${seq}
-        RETURNING m.conversation_id, c.kind
+        RETURNING c.kind, prev.old
       )
-      SELECT moved.kind, array_agg(o.user_id) AS members,
-             min(o.acked_seq) AS before_min,
-             min(CASE WHEN o.user_id = ${userId} THEN ${seq} ELSE o.acked_seq END) AS after_min
-        FROM conversation_members AS o JOIN moved ON moved.conversation_id = o.conversation_id
-       WHERE o.left_at IS NULL
-       GROUP BY moved.kind`.execute(this.#db);
+      SELECT moved.kind,
+             CASE WHEN moved.kind = 'direct' THEN (
+               SELECT array_agg(d.user_id) FROM conversation_members AS d
+                WHERE d.conversation_id = ${conversationId} AND d.left_at IS NULL
+             ) END AS members,
+             CASE WHEN moved.kind <> 'direct' THEN NOT EXISTS (
+               SELECT 1 FROM conversation_members AS o
+                WHERE o.conversation_id = ${conversationId} AND o.left_at IS NULL
+                  AND o.user_id <> ${userId} AND o.acked_seq <= moved.old
+             ) END AS was_last
+        FROM moved`.execute(this.#db);
     const row = advanced.rows[0];
     if (row !== undefined) {
       if (row.kind === 'direct') {
-        this.#publisher.publish(row.members, { type: 'receipt', conversationId, userId, seq });
-      } else if (Number(row.after_min) > Number(row.before_min)) {
-        // Groups: one receipt per message, when the last member has it ("delivered to
-        // everyone"), instead of one per member — that was members² frames per message.
-        this.#publisher.publish(row.members, {
+        this.#publisher.publish(row.members ?? [], {
           type: 'receipt',
           conversationId,
           userId,
-          seq: Number(row.after_min),
+          seq,
         });
+      } else if (row.was_last === true) {
+        // Once per message: the members, and the group's new lowest position.
+        const group = await sql<{ members: string[]; lowest: string }>`
+          SELECT array_agg(user_id) AS members, min(acked_seq) AS lowest
+            FROM conversation_members
+           WHERE conversation_id = ${conversationId} AND left_at IS NULL`.execute(this.#db);
+        const current = group.rows[0];
+        if (current !== undefined)
+          this.#publisher.publish(current.members, {
+            type: 'receipt',
+            conversationId,
+            userId,
+            seq: Number(current.lowest),
+          });
       }
       return;
     }

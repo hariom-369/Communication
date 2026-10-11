@@ -31,9 +31,10 @@ The coordinator (`src/cli.ts`):
 
 **Virtual users** (`src/client.ts`) speak the public protocol exactly as the web app does:
 session cookie and CSRF header on every API call, a single-use ticket, the `tessera.v1`
-subprotocol, the `auth` frame — and what the app does on its own: delivery acks coalesced over
-150 ms, `GET /sync` plus fetching what was missed after every reconnect, and the app's reconnect
-backoff (full jitter, 500 ms base, 30 s cap, reset after a minute connected). A reconnect moves to
+subprotocol, the `auth` frame — and what the app does on its own: delivery acks coalesced as the app
+coalesces them (150 ms, longer in large groups — `ack-delay.ts`), `GET /sync` plus fetching what was missed after every reconnect, and the app's reconnect
+backoff (full jitter, 500 ms base, 30 s cap, reset after a minute connected; a refused
+ticket's `Retry-After` is waited out). A reconnect moves to
 the next realtime pod, as a load balancer would. Messages are random bytes of a realistic
 ciphertext size (512 bytes by default) whose first 8 bytes carry the send time, so delivery
 latency is measured on the receiving socket, across processes. Latencies go into mergeable
@@ -61,7 +62,9 @@ creation, Welcomes, encrypted application messages.
 | `crypto` | `--pairs` pairs of headless clients (real MLS) message each other at `--pair-rate`/s each way, under `--rate`/s of synthetic background traffic | device registration, conversation setup, end-to-end latency including encryption and decryption, order and loss of every message |
 
 Common options: `--users`, `--generators`, `--apis`, `--realtimes`, `--duration` (s),
-`--warmup` (s), `--connect-rate` (sockets/s), `--payload` (bytes), `--api-env K=V` and
+`--warmup` (s), `--connect-rate` (sockets/s, default 400 — below the API's ticket admission
+budget of 500/s, so the ramp is not throttled; a refused attempt is retried as the app retries
+it), `--payload` (bytes), `--api-env K=V` and
 `--realtime-env K=V` (tuning experiments), `--out` (result directory).
 
 ## 3. What this environment can and cannot show

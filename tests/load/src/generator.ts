@@ -13,6 +13,8 @@ export interface GeneratorConversation {
   readonly kind: 'direct' | 'group';
   /** Local users (indexes into this generator's `users`) who send in it. */
   readonly senders: readonly number[];
+  /** All members (any generator): sets the acknowledgement delay, as in the app. */
+  readonly members: number;
 }
 
 export type Command =
@@ -141,6 +143,9 @@ async function handle(command: Command): Promise<unknown> {
           ),
       );
       conversations = command.conversations;
+      for (const conversation of conversations)
+        for (const index of conversation.senders)
+          users[index]?.memberCounts.set(conversation.id, conversation.members);
       return { users: users.length };
     }
     case 'connect': {
@@ -152,10 +157,14 @@ async function handle(command: Command): Promise<unknown> {
         if (user === undefined) return;
         try {
           await user.connect();
-        } catch {
+        } catch (error) {
+          // The app keeps trying (backoff, Retry-After); so does the virtual user.
           metrics.counters.add('connect_failed');
+          user.retryLater(error);
         }
       });
+      const deadline = Date.now() + 120_000;
+      while (targets.some((user) => !user.connected) && Date.now() < deadline) await sleep(250);
       return { connected: users.filter((user) => user.connected).length };
     }
     case 'send': {

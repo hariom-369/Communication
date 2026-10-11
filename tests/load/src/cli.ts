@@ -167,7 +167,9 @@ function assign(data: Seed, generators: number) {
     const to = Math.min(data.users.length, from + per);
     const conversations: GeneratorConversation[] = data.conversations.flatMap((c) => {
       const senders = c.members.filter((m) => m >= from && m < to).map((m) => m - from);
-      return senders.length === 0 ? [] : [{ id: c.id, kind: c.kind, senders }];
+      return senders.length === 0
+        ? []
+        : [{ id: c.id, kind: c.kind, senders, members: c.members.length }];
     });
     return { from, to, users: data.users.slice(from, to), conversations };
   });
@@ -203,7 +205,7 @@ async function main(): Promise<void> {
       duration: { type: 'string', default: '60' },
       warmup: { type: 'string', default: '15' },
       payload: { type: 'string', default: '512' },
-      'connect-rate': { type: 'string', default: '500' },
+      'connect-rate': { type: 'string', default: '400' },
       'group-size': { type: 'string', default: '1024' },
       subscribers: { type: 'string', default: '1000000' },
       hold: { type: 'string', default: '30' },

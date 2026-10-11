@@ -1,12 +1,14 @@
 import { REALTIME_SUBPROTOCOL, serverFrameSchema, type ServerFrame } from '@tessera/validation';
 
+import { ApiError } from '../api/client.js';
+
 import { backoffDelay } from './backoff.js';
 
 /**
  * Browser side of the realtime connection (docs/realtime.md):
  * ticket (REST, cookie-authenticated) → WebSocket with subprotocol → `auth` frame → `ready`.
  * Reconnects with exponential backoff and full jitter; honours server `reconnect` hints during
- * deploys. Every server frame is schema-validated before use.
+ * deploys and the `Retry-After` of a refused ticket (admission control, docs/capacity.md §4). Every server frame is schema-validated before use.
  */
 
 export type ConnectionStatus = 'connecting' | 'online' | 'offline';
@@ -103,8 +105,13 @@ export class RealtimeClient {
     let ticket: { ticket: string; url: string };
     try {
       ticket = await this.#options.getTicket();
-    } catch {
-      this.#scheduleReconnect();
+    } catch (error) {
+      // Refused by admission control (or a rate limit): not before the server says so.
+      const retryAfter =
+        error instanceof ApiError && error.problem.status === 429
+          ? (error.problem.retryAfterSeconds ?? 0) * 1000
+          : 0;
+      this.#scheduleReconnect(retryAfter);
       return;
     }
     // stop() may have been called while the ticket request was in flight.
@@ -158,15 +165,17 @@ export class RealtimeClient {
     };
   }
 
-  #scheduleReconnect(): void {
+  /** Next attempt after the backoff delay, and not before `minDelayMs` (capped like it). */
+  #scheduleReconnect(minDelayMs = 0): void {
     if (this.#stopped) return;
     this.#clearTimers();
     this.#options.onStatus('offline');
-    const delay = backoffDelay(this.#attempt, {
+    const backoff = backoffDelay(this.#attempt, {
       baseMs: BASE_DELAY_MS,
       capMs: MAX_DELAY_MS,
       ...(this.#options.random === undefined ? {} : { random: this.#options.random }),
     });
+    const delay = Math.max(backoff, Math.min(minDelayMs, MAX_DELAY_MS));
     this.#attempt += 1;
     this.#timer = setTimeout(() => void this.#connect(), delay);
   }

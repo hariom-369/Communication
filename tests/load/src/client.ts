@@ -5,6 +5,8 @@ import { newId } from '@tessera/shared';
 import { REALTIME_SUBPROTOCOL } from '@tessera/validation';
 import WebSocket from 'ws';
 
+import { ackDelayMs } from '../../../apps/web/src/messaging/ack-delay.js';
+
 import type { Counters, Histogram } from './metrics.js';
 import type { SeededUser } from './seed.js';
 
@@ -110,7 +112,6 @@ export function payloadStamp(base64: string): number {
 const BACKOFF_BASE_MS = Number(process.env['LOAD_BACKOFF_BASE_MS'] ?? '500');
 const BACKOFF_CAP_MS = 30_000;
 const STABLE_AFTER_MS = 60_000;
-const ACK_DELAY_MS = 150;
 
 /** A send this slow is counted in its 10 s window (counter `slow@<epoch seconds>`). */
 export const SLOW_MS = 1000;
@@ -206,7 +207,14 @@ export class VirtualUser {
     const ticket = await this.request('POST', '/api/v1/realtime/ticket', {});
     if (ticket.status !== 201) {
       this.#metrics.counters.add(`ticket_${String(ticket.status)}`);
-      throw new Error(`ticket ${String(ticket.status)}`);
+      const retryAfterSeconds = (ticket.body as { retryAfterSeconds?: unknown } | null)
+        ?.retryAfterSeconds;
+      throw Object.assign(new Error(`ticket ${String(ticket.status)}`), {
+        retryAfterMs:
+          ticket.status === 429 && typeof retryAfterSeconds === 'number'
+            ? retryAfterSeconds * 1000
+            : 0,
+      });
     }
     const { ticket: value, url } = ticket.body as { ticket: string; url: string };
     await new Promise<void>((resolve, reject) => {
@@ -334,7 +342,10 @@ export class VirtualUser {
     }
   }
 
-  /** Delivery acknowledgement, coalesced as the web client does (150 ms, messaging/store.ts). */
+  /** Members per conversation (default 2); sets the acknowledgement delay. */
+  readonly memberCounts = new Map<string, number>();
+
+  /** Delivery acknowledgement, coalesced as the web client does (messaging/ack-delay.ts). */
   readonly #ackTimers = new Map<string, NodeJS.Timeout>();
   #scheduleAck(conversationId: string): void {
     if (this.#ackTimers.has(conversationId)) return;
@@ -350,7 +361,7 @@ export class VirtualUser {
           this.#metrics.counters.add('ack_error');
         },
       );
-    }, ACK_DELAY_MS);
+    }, ackDelayMs(this.memberCounts.get(conversationId) ?? 2));
     timer.unref();
     this.#ackTimers.set(conversationId, timer);
   }
@@ -399,11 +410,21 @@ export class VirtualUser {
     this.#waiting = true;
     setTimeout(() => {
       this.#waiting = false;
-      this.connect().catch(() => {
+      this.connect().catch((error: unknown) => {
         this.#metrics.counters.add('reconnect_failed');
-        this.#scheduleReconnect(this.#backoff());
+        this.retryLater(error);
       });
     }, delayMs).unref();
+  }
+
+  /**
+   * After a failed attempt, as the web client does: the backoff delay, and not before a refused
+   * ticket's `Retry-After` (realtime-client.ts).
+   */
+  retryLater(error: unknown): void {
+    if (!this.reconnect || this.#closing) return;
+    const retryAfterMs = (error as { retryAfterMs?: number } | null)?.retryAfterMs ?? 0;
+    this.#scheduleReconnect(Math.max(this.#backoff(), Math.min(retryAfterMs, BACKOFF_CAP_MS)));
   }
 
   /** POST a message; records the API latency; returns the HTTP status. */

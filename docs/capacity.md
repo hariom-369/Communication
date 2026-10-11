@@ -63,9 +63,20 @@ Changes Phase 15 made because the measurements showed them necessary (each with 
   positions) and the common case is one round trip (`messaging.ts`).
 - **Group receipts only when the group's minimum moves.** Every ack in a group published a
   receipt to every member: members² frames per message — at 1,024 members, ~a million frames
-  per post, which collapsed the group scenario (10 of 20 posts/s achieved, minutes of latency).
-  Group receipts are now published only when the lowest acked position of the group advances,
-  with that position.
+  per post. Group receipts are now published only when the lowest acked position of the group
+  advances, with that position.
+- **Group acks without reading the whole group.** The first version of that check aggregated
+  all members on every ack — members² row reads per message, which moved the collapse into
+  PostgreSQL (group burst: sends averaging 80 s). The ack now asks only whether this member was
+  the last one behind (`NOT EXISTS` stops at the first member at or behind it, usually within a
+  row or two); the member list is read once per message, when a receipt is due.
+- **Acks coalesced longer in large groups.** Every online member acknowledges what it receives;
+  with the client's fixed 150 ms window one busy 1,024-member group produced ~7,000 ack
+  requests per second. The window now grows with the group (4 ms per member, 150 ms – 5 s,
+  `apps/web/src/messaging/ack-delay.ts`), bounding a busy group at ~250 acks per second
+  whatever its size; "delivered to everyone" in a 1,024-member group shows ~4 s later.
+  Together: the group burst went from sends averaging 80 s to p95 256 ms, and acks from
+  ~3,500/s to 240/s.
 - **Presence refresh batched.** The realtime heartbeat refreshed each socket's presence key
   one at a time; at 15,000 sockets per pod this stalled the event loop for hundreds of
   milliseconds every interval (delivery p99 1.1 s → 173 ms after). It now pipelines 1,000
@@ -98,8 +109,9 @@ API's ticket endpoint and the remaining pods.
   the backoff's first seconds. Without a limit this starved sends of connected users
   (p95 8 s). `REALTIME_TICKETS_PER_SECOND` (default 500, cluster-wide, via the shared rate-limit
   store; fails open if the store is down) answers excess ticket requests with 429 and
-  `Retry-After`, which the client's backoff already honours: reconnecting takes longer, the
-  users who are connected keep working. Set it to what the API tier sustains alongside normal
+  `Retry-After`; the web client now waits at least that long before its next attempt (it
+  used its backoff alone before — `realtime-client.ts`, unit-tested and mutation-checked):
+  reconnecting takes longer, the users who are connected keep working. Set it to what the API tier sustains alongside normal
   traffic (≈ 830 connects/s per API process here, minus headroom). CRASH_ADMISSION
 - **Backoff base.** Doubling the client's base delay (2 s) did not shorten recovery; the
   admission budget is the lever, not the client.
