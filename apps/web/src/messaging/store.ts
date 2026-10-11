@@ -339,7 +339,9 @@ export class MessagingStore {
     this.#realtime = create({
       getTicket: () => options.api.realtimeTicket(),
       onFrame: (frame) => {
-        void this.#onFrame(frame);
+        // A failed fetch here (offline, rate limited) leaves a gap that the next hint or the
+        // catch-up on reconnect fills; it must not surface as an unhandled rejection.
+        this.#onFrame(frame).catch(() => undefined);
       },
       onStatus: (status) => {
         this.#status = status;
@@ -595,6 +597,14 @@ export class MessagingStore {
     return this.#catchingUp;
   }
 
+  /** As `#serial`, for work that returns a value. */
+  #serialResult<T>(conversationId: string, work: () => Promise<T>): Promise<T> {
+    let result!: T;
+    return this.#serial(conversationId, async () => {
+      result = await work();
+    }).then(() => result);
+  }
+
   /** Serialises all ingestion for one conversation. */
   #serial(conversationId: string, work: () => Promise<void>): Promise<void> {
     const previous = this.#ingesting.get(conversationId) ?? Promise.resolve();
@@ -722,8 +732,16 @@ export class MessagingStore {
           }
         }
         await this.#hydrate(conversation);
-        // In order; fills any gap (missed hints while reconnecting) from the server.
-        await this.#catchUpConversation(conversation, frame.message.seq);
+        // The hint carries the whole message: when it is the next one, it is processed as is,
+        // without fetching it again (one request less per delivered message, docs/capacity.md
+        // §3). Anything else — a gap from missed hints, or no group yet — goes to the server.
+        const pushed = frame.message;
+        const target = conversation;
+        const taken = await this.#serialResult(target.meta.id, async () =>
+          pushed.seq === target.processedSeq + 1 ? this.#ingest(target, [pushed]) : false,
+        );
+        if (!taken || pushed.seq > target.processedSeq)
+          await this.#catchUpConversation(target, pushed.seq);
         return;
       }
       case 'receipt': {

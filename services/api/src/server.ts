@@ -218,7 +218,7 @@ async function main(): Promise<void> {
   lifecycle.onShutdown({ name: 'http', run: () => app.close() });
 
   await health.listen({ host: config.HOST, port: config.HEALTH_PORT });
-  await app.listen({ host: config.HOST, port: config.PORT });
+  await app.listen({ host: config.HOST, port: config.PORT, backlog: config.LISTEN_BACKLOG });
   lifecycle.markStarted();
   logger.info('api.started', { port: config.PORT, version: config.BUILD_VERSION });
 

@@ -79,6 +79,7 @@ export type ModuleConfig = Pick<
   | 'VALKEY_KEY_PREFIX'
   | 'MAILBOX_RETENTION_DAYS'
   | 'REALTIME_WS_PATH'
+  | 'REALTIME_TICKETS_PER_SECOND'
   | 'TURN_URLS'
   | 'TURN_SHARED_SECRET'
   | 'TURN_TTL_SECONDS'
@@ -455,7 +456,13 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
       ...keysRoutes({ keys }),
       ...backupsRoutes({ backups }),
       ...mediaRoutes({ media }),
-      ...realtimeRoutes({ realtime, websocketPath: config.REALTIME_WS_PATH }),
+      ...realtimeRoutes({
+        realtime,
+        websocketPath: config.REALTIME_WS_PATH,
+        ...(config.REALTIME_TICKETS_PER_SECOND === 0
+          ? {}
+          : { ticketsPerSecond: config.REALTIME_TICKETS_PER_SECOND }),
+      }),
       ...moderationRoutes({ moderation }),
       ...flagRoutes({ flags }),
       ...entitlementRoutes({ entitlements }),

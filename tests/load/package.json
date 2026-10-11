@@ -1,0 +1,26 @@
+{
+  "name": "@tessera/load",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "load": "node --max-old-space-size=4096 dist/cli.js"
+  },
+  "dependencies": {
+    "@tessera/crypto-core": "workspace:*",
+    "@tessera/shared": "workspace:*",
+    "@tessera/validation": "workspace:*",
+    "fake-indexeddb": "6.2.5",
+    "pg": "8.23.0",
+    "undici": "8.11.2",
+    "ws": "8.22.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1",
+    "@types/ws": "8.18.1"
+  }
+}

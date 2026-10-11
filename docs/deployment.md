@@ -58,6 +58,21 @@ OIDC role); Helm charts for services; Argo CD optional later. Drift detection ni
 `.env.example` in each service documents every variable (no values). Production config from
 ConfigMaps (non-secret) + External Secrets (secret). Config schema validated at boot.
 
+### Settings the load tests fixed (docs/capacity.md §4)
+
+- **Realtime pods**: `terminationGracePeriodSeconds` ≥ 50 (drain window 30 s + shutdown timeout
+  45 s); `RLIMIT_NOFILE` above `MAX_CONNECTIONS` + 1,000; size the realtime tier **N+1** — the
+  pods left after one fails must hold its sockets (a full survivor refuses upgrades with 503 and
+  clients retry for tens of seconds).
+- **Listen backlog**: `LISTEN_BACKLOG` (API and realtime, default 4096) only takes effect up to
+  the node's `net.core.somaxconn`; set the pods' namespaced sysctl `net.core.somaxconn=4096`.
+- **Rolling deploys of the realtime tier**: one pod at a time (`maxUnavailable: 1`,
+  `maxSurge: 1`), so each wave of reconnects is one pod's sockets spread over 30 s.
+- **API capacity for a pod crash**: a crash sends one pod's clients back at once (no drain hint);
+  every reconnect costs about five database queries (ticket, session checks, sync). Keep API CPU
+  headroom for one realtime pod's sockets reconnecting within ~10 s, or keep realtime pods small
+  (10–15k sockets).
+
 ## 6. Hardening baseline
 
 Pods: non-root, read-only root FS, drop all capabilities, seccomp `RuntimeDefault`, no

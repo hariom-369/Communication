@@ -593,20 +593,50 @@ export class MessagingService {
 
   /** Records that the caller's client has stored messages up to `seq` (delivery acknowledgement). */
   async acknowledge(userId: string, conversationId: string, seq: number): Promise<void> {
+    // The common case in one statement (acks are most of the write traffic, docs/capacity.md §3):
+    // a member moves its delivery position forward to a message that exists. The members to
+    // notify, and the group's lowest position before and after, come back with it.
+    const advanced = await sql<{
+      kind: string;
+      members: string[];
+      before_min: string;
+      after_min: string;
+    }>`
+      WITH moved AS (
+        UPDATE conversation_members AS m SET acked_seq = ${seq}
+        FROM conversations AS c
+        WHERE m.conversation_id = ${conversationId} AND m.user_id = ${userId}
+          AND m.left_at IS NULL AND m.acked_seq < ${seq}
+          AND c.id = m.conversation_id AND c.last_seq >= ${seq}
+        RETURNING m.conversation_id, c.kind
+      )
+      SELECT moved.kind, array_agg(o.user_id) AS members,
+             min(o.acked_seq) AS before_min,
+             min(CASE WHEN o.user_id = ${userId} THEN ${seq} ELSE o.acked_seq END) AS after_min
+        FROM conversation_members AS o JOIN moved ON moved.conversation_id = o.conversation_id
+       WHERE o.left_at IS NULL
+       GROUP BY moved.kind`.execute(this.#db);
+    const row = advanced.rows[0];
+    if (row !== undefined) {
+      if (row.kind === 'direct') {
+        this.#publisher.publish(row.members, { type: 'receipt', conversationId, userId, seq });
+      } else if (Number(row.after_min) > Number(row.before_min)) {
+        // Groups: one receipt per message, when the last member has it ("delivered to
+        // everyone"), instead of one per member — that was members² frames per message.
+        this.#publisher.publish(row.members, {
+          type: 'receipt',
+          conversationId,
+          userId,
+          seq: Number(row.after_min),
+        });
+      }
+      return;
+    }
+    // Nothing moved: not a member (404), an unknown message (400), or an ack at or behind the
+    // current position (nothing to do).
     const conversation = await this.#requireMember(this.#db, userId, conversationId);
     if (seq > Number(conversation.last_seq))
       throw new AppError('BAD_REQUEST', { detail: 'Unknown sequence number.' });
-    const updated = await this.#db
-      .updateTable('conversation_members')
-      .set({ acked_seq: seq })
-      .where('conversation_id', '=', conversationId)
-      .where('user_id', '=', userId)
-      .where('acked_seq', '<', String(seq))
-      .executeTakeFirst();
-    if (Number(updated.numUpdatedRows) > 0) {
-      const members = await this.#memberIds(this.#db, conversationId);
-      this.#publisher.publish(members, { type: 'receipt', conversationId, userId, seq });
-    }
   }
 
   /** Conversations with their last sequence number and the caller's acknowledged position. */

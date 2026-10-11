@@ -47,7 +47,10 @@ interface Node {
 }
 const nodes: Node[] = [];
 
-async function startNode(overrides: Partial<GatewayConfig> = {}): Promise<Node> {
+async function startNode(
+  overrides: Partial<GatewayConfig> = {},
+  commands: Redis = valkey,
+): Promise<Node> {
   const subscriber = new Redis(requireEnv('TEST_VALKEY_URL'));
   const gateway = new RealtimeGateway({
     config: {
@@ -61,7 +64,7 @@ async function startNode(overrides: Partial<GatewayConfig> = {}): Promise<Node> 
       sessionRecheckMs: 60_000,
       ...overrides,
     },
-    valkey,
+    valkey: commands,
     subscriber,
     db,
     logger,
@@ -466,6 +469,29 @@ describe('presence', () => {
   });
 });
 
+describe('presence refresh', () => {
+  it('each heartbeat refreshes online, last-seen and session presence of every connected user', async () => {
+    const node = await startNode({ heartbeatMs: 150 });
+    const users = await Promise.all(Array.from({ length: 4 }, () => createUser()));
+    await Promise.all(users.map((user) => connect(node.url, user)));
+    const keys = users.flatMap((user) => [
+      `${prefix}:presence:online:${user.userId}`,
+      `${prefix}:presence:session:${user.sessionId}`,
+    ]);
+    // As if the keys had expired: the next heartbeat writes them again, with an expiry.
+    await valkey.del(...keys);
+    const before = Date.now();
+    for (let i = 0; i < 50 && (await valkey.exists(...keys)) < keys.length; i++)
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(await valkey.exists(...keys)).toBe(keys.length);
+    for (const key of keys) expect(await valkey.ttl(key)).toBeGreaterThan(0);
+    for (const user of users)
+      expect(
+        Number(await valkey.get(`${prefix}:presence:seen:${user.userId}`)),
+      ).toBeGreaterThanOrEqual(before - 1000);
+  });
+});
+
 describe('session presence (used by notifications)', () => {
   it('marks the session connected while any of its sockets is open', async () => {
     const node = await startNode();
@@ -499,6 +525,41 @@ describe('draining', () => {
     expect(hint['afterMs']).toBeLessThan(200);
     await drained;
     expect((await socket.closed).code).toBe(CloseCode.serviceRestart);
+    nodes.splice(nodes.indexOf(node), 1);
+    await new Promise<void>((resolve) =>
+      node.server.close(() => {
+        resolve();
+      }),
+    );
+    node.subscriber.disconnect();
+  });
+
+  it('finishes cleaning up closed connections before it returns (Valkey closes next)', async () => {
+    // A slow Valkey (as under load): cleanup writes take a while to complete.
+    const slow = new Proxy(valkey, {
+      get(target, property, receiver) {
+        if (property === 'del')
+          return async (...keys: string[]) => {
+            await new Promise((resolve) => setTimeout(resolve, 200));
+            return target.del(...keys);
+          };
+        const value: unknown = Reflect.get(target, property, receiver);
+        return typeof value === 'function' ? (value as () => unknown).bind(target) : value;
+      },
+    });
+    const node = await startNode({}, slow);
+    const users = await Promise.all([createUser(), createUser(), createUser()]);
+    const sockets = await Promise.all(users.map((user) => connect(node.url, user)));
+    for (const user of users)
+      expect(await valkey.get(`${prefix}:presence:online:${user.userId}`)).toBe('1');
+    // Clients that ignore the hint: the gateway closes them itself at the deadline.
+    await node.gateway.drain(50);
+    // No waiting: presence is already gone when drain resolves.
+    for (const user of users) {
+      expect(await valkey.get(`${prefix}:presence:online:${user.userId}`)).toBeNull();
+      expect(await valkey.get(`${prefix}:presence:session:${user.sessionId}`)).toBeNull();
+    }
+    await Promise.all(sockets.map((socket) => socket.closed));
     nodes.splice(nodes.indexOf(node), 1);
     await new Promise<void>((resolve) =>
       node.server.close(() => {

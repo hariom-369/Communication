@@ -24,14 +24,28 @@ const schema = z
       .regex(/^\/[a-z0-9/_-]*$/)
       .default('/rt/v1/ws'),
     MAX_CONNECTIONS: env.positiveInt(50_000),
+    // Pending-connection queue (capped by net.core.somaxconn). Node's default of 511 overflowed
+    // when thousands of clients reconnected at once (docs/capacity.md §4).
+    LISTEN_BACKLOG: env.positiveInt(4096),
     MAX_CONNECTIONS_PER_USER: env.positiveInt(10),
     HEARTBEAT_SECONDS: env.positiveInt(25),
     AUTH_TIMEOUT_MS: env.positiveInt(5000),
     SESSION_RECHECK_SECONDS: env.positiveInt(60),
-    SHUTDOWN_DRAIN_MS: env.nonNegativeInt(5000),
-    SHUTDOWN_TIMEOUT_MS: env.positiveInt(25_000),
+    // Deploys: clients are told to reconnect at a random moment within this window, spreading
+    // the reconnect storm (docs/realtime.md §5; measured in docs/capacity.md §4). 5 s let 15,000
+    // clients of one pod hit the API within 5 s and stalled message sends for seconds.
+    SHUTDOWN_DRAIN_MS: env.nonNegativeInt(30_000),
+    SHUTDOWN_TIMEOUT_MS: env.positiveInt(45_000),
   })
   .superRefine((config, ctx) => {
+    // The drain (plus closing the stragglers) must fit inside the shutdown timeout.
+    if (config.SHUTDOWN_TIMEOUT_MS < config.SHUTDOWN_DRAIN_MS + 10_000) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['SHUTDOWN_TIMEOUT_MS'],
+        message: 'Must exceed SHUTDOWN_DRAIN_MS by at least 10 s',
+      });
+    }
     if (config.NODE_ENV !== 'production') return;
     if (config.ALLOWED_ORIGINS.some((origin) => !origin.startsWith('https://'))) {
       ctx.addIssue({

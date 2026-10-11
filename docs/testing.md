@@ -13,7 +13,7 @@ Status: PROPOSED · Testing is part of the Definition of Done for every feature.
 | WebSocket | handshake, ticket, origin, frames, backpressure, reconnect | Vitest + `ws` client harness | every PR |
 | E2E | browser flows across multiple virtual users/devices | Playwright (Chromium, Firefox, WebKit), multi-context | PR (smoke), nightly (full) |
 | Security (DAST) | running staging | OWASP ZAP baseline + authenticated scan; custom attack suites | nightly |
-| Load | capacity, soak | k6 (HTTP + WS), headless crypto clients | pre-release, Phase 15 |
+| Load | capacity, reconnect storms, soak | `tests/load` (Node harness speaking the real protocol from many source addresses; headless web clients with real MLS; ADR-053, [load-testing.md](load-testing.md)) | pre-release, Phase 15; results in [capacity.md](capacity.md) |
 | Failure / chaos | dependency loss, pod kills, network partitions | Toxiproxy, chaos experiments in staging | weekly |
 | Migration | up on empty + production-shaped fixture; lint for locking ops | squawk, custom harness | every PR touching migrations |
 | Accessibility | WCAG 2.2 AA | axe-core in Playwright, manual screen-reader passes | PR + release |

@@ -110,7 +110,9 @@ async function main(): Promise<void> {
   lifecycle.onShutdown({ name: 'health', run: () => health.close() });
 
   await health.listen({ host: config.HOST, port: config.HEALTH_PORT });
-  await new Promise<void>((resolve) => http.listen(config.PORT, config.HOST, resolve));
+  await new Promise<void>((resolve) =>
+    http.listen({ port: config.PORT, host: config.HOST, backlog: config.LISTEN_BACKLOG }, resolve),
+  );
   lifecycle.markStarted();
   logger.info('realtime.started', { port: config.PORT });
 

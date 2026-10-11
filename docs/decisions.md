@@ -1247,3 +1247,40 @@ browser must be reset (site data cleared) to trust a new key — the key needs t
 other signing keys (Phase 15). Install downloads about 4 MB once per release.
 
 **Status.** PROPOSED — implemented; NEEDS-SECURITY-REVIEW (S-03).
+
+## ADR-053 — Load testing as built: a Node harness speaking the real protocol, the web client's own code for real end-to-end encryption, seeding as the only shortcut (Phase 15)
+
+**Context.** scaling.md planned k6 for HTTP and WebSocket load with "real crypto in a smaller
+fleet of headless clients". The exit criterion is the Stage-2 target (≈10,000 sockets, ≈60
+messages/s at peak) with 3× headroom: 30,000 sockets and 180 messages/s, on whatever hardware the
+test runs.
+
+**Decision.**
+- **A Node harness (`tests/load`) instead of k6.** k6 runs a JavaScript VM per virtual user;
+  holding 30,000 mostly idle WebSockets would take tens of gigabytes. A virtual user here is a
+  few kilobytes on top of its socket. The harness reuses the shared validation package for the
+  protocol constants, so it cannot drift from the API.
+- **Virtual users behave like the web app**, not like an idealised client: delivery acks,
+  catch-up after reconnects, the app's backoff, pod failover. An early version that only sent
+  and received understated API load about threefold (each message also produces two acks and
+  two receipts).
+- **Open-loop load** with latency histograms merged across generator processes; every run
+  records CPU and memory of each service and of the machine.
+- **Real end-to-end encryption through the web client's own modules** (`MessagingStore`,
+  `E2eeSession`, the crypto engine and WebAssembly core), run headless in worker threads — not a
+  reimplementation, so what is measured is what ships.
+- **Seeding writes accounts directly to the database** (sessions stored as the API stores them);
+  everything measured afterwards goes through the public interfaces. Headless clients register
+  real devices and keys through the API.
+- **Services run from their production builds**, as several processes ("pods"), with production
+  defaults; tuning experiments pass environment overrides explicitly and are reported as such.
+
+**Consequences.** The harness found and fixed (capacity.md §4): a presence write per user per
+heartbeat that stalled delivery, a 5-second deploy drain window (design said 30 s) that let
+reconnects stall sends for seconds, a shutdown race that lost presence cleanup, the default listen
+backlog dropping connections in bursts, a web-client fetch per delivered message and an unhandled
+rejection on failed catch-ups. Its numbers come from one 4-core machine shared by services,
+database and generators — conservative, and no substitute for staging measurements with real
+networks (Phase 17).
+
+**Status.** ACCEPTED (implemented).

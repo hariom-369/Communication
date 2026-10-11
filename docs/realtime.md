@@ -15,8 +15,8 @@ What `services/realtime` does today, and where it differs from the target design
 | Sends | REST (ADR-036); the socket only pushes | socket submit + REST fallback |
 | Fan-out | per-user Valkey channel (ADR-037) | per-device routes (§3) |
 | Limits | 10 sockets/user (4429), 50k/pod (1013), 20 frames/s burst 40 (4408), typing 1 per 3 s per conversation, backpressure close at 1 MiB buffered (1013) | + per-device eviction, per-IP unauthenticated cap |
-| Heartbeat | ping every 25 s, terminate on missed pong | same |
-| Deploys | SIGTERM → `reconnect{afterMs: random 0..30 s}` → drain | same |
+| Heartbeat | ping every 25 s, terminate on missed pong; presence refreshed in pipelined batches of 1,000 keys (Phase 15: one transaction per user stalled delivery) | same |
+| Deploys | SIGTERM → `reconnect{afterMs: random 0..30 s}` → drain (`SHUTDOWN_DRAIN_MS` 30 s, shutdown timeout 45 s; was 5 s until Phase 15, which stalled sends during deploys — capacity.md §4); cleanups of closed sockets finish before Valkey closes | same |
 | Presence | online flag (TTL 90 s) + last seen, visibility enforced at read time with reciprocity (hidden users see no one's) | same |
 | Typing | server-visible `typing` frames, membership-checked, not persisted (metadata, documented) | MLS-encrypted typing |
 

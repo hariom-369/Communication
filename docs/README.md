@@ -23,7 +23,7 @@ Date of research pass: 2026-09-27.
 | 13 | Admin architecture | [admin.md](admin.md) |
 | 14 | Billing architecture | [billing.md](billing.md) |
 | 15 | Deployment architecture | [deployment.md](deployment.md), [disaster-recovery.md](disaster-recovery.md), [observability.md](observability.md) |
-| 16 | Scaling strategy | [scaling.md](scaling.md) |
+| 16 | Scaling strategy | [scaling.md](scaling.md), [capacity.md](capacity.md) (measured), [load-testing.md](load-testing.md) |
 | 17 | Compliance-readiness checklist | [compliance.md](compliance.md) |
 | 18 | Testing strategy | [testing.md](testing.md) |
 | 19 | Repository structure | [repository-structure.md](repository-structure.md) |

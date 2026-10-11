@@ -28,6 +28,7 @@ export function routeCatalog(): { routes: RouteDefinition[]; close(): Promise<vo
       SESSION_IDLE_DAYS: 30,
       SESSION_ABSOLUTE_DAYS: 90,
       BUILD_VERSION: 'catalog',
+      REALTIME_TICKETS_PER_SECOND: 0,
       BUILD_COMMIT: 'catalog',
       VALKEY_KEY_PREFIX: 'catalog',
       MAILBOX_RETENTION_DAYS: 30,

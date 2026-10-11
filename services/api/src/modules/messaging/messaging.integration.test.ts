@@ -263,6 +263,74 @@ describe("'messaging.list_messages', 'messaging.ack', 'messaging.sync'", () => {
     expect(backward.hasMore).toBe(false);
   });
 
+  it('in groups, publishes one receipt per message — when the last member has it — not one per member', async () => {
+    const owner = await user();
+    const members = [await user(), await user()];
+    for (const member of members) {
+      const privacy = (await member.client.get('/api/v1/accounts/me/privacy')).json<object>();
+      await member.client.put('/api/v1/accounts/me/privacy', {
+        ...privacy,
+        groupInvites: 'everyone',
+      });
+    }
+    const created = await owner.client.post('/api/v1/groups', {
+      ciphersuite: 1,
+      usernames: members.map((m) => m.username),
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    const groupId = created.json<{ conversationId: string }>().conversationId;
+    expect((await send(owner.client, groupId)).statusCode).toBe(201);
+    const receipts = () =>
+      (received.get(userChannel(env.keyPrefix, owner.id)) ?? []).filter(
+        (event) => event['type'] === 'receipt' && event['conversationId'] === groupId,
+      );
+    // The first member's ack: the message is not with everyone yet — nobody is told.
+    expect(
+      (await members[0]!.client.post(`/api/v1/conversations/${groupId}/ack`, { seq: 1 }))
+        .statusCode,
+    ).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(receipts()).toEqual([]);
+    // The last one: one receipt, carrying the position everyone has reached.
+    expect(
+      (await members[1]!.client.post(`/api/v1/conversations/${groupId}/ack`, { seq: 1 }))
+        .statusCode,
+    ).toBe(200);
+    await eventsFor(owner.id, 'receipt');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(receipts()).toEqual([
+      { type: 'receipt', conversationId: groupId, userId: members[1]!.id, seq: 1 },
+    ]);
+  });
+
+  it('refuses acks from non-members like a missing conversation, and a stale ack publishes nothing', async () => {
+    const alice = await user();
+    const bob = await user();
+    const mallory = await user();
+    const conversation = await openDirect(alice.client, bob.username);
+    for (let i = 0; i < 2; i++) await send(alice.client, conversation.id);
+    expect(
+      (await mallory.client.post(`/api/v1/conversations/${conversation.id}/ack`, { seq: 1 }))
+        .statusCode,
+    ).toBe(404);
+    expect(
+      (await bob.client.post(`/api/v1/conversations/${conversation.id}/ack`, { seq: 2 }))
+        .statusCode,
+    ).toBe(200);
+    const before = (await eventsFor(alice.id, 'receipt')).length;
+    // At or behind the current position: accepted, nothing changes, nobody is told.
+    expect(
+      (await bob.client.post(`/api/v1/conversations/${conversation.id}/ack`, { seq: 2 }))
+        .statusCode,
+    ).toBe(200);
+    expect(
+      (await bob.client.post(`/api/v1/conversations/${conversation.id}/ack`, { seq: 1 }))
+        .statusCode,
+    ).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 300)); // a wrongly published receipt lands
+    expect((await eventsFor(alice.id, 'receipt')).length).toBe(before);
+  });
+
   it('tracks delivery per member, publishes receipts, and never moves backwards', async () => {
     const alice = await user();
     const bob = await user();

@@ -50,6 +50,7 @@ describe('api config', () => {
     expect(config.BODY_LIMIT_BYTES).toBe(65_536);
     expect(config.LOG_ERROR_DETAILS).toBe(false);
     expect(config.TRUST_PROXY_HOPS).toBe(0);
+    expect(config.LISTEN_BACKLOG).toBe(4096);
   });
 
   it('accepts a hardened production configuration', () => {

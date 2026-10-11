@@ -140,7 +140,7 @@ async function main(): Promise<void> {
   });
   lifecycle.onShutdown({ name: 'http', run: () => app.close() });
   await health.listen({ host: config.HOST, port: config.ADMIN_HEALTH_PORT });
-  await app.listen({ host: config.HOST, port: config.ADMIN_PORT });
+  await app.listen({ host: config.HOST, port: config.ADMIN_PORT, backlog: config.LISTEN_BACKLOG });
   lifecycle.markStarted();
   logger.info('admin.started', { port: config.ADMIN_PORT, version: config.BUILD_VERSION });
   for (const signal of ['SIGTERM', 'SIGINT'] as const) {

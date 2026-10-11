@@ -62,6 +62,15 @@ const schema = z
 
     ALLOWED_ORIGINS: env.originList(),
     TRUST_PROXY_HOPS: env.nonNegativeInt(0),
+    // Pending-connection queue of the listening socket (the kernel caps it at net.core.somaxconn).
+    // Node's default of 511 overflowed during reconnect storms: dropped SYNs cost clients 1–3 s
+    // retransmission delays while the process was mostly idle (docs/capacity.md §4).
+    LISTEN_BACKLOG: env.positiveInt(4096),
+    // Realtime tickets per second across the cluster (0 = unlimited). Bounds the reconnect wave
+    // after a realtime pod fails, so connected users keep sending (docs/capacity.md §4). Size it
+    // to the API tier: about a third of its spare request capacity, since each reconnect costs
+    // about three API requests.
+    REALTIME_TICKETS_PER_SECOND: env.nonNegativeInt(500),
     BODY_LIMIT_BYTES: env.positiveInt(64 * 1024),
 
     /** Public URL of the web app, used in email links (password reset). */

@@ -27,7 +27,17 @@ describe('realtime config', () => {
       WS_PATH: '/rt/v1/ws',
       MAX_CONNECTIONS_PER_USER: 10,
       HEARTBEAT_SECONDS: 25,
+      SHUTDOWN_DRAIN_MS: 30_000,
+      SHUTDOWN_TIMEOUT_MS: 45_000,
+      LISTEN_BACKLOG: 4096,
     });
+  });
+
+  it('keeps the drain window inside the shutdown timeout', () => {
+    expect(issues({ ...base, SHUTDOWN_DRAIN_MS: '30000', SHUTDOWN_TIMEOUT_MS: '25000' })).toEqual([
+      'SHUTDOWN_TIMEOUT_MS',
+    ]);
+    expect(issues({ ...base, SHUTDOWN_DRAIN_MS: '0', SHUTDOWN_TIMEOUT_MS: '10000' })).toEqual([]);
   });
 
   it('enforces TLS and https origins in production', () => {

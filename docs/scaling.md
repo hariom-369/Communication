@@ -1,6 +1,6 @@
 # Scaling strategy
 
-Status: PROPOSED · Planning assumptions (to be validated by load tests in Phase 15):
+Status: PROPOSED · Planning assumptions (load-tested in Phase 15 — [capacity.md](capacity.md)):
 DAU = 40% of registered; peak concurrent = 15% of DAU; 40 messages/DAU/day; peak/avg = 3×;
 average 1.6 devices per user (sockets ≈ concurrent users × 1.6); average conversation fan-out 3 devices (1:1 dominated). One mailbox row per message regardless of device count (MLS). Design headroom: 3× these numbers.
 
@@ -68,7 +68,9 @@ Bottlenecks:
 
 ## Load testing (Phase 15)
 
-k6 (HTTP + WebSocket) with synthetic MLS-shaped payloads (ciphertext-sized random bytes;
-real crypto in a smaller fleet of headless clients); scenarios: steady chat, reconnect storm
-after deploy, 1,024-member group burst, channel publish to 1M subscribers, call setup
-surge; soak 24 h. Capacity model updated from results.
+Done — harness in [load-testing.md](load-testing.md) (a Node harness instead of k6, ADR-053),
+results and the per-message cost model in [capacity.md](capacity.md). Stage 2 with 3× headroom
+(30,000 sockets, 180 messages/s) was met on a single 4-core machine; PostgreSQL is the first
+bottleneck (≈ 4.4 ms CPU per delivered direct message), which puts the Stage 3 database at
+≈ 8 cores and Stage 4 past one primary, as planned above. The longest soak was 30 minutes, not
+24 hours; a 24-hour soak runs in staging (Phase 17).

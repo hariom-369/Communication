@@ -104,6 +104,8 @@ export async function startIntegrationApp(
     pushTestOrigin?: string;
     /** Billing against a stand-in for both payment providers (src/test/fake-payments.ts). */
     payments?: FakePayments;
+    /** Realtime ticket admission (tickets per second, cluster-wide); default unlimited. */
+    ticketsPerSecond?: number;
   } = {},
 ): Promise<IntegrationApp> {
   const adminUrl = requireEnv('TEST_DATABASE_URL');
@@ -183,6 +185,7 @@ export async function startIntegrationApp(
       SECURITY_ALERT_RETENTION_DAYS: 180,
       FRANKING_KEYS: `f1:${key()}`,
       EVIDENCE_RETENTION_DAYS: 365,
+      REALTIME_TICKETS_PER_SECOND: options.ticketsPerSecond ?? 0,
       ...(options.payments === undefined ? {} : billingTestConfig(options.payments)),
     },
     { db, valkey, mailer, logger, media, moderationKey },

@@ -431,6 +431,42 @@ describe('MessagingStore', () => {
     store.stop();
   });
 
+  it('processes the next message straight from the hint, without fetching it', async () => {
+    const server = [mailbox(1, PEER, { kind: 'text', text: 'one' })];
+    const api = fakeApi(server);
+    const { store, push } = createStore(api);
+    await store.start();
+    const fetches = api.messages.mock.calls.length;
+    server.push(mailbox(2, PEER, { kind: 'text', text: 'two' }));
+    push({ type: 'message', conversationId: CONVERSATION, message: server[1]! });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(texts(store)).toEqual(['one', 'two']);
+    expect(api.messages.mock.calls.length).toBe(fetches);
+    store.stop();
+  });
+
+  it('a catch-up that fails after a hint (rate limited, offline) is retried by the next one', async () => {
+    const server = [mailbox(1, PEER, { kind: 'text', text: 'one' })];
+    const api = fakeApi(server);
+    const { store, push } = createStore(api);
+    await store.start();
+    server.push(
+      mailbox(2, PEER, { kind: 'text', text: 'two' }),
+      mailbox(3, PEER, { kind: 'text', text: 'three' }),
+    );
+    // A hint that skips ahead needs a fetch; it fails. Not an unhandled rejection (the test run
+    // would fail on one): the gap simply stays open.
+    api.messages.mockRejectedValueOnce(new Error('Too many requests'));
+    push({ type: 'message', conversationId: CONVERSATION, message: server[2]! });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(texts(store)).toEqual(['one']);
+    server.push(mailbox(4, PEER, { kind: 'text', text: 'four' }));
+    push({ type: 'message', conversationId: CONVERSATION, message: server[3]! });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(texts(store)).toEqual(['one', 'two', 'three', 'four']);
+    store.stop();
+  });
+
   it('keeps a message sent while incoming messages are being decrypted', async () => {
     const server: MailboxMessage[] = [];
     const api = fakeApi(server);

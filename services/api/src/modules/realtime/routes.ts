@@ -9,9 +9,27 @@ export interface RealtimeModuleDeps {
   readonly realtime: RealtimeService;
   /** Path of the WebSocket endpoint relative to the web origin (routed to services/realtime). */
   readonly websocketPath: string;
+  /**
+   * Tickets issued per second across all API processes (admission control, docs/capacity.md
+   * §4). When a realtime pod fails, all of its clients reconnect at once; refusing the excess
+   * (429 with Retry-After, the clients back off and retry) spreads the wave so the people already
+   * connected keep sending without delay. Absent: no limit.
+   */
+  readonly ticketsPerSecond?: number;
 }
 
 export function realtimeRoutes(deps: RealtimeModuleDeps): RouteDefinition[] {
+  const admission =
+    deps.ticketsPerSecond === undefined
+      ? null
+      : {
+          name: 'realtime.ticket.admission',
+          limit: deps.ticketsPerSecond,
+          periodMs: 1000,
+          burst: deps.ticketsPerSecond,
+          // A limiter outage must not keep anyone offline.
+          onStoreFailure: 'open' as const,
+        };
   return [
     defineRoute({
       id: 'realtime.ticket',
@@ -31,11 +49,15 @@ export function realtimeRoutes(deps: RealtimeModuleDeps): RouteDefinition[] {
       audit: { kind: 'none', reason: 'Short-lived connection credential' },
       schema: { body: z.strictObject({}), response: realtimeTicketSchema },
       successStatus: 201,
-      handler: async (_input, context) => ({
-        ticket: await deps.realtime.issueTicket(context.session.userId, context.session.id),
-        url: deps.websocketPath,
-        expiresInSeconds: TICKET_TTL_SECONDS,
-      }),
+      handler: async (_input, context) => {
+        // One shared budget for the whole cluster (the subject is the same for everyone).
+        if (admission !== null) await context.rateLimit(admission, 'cluster');
+        return {
+          ticket: await deps.realtime.issueTicket(context.session.userId, context.session.id),
+          url: deps.websocketPath,
+          expiresInSeconds: TICKET_TTL_SECONDS,
+        };
+      },
     }),
     defineRoute({
       id: 'realtime.presence',

@@ -68,6 +68,8 @@ const TYPING_INTERVAL_MS = 3000;
 const MEMBERSHIP_CACHE_MS = 60_000;
 const PRESENCE_TTL_SECONDS = 90;
 const LAST_SEEN_TTL_SECONDS = 90 * 24 * 3600;
+/** Presence keys written per pipeline round trip on each heartbeat. */
+const PRESENCE_BATCH = 1000;
 
 const ticketSchema = z.object({ userId: z.string(), sessionId: z.string() });
 
@@ -89,6 +91,8 @@ export class RealtimeGateway {
   readonly #connections = new Set<Connection>();
   readonly #byUser = new Map<string, Set<Connection>>();
   readonly #timers: NodeJS.Timeout[] = [];
+  /** Cleanups of closed connections still writing to Valkey (awaited before shutdown ends). */
+  readonly #cleanups = new Set<Promise<void>>();
   #draining = false;
 
   constructor(deps: GatewayDeps) {
@@ -184,7 +188,10 @@ export class RealtimeGateway {
     });
     socket.on('close', () => {
       clearTimeout(authTimer);
-      void this.#remove(connection);
+      const cleanup = this.#remove(connection).finally(() => {
+        this.#cleanups.delete(cleanup);
+      });
+      this.#cleanups.add(cleanup);
     });
     socket.on('error', () => {
       socket.terminate();
@@ -426,22 +433,29 @@ export class RealtimeGateway {
       if (connection.userId !== null) online.add(connection.userId);
       if (connection.sessionId !== null) sessions.add(connection.sessionId);
     }
+    // Presence refresh in pipelined batches, yielding between them: one transaction per user made
+    // every heartbeat a burst of tens of thousands of round trips that stalled message delivery
+    // (docs/capacity.md §3).
     const { valkey, config } = this.#deps;
-    const marks = [...online].map((userId) => this.#markOnline(userId, null));
-    if (sessions.size > 0) {
-      const multi = valkey.multi();
-      for (const sessionId of sessions)
-        multi.set(
-          `${config.keyPrefix}:presence:session:${sessionId}`,
-          '1',
-          'EX',
-          PRESENCE_TTL_SECONDS,
-        );
-      marks.push(multi.exec().then(() => undefined));
+    const now = String(Date.now());
+    const writes: [string, string, number][] = [];
+    for (const userId of online) {
+      writes.push([`${config.keyPrefix}:presence:online:${userId}`, '1', PRESENCE_TTL_SECONDS]);
+      writes.push([`${config.keyPrefix}:presence:seen:${userId}`, now, LAST_SEEN_TTL_SECONDS]);
     }
-    await Promise.all(marks).catch((error: unknown) => {
+    for (const sessionId of sessions)
+      writes.push([`${config.keyPrefix}:presence:session:${sessionId}`, '1', PRESENCE_TTL_SECONDS]);
+    try {
+      for (let i = 0; i < writes.length; i += PRESENCE_BATCH) {
+        const pipeline = valkey.pipeline();
+        for (const [key, value, ttl] of writes.slice(i, i + PRESENCE_BATCH))
+          pipeline.set(key, value, 'EX', ttl);
+        await pipeline.exec();
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+    } catch (error) {
       this.#deps.logger.warn('realtime.presence_failed', this.#deps.logger.errorFields(error));
-    });
+    }
   }
 
   async #recheckAllSessions(): Promise<void> {
@@ -535,11 +549,19 @@ export class RealtimeGateway {
     }
     for (const connection of this.#connections)
       connection.socket.close(CloseCode.serviceRestart, 'Server restarting');
+    // Clients get a moment to answer the close; then the rest is dropped.
+    const closeDeadline = Date.now() + 2000;
+    while (this.#connections.size > 0 && Date.now() < closeDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    for (const connection of this.#connections) connection.socket.terminate();
     await new Promise<void>((resolve) => {
       this.#server.close(() => {
         resolve();
       });
     });
+    // Presence and subscriptions of the closed connections are cleaned up before Valkey closes.
+    while (this.#cleanups.size > 0) await Promise.allSettled([...this.#cleanups]);
   }
 }
 
