@@ -9,7 +9,8 @@ import lighthouse from 'lighthouse';
  */
 
 const WEB_URL = 'http://localhost:4173';
-const PORT = 59_222;
+// Below 32768: outside the ephemeral range, where a connection can take the port first.
+const PORT = 29_222;
 const MINIMUM = { performance: 0.9, accessibility: 1, 'best-practices': 0.9 } as const;
 
 test.describe('lighthouse', () => {

@@ -1,7 +1,7 @@
 # Phase 15 report — Load testing
 
-**Status: GATE_STATUS.** Verified 2026-10-11. CI has not run, because the branch still cannot
-be pushed (GitHub returns 403 for the Claude app).
+**Status: GREEN locally.** Verified 2026-10-11. The branch is pushed (GitHub access was restored
+during the phase); CI runs on the next push to a pull request.
 
 Stage 2 of the scaling plan (100k registered users) with 3× headroom — **30,000 concurrent
 sockets and 180 messages/s** — was met on a single 4-core machine that also ran PostgreSQL,
@@ -23,7 +23,7 @@ users' sends for ≈ 20 s while its clients reconnect (capacity.md §4). Harness
 | Format, lint, typecheck, build | pass (lint after excluding Playwright output an interrupted run left behind — ESLint now ignores `test-results/`) |
 | Unit tests | **656 TypeScript** (api 401, web 150, ui 65, platform 15, load 8, shared 7, realtime 4, validation 3, admin 3) + **78 Rust** — new: ticket admission spread, periodic job failure handling, `Retry-After` honoured, ack delay, harness metrics and random |
 | Integration (real PostgreSQL + Valkey + S3-compatible store + coturn) | **244 passed** (api 225, realtime 19); 2 skipped (IPv6 TURN without IPv6 here; opt-in channel scale test) — new: ticket admission, group receipts (incl. ties), stale/non-member acks, presence refresh, drain with a slow Valkey |
-| End-to-end, user app (Chromium, production build, real services) | E2E_WEB |
+| End-to-end, user app (Chromium, production build, real services) | **59 passed (1 skipped: opt-in call load test) in each of the last 2 full runs**; the third failed only in Lighthouse because its DevTools port (59222) was taken — moved below 32768 like the other test ports, then the Lighthouse spec passed 3 of 3 (performance 0.94–0.96, accessibility 1.00, best practices 0.96). Earlier rounds failed on leftovers of an interrupted run and on ports in the ephemeral range; all causes fixed (below) |
 | End-to-end, admin console | **6 passed in each of 3 consecutive runs** |
 | Mutation checks | **8 of 8** seeded faults caught: group receipt condition (always / never), ticket admission removed, `Retry-After` ignored by the client, timing test (`burn` doing nothing), periodic job (old code), drain cleanups (slow-Valkey test), store direct-ingest |
 | Load runs | see "Exit criterion" below and capacity.md §1 |
@@ -103,7 +103,8 @@ the next runs fail at port binding; they were killed and the reruns record lefto
 (API, inbox, push and payment stand-ins, health ports, coturn, LiveKit) and CI's S3 stand-in sat
 inside Linux's ephemeral port range (32768–60999), so an outgoing connection could take a test
 listener's port: one run failed on the push stand-in's port, one admin run on its health port.
-They moved below 32768 (the load harness already used such ports).
+They moved below 32768 (the load harness already used such ports); so did the Lighthouse spec's
+DevTools port (59222), the cause of one Lighthouse run scoring 0.
 
 ## Security implications (threat-model delta)
 
@@ -141,4 +142,6 @@ figures, no message content (payloads are random bytes; headless clients' plaint
 
 ## Commit
 
-COMMIT_LINE
+See the git log of branch `claude/trusting-goodall-55613i`: the Phase 15 work is in the commits
+prefixed "Phase 15" plus "Fix API crash when a periodic job cannot get a database connection"
+and "Move end-to-end test ports out of the ephemeral port range"; this report closes the phase.
