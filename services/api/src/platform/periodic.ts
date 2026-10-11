@@ -17,8 +17,12 @@ export function startSingletonTask(options: {
   let stopped = false;
 
   const run = async (): Promise<void> => {
-    const client = await options.pool.connect();
+    // Every failure is logged and the next interval tries again — including not getting a
+    // connection at all: a pool timeout while the database was briefly saturated used to reject
+    // here unhandled and take the whole API process down (found by the Phase 15 soak).
+    let client: pg.PoolClient | undefined;
     try {
+      client = await options.pool.connect();
       const locked = await client.query<{ ok: boolean }>('SELECT pg_try_advisory_lock($1) AS ok', [
         options.lockKey,
       ]);
@@ -34,7 +38,7 @@ export function startSingletonTask(options: {
         ...options.logger.errorFields(error),
       });
     } finally {
-      client.release();
+      client?.release();
     }
   };
 
