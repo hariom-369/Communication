@@ -35,7 +35,7 @@ subprotocol, the `auth` frame — and what the app does on its own: delivery ack
 coalesces them (150 ms, longer in large groups — `ack-delay.ts`), `GET /sync` plus fetching what was missed after every reconnect, and the app's reconnect
 backoff (full jitter, 500 ms base, 30 s cap, reset after a minute connected; a refused
 ticket's `Retry-After` is waited out). A reconnect moves to
-the next realtime pod, as a load balancer would. Messages are random bytes of a realistic
+another realtime pod, chosen at random, as a load balancer would spread it. Messages are random bytes of a realistic
 ciphertext size (512 bytes by default) whose first 8 bytes carry the send time, so delivery
 latency is measured on the receiving socket, across processes. Latencies go into mergeable
 logarithmic histograms (≈2 % resolution). Load is **open-loop**: requests leave on schedule

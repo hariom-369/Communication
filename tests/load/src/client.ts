@@ -272,7 +272,7 @@ export class VirtualUser {
         clearTimeout(timer);
         if (!settled) {
           settled = true;
-          this.#pod += 1; // try another pod next time
+          this.#nextPod(); // try another pod next time
           reject(new Error(`closed ${String(code)}`));
         }
         // A socket closed on purpose, or one already replaced, says nothing about the current one
@@ -284,7 +284,7 @@ export class VirtualUser {
         this.#metrics.counters.add(`close_${String(code)}`);
         if (wasReady) {
           this.#disconnectedAt ??= Date.now();
-          this.#pod += 1;
+          this.#nextPod();
         }
         if (this.reconnect && wasReady) this.#scheduleReconnect(this.#backoff());
       });
@@ -296,12 +296,18 @@ export class VirtualUser {
         clearTimeout(timer);
         if (!settled) {
           settled = true;
-          this.#pod += 1;
+          this.#nextPod();
           socket.terminate();
           reject(new Error(`upgrade ${String(response.statusCode)}`));
         }
       });
     });
+  }
+
+  /** Another pod, chosen at random among the others — as a load balancer spreads reconnects. */
+  #nextPod(): void {
+    const others = this.#realtime.length - 1;
+    if (others > 0) this.#pod += 1 + Math.floor(Math.random() * others);
   }
 
   #onFrame(frame: {
@@ -326,7 +332,7 @@ export class VirtualUser {
         // A pod draining for a deploy: reconnect after its jitter (elsewhere, via the API).
         this.#metrics.counters.add('reconnect_requested');
         this.#disconnectedAt = Date.now();
-        this.#pod += 1;
+        this.#nextPod();
         const socket = this.#socket;
         this.#ready = false;
         if (socket !== null) {
