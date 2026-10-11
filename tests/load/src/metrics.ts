@@ -231,7 +231,9 @@ export class ResourceMonitor {
   cpuBetween(name: string, fromMs: number, toMs: number): number {
     const entry = this.#samples.get(name);
     if (entry === undefined) return 0;
-    const inside = entry.cpu.filter((_, i) => (entry.at[i] ?? 0) >= fromMs && (entry.at[i] ?? 0) < toMs);
+    const inside = entry.cpu.filter(
+      (_, i) => (entry.at[i] ?? 0) >= fromMs && (entry.at[i] ?? 0) < toMs,
+    );
     return round(inside.reduce((a, b) => a + b, 0) / Math.max(1, inside.length));
   }
 

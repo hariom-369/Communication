@@ -28,7 +28,7 @@ GATE_ROWS
 |---|---|---|
 | steady, 3 min | 30,000 sockets, 180 msg/s, every delivery acked | send p50 7 ms, p95 29 ms, p99 131 ms; delivery p95 42 ms, p99 240 ms; 64,800/64,800 delivered; 0 errors |
 | soak, 30 min | same | send p50 8 ms, p95 38 ms, p99 152 ms, max 521 ms; 648,000/648,000 delivered; 0 errors; no 10 s window with a send over 1 s |
-| reconnect storm, deploy | 30,000 sockets on 3 pods; one drained and restarted | every socket back after 31 s; sends meanwhile p95 440 ms; nothing refused or lost |
+| reconnect storm, deploy | 30,000 sockets on 3 pods; one drained and restarted | every socket back after 31–32 s; sends meanwhile p95 0.44–1.6 s (three runs); nothing refused or lost |
 | reconnect storm, crash | same; one pod SIGKILLed | every socket back after 14 s; meanwhile connected users' sends p95 8.9 s for ≈ 20 s — the one limit left (capacity.md §4) |
 | group burst | 1,024-member group, all online, 20 posts/s (20,480 deliveries/s) | send p50 33 ms, p95 256 ms; 1,228,800/1,228,800 delivered |
 | channel | 1,005,000 subscribers, a post every 2 s, 300 feed reads/s | publish p95 18 ms; feed read p95 8 ms; 0 writes per subscriber |

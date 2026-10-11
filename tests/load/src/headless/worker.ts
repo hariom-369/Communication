@@ -110,7 +110,10 @@ globalThis.fetch = (async (input: RequestInfo | URL, request?: RequestInit) => {
     if (!limited.has(key)) {
       limited.add(key);
       const detail = await response.clone().text();
-      parentPort?.postMessage({ event: 'error', message: `429 on ${key}: ${detail.slice(0, 200)}` });
+      parentPort?.postMessage({
+        event: 'error',
+        message: `429 on ${key}: ${detail.slice(0, 200)}`,
+      });
     }
   }
   return response as unknown as Response;
@@ -235,7 +238,10 @@ async function handle(command: HeadlessCommand): Promise<void> {
     case 'send':
       // The store ignores a send into a conversation it does not know (the UI offers none).
       if (!known(command.conversationId)) {
-        post({ event: 'error', message: `send ${String(command.n)} dropped: conversation unknown` });
+        post({
+          event: 'error',
+          message: `send ${String(command.n)} dropped: conversation unknown`,
+        });
         return;
       }
       store.sendText(

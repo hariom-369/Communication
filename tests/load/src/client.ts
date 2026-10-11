@@ -355,19 +355,22 @@ export class VirtualUser {
   readonly #ackTimers = new Map<string, NodeJS.Timeout>();
   #scheduleAck(conversationId: string): void {
     if (this.#ackTimers.has(conversationId)) return;
-    const timer = setTimeout(() => {
-      this.#ackTimers.delete(conversationId);
-      const seq = this.#seen.get(conversationId) ?? 0;
-      if (seq < 1) return;
-      this.request('POST', `/api/v1/conversations/${conversationId}/ack`, { seq }).then(
-        (response) => {
-          this.#metrics.counters.add(`ack_${String(response.status)}`);
-        },
-        () => {
-          this.#metrics.counters.add('ack_error');
-        },
-      );
-    }, ackDelayMs(this.memberCounts.get(conversationId) ?? 2));
+    const timer = setTimeout(
+      () => {
+        this.#ackTimers.delete(conversationId);
+        const seq = this.#seen.get(conversationId) ?? 0;
+        if (seq < 1) return;
+        this.request('POST', `/api/v1/conversations/${conversationId}/ack`, { seq }).then(
+          (response) => {
+            this.#metrics.counters.add(`ack_${String(response.status)}`);
+          },
+          () => {
+            this.#metrics.counters.add('ack_error');
+          },
+        );
+      },
+      ackDelayMs(this.memberCounts.get(conversationId) ?? 2),
+    );
     timer.unref();
     this.#ackTimers.set(conversationId, timer);
   }

@@ -51,7 +51,10 @@ describe('counters', () => {
     const counters = new Counters();
     counters.add('sent');
     counters.add('sent', 2);
-    counters.merge([['sent', 4], ['lost', 1]]);
+    counters.merge([
+      ['sent', 4],
+      ['lost', 1],
+    ]);
     expect(counters.get('sent')).toBe(7);
     expect(counters.get('lost')).toBe(1);
     expect(counters.get('other')).toBe(0);

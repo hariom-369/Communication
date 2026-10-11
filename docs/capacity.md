@@ -16,7 +16,7 @@ peak. With 3× headroom: **30,000 sockets and 180 messages/s**.
 |---|---|---|---|
 | steady (3 min) | 30,000 sockets, 180 msg/s, every delivery acked | send p50 7 ms, p95 29 ms, p99 131 ms; delivery (send start → frame on the peer's socket) p95 42 ms, p99 240 ms; 64,800/64,800 delivered; 0 errors | **met** |
 | soak (30 min) | same | send p50 8 ms, p95 38 ms, p99 152 ms, max 521 ms; delivery p95 59 ms; 648,000/648,000 delivered; 0 errors; no 10 s window with a send over 1 s; realtime memory did not grow (265 → 243 MB per pod, start vs end, in a second 30-min run — at half the send rate after one API process crashed; that crash is §4's periodic-job fix) | **met** |
-| reconnect storm, deploy | 30,000 sockets on 3 pods, 180 msg/s; one pod drained (SIGTERM) and restarted | every socket back after 31 s (the 30 s jitter window); sends meanwhile p50 9 ms, p95 440 ms; nothing refused or lost | **met** |
+| reconnect storm, deploy | 30,000 sockets on 3 pods, 180 msg/s; one pod drained (SIGTERM) and restarted | every socket back after 31–32 s (the 30 s jitter window); sends meanwhile p50 9–10 ms, p95 0.44–1.6 s over three runs (the deploy's ≈ 333 reconnects/s sit at this machine's limit, §4); nothing refused or lost | **met** |
 | reconnect storm, crash | same; one pod SIGKILLed | every socket back after 14 s; meanwhile sends of connected users p95 8.9 s for ≈ 20 s (§4) | **recovers; degraded while it does** |
 | group burst | 1,024-member group (the E2EE cap), all online, 20 posts/s (20,480 deliveries/s) | send p50 33 ms, p95 256 ms; delivery p95 267 ms; 1,228,800/1,228,800 delivered; machine 1.6 cores | **met** |
 | channel | 1,005,000 subscribers; a post every 2 s; 300 feed reads/s | publish p50 9 ms, p95 18 ms; feed read p95 8 ms; writes per subscriber per post: 0 (13 posts refused by the channel post rate limit, as designed) | **met** |
@@ -108,7 +108,7 @@ API's ticket endpoint and the remaining pods.
 - **A crash is the expensive case, and its limit is the API's reconnect throughput.** A crash
   has no drain hint: all of a pod's clients come back within seconds. Every reconnect costs a
   ticket, a `GET /sync` and catch-up — and the API on this machine sustains ≈ 300 reconnects/s
-  next to normal traffic (the deploy above spreads 10,000 over 30 s and stays at p95 440 ms).
+  next to normal traffic (the deploy above spreads 10,000 over 30 s: send p95 0.44–1.6 s).
   Measured, one of three pods (10,000 sockets) SIGKILLed under 180 msg/s:
 
   | Variant | All back after | Sends of connected users meanwhile |

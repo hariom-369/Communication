@@ -113,7 +113,9 @@ function spawnGenerator(): Promise<Generator> {
       },
     );
     child.once('exit', (code, signal) => {
-      process.stderr.write(`generator ${String(child.pid)} exited (${String(code)} ${String(signal)})\n`);
+      process.stderr.write(
+        `generator ${String(child.pid)} exited (${String(code)} ${String(signal)})\n`,
+      );
       reject(new Error(`generator exited ${String(code)}`));
       for (const entry of pending.values()) entry.reject(new Error('generator exited'));
     });
