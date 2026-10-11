@@ -170,7 +170,7 @@ async function systemBusyTicks(): Promise<{ busy: number; total: number }> {
  */
 export class ResourceMonitor {
   readonly #targets: readonly MonitorTarget[];
-  readonly #samples = new Map<string, { cpu: number[]; rss: number[] }>();
+  readonly #samples = new Map<string, { at: number[]; cpu: number[]; rss: number[] }>();
   #timer: NodeJS.Timeout | null = null;
   readonly #last = new Map<string, { ticks: number; at: number }>();
   #lastSystem: { busy: number; total: number } | null = null;
@@ -180,7 +180,8 @@ export class ResourceMonitor {
   }
 
   #push(name: string, cpu: number, rssMb: number): void {
-    const entry = this.#samples.get(name) ?? { cpu: [], rss: [] };
+    const entry = this.#samples.get(name) ?? { at: [], cpu: [], rss: [] };
+    entry.at.push(Date.now());
     entry.cpu.push(cpu);
     entry.rss.push(rssMb);
     this.#samples.set(name, entry);
@@ -216,6 +217,14 @@ export class ResourceMonitor {
     };
     void tick();
     this.#timer = setInterval(() => void tick(), intervalMs);
+  }
+
+  /** Mean CPU (cores) of `name` over samples taken in [fromMs, toMs). */
+  cpuBetween(name: string, fromMs: number, toMs: number): number {
+    const entry = this.#samples.get(name);
+    if (entry === undefined) return 0;
+    const inside = entry.cpu.filter((_, i) => (entry.at[i] ?? 0) >= fromMs && (entry.at[i] ?? 0) < toMs);
+    return round(inside.reduce((a, b) => a + b, 0) / Math.max(1, inside.length));
   }
 
   stop(): Record<string, { cpuMean: number; cpuPeak: number; rssPeakMb: number }> {

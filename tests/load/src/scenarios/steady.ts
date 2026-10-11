@@ -1,4 +1,5 @@
 import type { Context } from '../cli.js';
+import { SLOW_MS, SLOW_PREFIX } from '../client.js';
 
 /**
  * Steady chat (docs/load-testing.md §2): every account holds one realtime socket; messages go
@@ -37,6 +38,26 @@ export async function steady(context: Context): Promise<Record<string, unknown>>
   await context.sleep(5000); // let in-flight deliveries land
   const resources = context.monitor.stop();
   const report = await context.report(false);
+  // 10 s windows with sends slower than SLOW_MS, with what the machine was doing meanwhile.
+  const stalls = Object.entries(report.counters)
+    .filter(([name]) => name.startsWith(SLOW_PREFIX))
+    .map(([name, slowSends]) => {
+      const at = Number(name.slice(SLOW_PREFIX.length)) * 1000;
+      return {
+        at: new Date(at).toISOString(),
+        slowSends,
+        cpu: Object.fromEntries(
+          ['machine', 'postgres', 'api-0', 'api-1', 'valkey'].map((name) => [
+            name,
+            context.monitor.cpuBetween(name, at, at + 10_000),
+          ]),
+        ),
+      };
+    })
+    .sort((a, b) => a.at.localeCompare(b.at));
+  const counters = Object.fromEntries(
+    Object.entries(report.counters).filter(([name]) => !name.startsWith(SLOW_PREFIX)),
+  );
   const sent = report.counters['sent'] ?? 0;
   // Both members of a direct conversation are online: the peer and the sender's own socket.
   const expected = sent * 2;
@@ -60,7 +81,9 @@ export async function steady(context: Context): Promise<Record<string, unknown>>
     deliveryLatencyMs: report.delivery,
     deliveries: { expected, delivered, lost: Math.max(0, expected - delivered) },
     stillConnected: report.connected,
-    counters: report.counters,
+    slowSendThresholdMs: SLOW_MS,
+    stalls,
+    counters,
     resources,
   };
 }

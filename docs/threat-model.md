@@ -242,3 +242,21 @@ without an announced successor strands browsers on the last release; no public t
 or reproducible builds yet; lazily loaded chunks have no SRI on a first visit (the pin covers
 them afterwards); the pinned copy keeps the CSP captured at install until the next release.
 
+**Phase 15 delta (load testing; availability).** No new trust boundary or data flow: the load
+harness runs only against a disposable local stack and seeds its own database. Analysis in
+[phase-reports/phase-15.md](phase-reports/phase-15.md) and [capacity.md](capacity.md). T-18
+(DDoS) and self-inflicted overload, now measured: a realtime pod crashing sends all its clients
+back at once — **cluster-wide ticket admission** (`REALTIME_TICKETS_PER_SECOND`, 429 +
+`Retry-After`, the client's backoff honours it) keeps the API serving users who are connected
+(integration-tested, mutation-checked); a deploy spreads reconnects over a 30 s drain window; a
+**listen backlog of 4096** stops dropped SYNs during bursts; a full survivor pod refuses upgrades
+(503) rather than degrading every socket, so the realtime tier is sized N+1; quadratic group
+receipt fan-out (members² frames per message, which an ordinary 1,024-member group could trigger
+by chatting) is gone (integration-tested, mutation-checked). Residual: admission is
+cluster-wide, not per client, so a flood of valid sessions requesting tickets slows everyone's
+reconnects (each account is still held to 60 tickets a minute, and each address to the
+unauthenticated flood guard); the admission
+counter fails open if Valkey is down; an unauthenticated per-address socket cap belongs at the
+edge (WAF/load balancer, Phase 17); capacity figures come from one machine and are re-measured in
+staging.
+

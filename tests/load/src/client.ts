@@ -112,6 +112,10 @@ const BACKOFF_CAP_MS = 30_000;
 const STABLE_AFTER_MS = 60_000;
 const ACK_DELAY_MS = 150;
 
+/** A send this slow is counted in its 10 s window (counter `slow@<epoch seconds>`). */
+export const SLOW_MS = 1000;
+export const SLOW_PREFIX = 'slow@';
+
 export interface UserMetrics {
   readonly connect: Histogram;
   readonly reconnect: Histogram;
@@ -415,7 +419,11 @@ export class VirtualUser {
         ciphertext: stampedPayload(payloadBytes, started),
       },
     );
-    this.#metrics.send.record(Date.now() - started);
+    const latency = Date.now() - started;
+    this.#metrics.send.record(latency);
+    // Where in the run slow sends happened (10 s windows by start time; see steady's `stalls`).
+    if (latency >= SLOW_MS)
+      this.#metrics.counters.add(`${SLOW_PREFIX}${String(Math.floor(started / 10_000) * 10)}`);
     this.#metrics.counters.add(
       response.status === 201 ? 'sent' : `send_${String(response.status)}`,
     );
