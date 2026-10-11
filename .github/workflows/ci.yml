@@ -43,6 +43,10 @@ jobs:
         run: |
           pnpm openapi
           git diff --exit-code -- services/api/openapi.json
+      - name: Route security matrix is up to date
+        run: |
+          pnpm --filter @tessera/api security-matrix
+          git diff --exit-code -- docs/security/route-matrix.md
 
   integration:
     name: Integration tests (PostgreSQL + Valkey)
@@ -194,6 +198,7 @@ jobs:
         with:
           scan-args: |-
             --lockfile=pnpm-lock.yaml
+            --lockfile=packages/crypto-core/Cargo.lock
 
   dependency-review:
     name: Dependency review

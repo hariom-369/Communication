@@ -148,9 +148,19 @@ export class S3ObjectStore implements ObjectStore {
   }
 
   presignGet(key: string, expiresInSeconds: number): Promise<string> {
-    return getSignedUrl(this.#client, new GetObjectCommand({ Bucket: this.#bucket, Key: key }), {
-      expiresIn: expiresInSeconds,
-    });
+    // The response headers are part of the signature: whatever metadata the object carries, the
+    // browser receives an opaque download it will not render (defence in depth — objects are
+    // ciphertext stored as application/octet-stream; security review F-07).
+    return getSignedUrl(
+      this.#client,
+      new GetObjectCommand({
+        Bucket: this.#bucket,
+        Key: key,
+        ResponseContentType: 'application/octet-stream',
+        ResponseContentDisposition: 'attachment',
+      }),
+      { expiresIn: expiresInSeconds },
+    );
   }
 
   async delete(keys: readonly string[]): Promise<void> {

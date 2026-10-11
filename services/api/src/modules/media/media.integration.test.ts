@@ -204,6 +204,15 @@ describe("'media.download' and attachments on 'messaging.send'", () => {
     const sent = await send(alice, conversation, [blobId]);
     expect(sent.statusCode, sent.body).toBe(201);
     expect((await fetchBlob(bob.client, blobId)).bytes?.equals(bytes)).toBe(true);
+    // Whatever the object's metadata, the download is an opaque attachment the browser will not
+    // render as a page (the response headers are part of the signed URL).
+    const { url } = mediaDownloadSchema.parse(
+      (await bob.client.get(`/api/v1/media/${blobId}`)).json(),
+    );
+    const download = await fetch(url);
+    expect(download.headers.get('content-type')).toBe('application/octet-stream');
+    expect(download.headers.get('content-disposition')).toBe('attachment');
+    await download.arrayBuffer();
     // Not a member: same answer as for a blob that does not exist.
     const outsider = await carol.client.get(`/api/v1/media/${blobId}`);
     const missing = await carol.client.get(`/api/v1/media/${newId()}`);
