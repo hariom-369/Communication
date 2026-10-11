@@ -1,7 +1,7 @@
 # Threat model
 
-Status: PROPOSED — to be re-reviewed at the end of every phase and by the external security
-reviewer before public beta. Method: asset/actor analysis + STRIDE per trust boundary, then
+Status: **refreshed in Phase 16** (§7: what of each mitigation is built) — re-reviewed at the end
+of every phase and by the external security reviewer before public beta. Method: asset/actor analysis + STRIDE per trust boundary, then
 the threat register below.
 
 Scales: **Probability** L (unlikely in 3 years) / M (plausible) / H (expected).
@@ -261,4 +261,46 @@ a minute, and each address to the unauthenticated flood guard), and its counter 
 Valkey is down; an unauthenticated per-address socket cap belongs at the
 edge (WAF/load balancer, Phase 17); capacity figures come from one machine and are re-measured in
 staging.
+
+## 7. Status as built (Phase 16 refresh)
+
+The register (§4) lists the intended mitigations. This is what exists in the code after
+Phase 16, what is a deployment property (Phase 17), and what is still to build — checked during
+the internal review ([security/review.md](security/review.md), findings F-nn).
+
+| ID | Built and tested | Deployment property (Phase 17) | Not built yet |
+|---|---|---|---|
+| T-01 | rate limits, new-account limits, blocks, reports with franking, privacy controls | — | — |
+| T-02 | `__Host-` HttpOnly cookie, CSP + Trusted Types, session list and revoke, new-login alerts | — | short idle timeout on shared devices (user setting) |
+| T-03 | device revoke, MLS removal, disappearing messages | — | ASK rotation UX ("Start over" only) |
+| T-04 | E2EE, ASK-signed device certificates, client-enforced group policy, signed commits, fingerprint-substitution refused (E2E) | — | key transparency (S-07, post-GA) |
+| T-05 | admin RBAC, step-up, four-eyes, purpose binding, every admin call audited | break-glass production access | — |
+| T-06 | Argon2id + pepper, hashed session tokens, ciphertext only | encryption at rest, KMS-held keys | canary records |
+| T-07 | client-encrypted blobs and backups, random keys, opaque downloads (F-03) | Block Public Access, bucket policies, access logs | — |
+| T-08 | E2EE independent of TLS, DTLS fingerprints via MLS | TLS 1.3, HSTS preload, CT monitoring | — |
+| T-09 | passkeys first, no SMS factor, login alerts | lookalike-domain monitoring | — |
+| T-10 | breached-password check (F-04, Phase 16), rate limits, passkeys, TOTP | breached-password mirror | MFA prompts on risk, credential-stuffing detection (F-09) |
+| T-11 | link confirmation with step-up, notices to own devices and contacts | — | — |
+| T-12 | no phone factor or phone-only recovery | — | — |
+| T-13 | — (out of our control) | — | desktop app |
+| T-14 | React escaping, no HTML rendering, strict CSP + Trusted Types, crypto in a worker, XSS payloads in every rendered field (F-10) | user-content origin for document viewers | — |
+| T-15 | Origin allow-list, single-use tickets from a CSRF-protected endpoint | — | — |
+| T-16 | new-account limits, behaviour signals, email verification | — | risk-based sign-up friction (F-09), graph-based detection |
+| T-17 | signed release manifest, SW pinning, no rollback | release key custody (runbook), 2-person release approval | reproducible builds, transparency log (F-06) |
+| T-18 | per-route limits, flood guard, ticket admission option, N+1 realtime sizing, backlog 4096 | CDN/WAF/Shield, autoscaling, edge socket caps | — |
+| T-19 | pinned actions, least-privilege CI tokens, secret scan | protected branches, OIDC credentials, admission control | SBOM, image signing, SLSA provenance (F-06) |
+| T-20 | lockfiles, dependency review, install-script allow-list, OSV for npm and Cargo (F-02) | — | `cargo deny` (licences, bans) |
+| T-21 | ciphertext padding, no content in push, retention limits | restricted internal access | sealed sender (S-09, research) |
+| T-22 | encrypted local store, device lock (PIN/passkey), remote revoke | — | — |
+| T-23 | client-side backup encryption, 256-bit keys, alerts | — | backup rollback detection (S-06) |
+| T-24 | MLS generation guard, message id dedupe, idempotent sends | — | — |
+| T-25 | Rust parsing, length limits, fuzz targets run nightly in CI (`fuzz.yml`) | — | — |
+| T-26 | ASK-signed certificates verified by clients | — | — |
+| T-27 | claim rate limits, last-resort KeyPackage | claim-rate alerts | — |
+| T-28 | E2EE limits what can be produced; legal-order workflow | — | — |
+
+New in this refresh: **T-29 — security documents claiming controls the code lacks.** Found
+twice in Phase 16 (a SQL lint rule, a breached-password check — F-01, F-04). Mitigation: claims
+are checked against code in each review; generated documents where possible (the route matrix
+and OpenAPI document are produced from the code and checked for drift in CI).
 
