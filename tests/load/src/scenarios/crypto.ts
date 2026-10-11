@@ -85,6 +85,10 @@ export async function crypto(context: Context): Promise<Record<string, unknown>>
         lastSeen.set(key, Math.max(previous, event.n));
         return;
       }
+      if (event.event === 'diagnostic') {
+        log(`client ${user.username}: ${event.message}`);
+        return;
+      }
       if (event.event === 'error') {
         counters.add('client_error');
         log(`client ${user.username}: ${event.message}`);

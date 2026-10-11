@@ -66,7 +66,9 @@ export type HeadlessEvent =
       readonly n: number;
       readonly latencyMs: number;
     }
-  | { readonly event: 'error'; readonly message: string };
+  | { readonly event: 'error'; readonly message: string }
+  /** Information for the log (not a failure). */
+  | { readonly event: 'diagnostic'; readonly message: string };
 
 const data = workerData as HeadlessData;
 const post = (event: HeadlessEvent) => parentPort?.postMessage(event);
@@ -252,7 +254,10 @@ async function handle(command: HeadlessCommand): Promise<void> {
       if (Object.keys(unsent).length > 0)
         post({ event: 'error', message: `unsent own messages ${JSON.stringify(unsent)}` });
       if (process.env['LOAD_REQUEST_COUNTS'] === '1')
-        post({ event: 'error', message: `requests ${JSON.stringify([...requestCounts].sort((a, b) => b[1] - a[1]).slice(0, 12))}` });
+        post({
+          event: 'diagnostic',
+          message: `requests ${JSON.stringify([...requestCounts].sort((a, b) => b[1] - a[1]).slice(0, 12))}`,
+        });
       store.stop();
       session.stop();
       setTimeout(() => process.exit(0), 100);

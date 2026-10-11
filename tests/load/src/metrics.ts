@@ -164,6 +164,14 @@ async function systemBusyTicks(): Promise<{ busy: number; total: number }> {
   return { busy: total - idle, total };
 }
 
+export interface ResourceSummary {
+  readonly cpuMean: number;
+  readonly cpuPeak: number;
+  readonly rssPeakMb: number;
+  readonly rssStartMb: number;
+  readonly rssEndMb: number;
+}
+
 /**
  * Samples CPU (in cores) and memory of the given processes or process groups every
  * `intervalMs`, plus the whole machine; keeps the mean and the peak.
@@ -227,14 +235,21 @@ export class ResourceMonitor {
     return round(inside.reduce((a, b) => a + b, 0) / Math.max(1, inside.length));
   }
 
-  stop(): Record<string, { cpuMean: number; cpuPeak: number; rssPeakMb: number }> {
+  stop(): Record<string, ResourceSummary> {
     if (this.#timer !== null) clearInterval(this.#timer);
-    const out: Record<string, { cpuMean: number; cpuPeak: number; rssPeakMb: number }> = {};
+    const out: Record<string, ResourceSummary> = {};
+    const mean = (values: readonly number[]) =>
+      values.reduce((a, b) => a + b, 0) / Math.max(1, values.length);
     for (const [name, { cpu, rss }] of this.#samples) {
+      // Memory at the start and end of the window (mean of the first and last tenth): growth
+      // over a soak shows as end ≫ start.
+      const tenth = Math.max(1, Math.floor(rss.length / 10));
       out[name] = {
-        cpuMean: round(cpu.reduce((a, b) => a + b, 0) / Math.max(1, cpu.length)),
+        cpuMean: round(mean(cpu)),
         cpuPeak: round(Math.max(0, ...cpu)),
         rssPeakMb: Math.round(Math.max(0, ...rss)),
+        rssStartMb: Math.round(mean(rss.slice(0, tenth))),
+        rssEndMb: Math.round(mean(rss.slice(-tenth))),
       };
     }
     return out;
