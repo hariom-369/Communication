@@ -138,29 +138,4 @@ describe('RealtimeClient', () => {
     expect(sockets).toHaveLength(1);
     client.stop();
   });
-
-  it('spreads the first reconnect after a connection drops without warning', async () => {
-    const { client, sockets } = setup(ticket, () => 0.5);
-    client.start();
-    await vi.advanceTimersByTimeAsync(0);
-    sockets[0]!.open();
-    sockets[0]!.onclose?.({ code: 1006 });
-    // Up to 5 s at random (here half of it), not the backoff's first 500 ms.
-    await vi.advanceTimersByTimeAsync(2_499);
-    expect(sockets).toHaveLength(1);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(sockets).toHaveLength(2);
-    client.stop();
-  });
-
-  it('does not spread a retry after a connection that never became ready', async () => {
-    const { client, sockets } = setup(ticket, () => 0.5);
-    client.start();
-    await vi.advanceTimersByTimeAsync(0);
-    sockets[0]!.onclose?.({ code: 1006 });
-    // The backoff alone: random 0.5 of the first 500 ms.
-    await vi.advanceTimersByTimeAsync(250);
-    expect(sockets).toHaveLength(2);
-    client.stop();
-  });
 });

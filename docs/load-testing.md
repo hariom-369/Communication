@@ -62,9 +62,8 @@ creation, Welcomes, encrypted application messages.
 | `crypto` | `--pairs` pairs of headless clients (real MLS) message each other at `--pair-rate`/s each way, under `--rate`/s of synthetic background traffic | device registration, conversation setup, end-to-end latency including encryption and decryption, order and loss of every message |
 
 Common options: `--users`, `--generators`, `--apis`, `--realtimes`, `--duration` (s),
-`--warmup` (s), `--connect-rate` (sockets/s, default 400 — below the API's ticket admission
-budget of 500/s, so the ramp is not throttled; a refused attempt is retried as the app retries
-it), `--payload` (bytes), `--api-env K=V` and
+`--warmup` (s), `--connect-rate` (sockets/s, default 400 — about what the test machine's API
+sustains next to traffic; a refused attempt is retried as the app retries it), `--payload` (bytes), `--api-env K=V` and
 `--realtime-env K=V` (tuning experiments), `--out` (result directory).
 
 ## 3. What this environment can and cannot show

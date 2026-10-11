@@ -245,18 +245,20 @@ them afterwards); the pinned copy keeps the CSP captured at install until the ne
 **Phase 15 delta (load testing; availability).** No new trust boundary or data flow: the load
 harness runs only against a disposable local stack and seeds its own database. Analysis in
 [phase-reports/phase-15.md](phase-reports/phase-15.md) and [capacity.md](capacity.md). T-18
-(DDoS) and self-inflicted overload, now measured: a realtime pod crashing sends all its clients
-back at once — **cluster-wide ticket admission** (`REALTIME_TICKETS_PER_SECOND`, 429 +
-`Retry-After`, which the web client now waits out before retrying) keeps the API serving users who are connected
-(integration-tested, mutation-checked); a deploy spreads reconnects over a 30 s drain window; a
-**listen backlog of 4096** stops dropped SYNs during bursts; a full survivor pod refuses upgrades
-(503) rather than degrading every socket, so the realtime tier is sized N+1; quadratic group
-receipt fan-out (members² frames per message, which an ordinary 1,024-member group could trigger
-by chatting) is gone (integration-tested, mutation-checked). Residual: admission is
-cluster-wide, not per client, so a flood of valid sessions requesting tickets slows everyone's
-reconnects (each account is still held to 60 tickets a minute, and each address to the
-unauthenticated flood guard); the admission
-counter fails open if Valkey is down; an unauthenticated per-address socket cap belongs at the
+(DDoS) and self-inflicted overload, now measured: a deploy spreads reconnects over a 30 s drain
+window; a **listen backlog of 4096** stops dropped SYNs during bursts; a full survivor pod refuses
+upgrades (503) rather than degrading every socket, so the realtime tier is sized N+1; quadratic
+group fan-out (members² receipt frames, then members² row reads per message, which an ordinary
+1,024-member group could trigger by chatting) is gone (integration-tested, mutation-checked); an
+API process no longer exits when a background job cannot get a database connection (unit-tested).
+A realtime pod **crash** still degrades connected users' sends for ≈ 20 s while its clients
+reconnect: cluster-wide ticket admission (`REALTIME_TICKETS_PER_SECOND`) did not prevent that
+and is off by default; refused tickets carry a spread `Retry-After` that the client now honours.
+Residual: reconnect throughput is an availability limit (API headroom and pod size are the
+mitigation, deployment.md); if admission is enabled it is cluster-wide, so a flood of valid
+sessions requesting tickets slows everyone's reconnects (each account is still held to 60 tickets
+a minute, and each address to the unauthenticated flood guard), and its counter fails open if
+Valkey is down; an unauthenticated per-address socket cap belongs at the
 edge (WAF/load balancer, Phase 17); capacity figures come from one machine and are re-measured in
 staging.
 

@@ -6,11 +6,13 @@ be pushed (GitHub returns 403 for the Claude app).
 Stage 2 of the scaling plan (100k registered users) with 3× headroom — **30,000 concurrent
 sockets and 180 messages/s** — was met on a single 4-core machine that also ran PostgreSQL,
 Valkey and the load generators, over 3 and 30 minutes, with nothing lost. Getting there found
-and fixed nine problems in the services and the web client, most of which would have shown up
+and fixed ten problems in the services and the web client, most of which would have shown up
 in production only under load: a quadratic group fan-out (twice), a heartbeat that stalled the
 realtime event loop, a deploy drain too short for its pod, dropped connections in the kernel
 backlog, shutdown cleanups racing the Valkey close, a client that refetched every message it was
-pushed, and reconnect waves after a crash that starved connected users. Harness: ADR-053,
+pushed, and an API process that exited when a background job could not get a database connection, and a
+client that ignored `Retry-After`. One limit remains: a realtime pod *crash* slows connected
+users' sends for ≈ 20 s while its clients reconnect (capacity.md §4). Harness: ADR-053,
 [load-testing.md](../load-testing.md). Results and the capacity model:
 [capacity.md](../capacity.md).
 
@@ -25,9 +27,9 @@ GATE_ROWS
 | Run | Load | Result |
 |---|---|---|
 | steady, 3 min | 30,000 sockets, 180 msg/s, every delivery acked | send p50 7 ms, p95 29 ms, p99 131 ms; delivery p95 42 ms, p99 240 ms; 64,800/64,800 delivered; 0 errors |
-| soak, 30 min | same | SOAK_ROW |
-| reconnect storm, deploy | 30,000 sockets on 3 pods; one drained and restarted | DRAIN_ROW |
-| reconnect storm, crash | same; one pod SIGKILLed | CRASH_ROW |
+| soak, 30 min | same | send p50 8 ms, p95 38 ms, p99 152 ms, max 521 ms; 648,000/648,000 delivered; 0 errors; no 10 s window with a send over 1 s |
+| reconnect storm, deploy | 30,000 sockets on 3 pods; one drained and restarted | every socket back after 31 s; sends meanwhile p95 440 ms; nothing refused or lost |
+| reconnect storm, crash | same; one pod SIGKILLed | every socket back after 14 s; meanwhile connected users' sends p95 8.9 s for ≈ 20 s — the one limit left (capacity.md §4) |
 | group burst | 1,024-member group, all online, 20 posts/s (20,480 deliveries/s) | send p50 33 ms, p95 256 ms; 1,228,800/1,228,800 delivered |
 | channel | 1,005,000 subscribers, a post every 2 s, 300 feed reads/s | publish p95 18 ms; feed read p95 8 ms; 0 writes per subscriber |
 | call surge | 20 new 1:1 calls/s, 30 s each (600 concurrent) | ring p95 15 ms; setup p95 28 ms |
@@ -44,7 +46,8 @@ derives the model for later stages from it.
   SQL (the only shortcut — sign-up would spend the run on Argon2id); generator processes hold
   virtual users that speak the public protocol as the web app does (cookie + CSRF header,
   single-use ticket, `tessera.v1`, `auth` frame, coalesced acks, catch-up after every reconnect,
-  the app's backoff, `Retry-After`, reconnect spread) from 40+ loopback source addresses;
+  the app's backoff and `Retry-After`, reconnects spread over the other pods as a load balancer
+  would) from 40+ loopback source addresses;
   open-loop schedules; mergeable log histograms; CPU/memory sampling of every process; slow-send
   windows; JSON results.
 - **Headless web clients**: the app's own `MessagingStore`, `E2eeSession` and Rust/WASM engine,
@@ -70,7 +73,8 @@ derives the model for later stages from it.
 | 6 | group | A receipt per member per ack: members² frames per message | group receipts only when the group's minimum advances | integration, mutation-checked both ways |
 | 7 | group | That check aggregated all members on every ack: members² row reads; acks every 150 ms from every member (~7,000/s for one group) | `NOT EXISTS` stops at the first member behind; ack window grows with group size (≤ ~250 acks/s per group) | integration (incl. ties), unit; mutation-checked |
 | 8 | crypto | Web client refetched every pushed message; a frame handler rejection was unhandled | next-in-order frames decrypted directly; rejections caught | store unit tests, mutation-checked |
-| 9 | storm crash | A crashed pod's clients all reconnected within 500 ms; refused tickets cost as much as granted ones and came back after ~1 s | client spreads the first reconnect after an unexpected drop over 5 s and honours `Retry-After`; refused tickets get a random 1–10 s `Retry-After`; cluster-wide ticket admission | unit tests (client, spread), integration (admission); mutation-checked |
+| 9 | storm crash | The web client ignored a refused ticket's `Retry-After`; refusals all asked for ~1 s | client waits at least `Retry-After`; refusals spread over 1–10 s at random | unit tests, mutation-checked |
+| 10 | soak | A background job's pool-connect timeout (database briefly saturated) rejected unhandled and **exited the API process** | connection failures logged like task failures; next interval retries | unit test (fails on the old code) |
 
 Harness problems found and fixed on the way (they would have made results wrong, not the
 product): undici ignoring `localAddress` (every headless client on one address → 429s); the
@@ -83,10 +87,13 @@ security scan during a soak (an 11–20 s tail that a clean rerun did not show).
 ## Security implications (threat-model delta)
 
 No new trust boundary or data flow; the harness runs only against a disposable local stack. The
-changes are availability (T-18): ticket admission and spread retries, backlog, drain window,
-N+1 sizing, the end of two members² fan-outs a large group could trigger by chatting. Residual:
-admission is cluster-wide (a flood of valid sessions slows everyone's reconnects, each account
-still held to 60 tickets a minute); the admission counter fails open without Valkey; a
+changes are availability (T-18): backlog, drain window, N+1 sizing, the end of two members²
+fan-outs a large group could trigger by chatting, an API process that no longer exits on a
+background job's connection timeout, spread and honoured `Retry-After`. Residual: a realtime pod
+crash degrades connected users' sends for ≈ 20 s (reconnect throughput; API headroom and pod
+size are the mitigation); ticket admission, if enabled, is cluster-wide (a flood of valid
+sessions slows everyone's reconnects, each account still held to 60 tickets a minute) and its
+counter fails open without Valkey; a
 per-address cap on unauthenticated sockets belongs at the edge (Phase 17); figures come from one
 machine. Logged and stored: nothing new — results contain latencies, counts and resource
 figures, no message content (payloads are random bytes; headless clients' plaintext is

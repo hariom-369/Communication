@@ -69,11 +69,11 @@ ConfigMaps (non-secret) + External Secrets (secret). Config schema validated at 
 - **Rolling deploys of the realtime tier**: one pod at a time (`maxUnavailable: 1`,
   `maxSurge: 1`), so each wave of reconnects is one pod's sockets spread over 30 s.
 - **API capacity for a pod crash**: a crash sends one pod's clients back at once (no drain hint);
-  every reconnect costs about five database queries (ticket, session checks, sync). Ticket
-  admission (`REALTIME_TICKETS_PER_SECOND`, cluster-wide, default 500) spreads the wave: set it
-  to what the API tier sustains next to normal traffic (≈ 800 connects/s per API process on
-  the test machine, minus headroom) — too low lengthens recovery after a full outage
-  (300,000 sockets at 500/s take 10 minutes), too high lets a crash starve sends.
+  every reconnect costs a ticket, a sync and catch-up. Keep API CPU headroom for one realtime
+  pod's sockets reconnecting within ~15 s, or keep realtime pods small (10–15k sockets): on the
+  test machine (≈ 300 reconnects/s next to traffic) a 10,000-socket crash slowed connected
+  users' sends to p95 ≈ 9 s for ≈ 20 s. Ticket admission (`REALTIME_TICKETS_PER_SECOND`, off by
+  default) does not help with that and slows recovery (capacity.md §4).
 
 ## 6. Hardening baseline
 

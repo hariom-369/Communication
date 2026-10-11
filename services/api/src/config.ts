@@ -66,11 +66,12 @@ const schema = z
     // Node's default of 511 overflowed during reconnect storms: dropped SYNs cost clients 1–3 s
     // retransmission delays while the process was mostly idle (docs/capacity.md §4).
     LISTEN_BACKLOG: env.positiveInt(4096),
-    // Realtime tickets per second across the cluster (0 = unlimited). Bounds the reconnect wave
-    // after a realtime pod fails, so connected users keep sending (docs/capacity.md §4). Size it
-    // to the API tier: about a third of its spare request capacity, since each reconnect costs
-    // about three API requests.
-    REALTIME_TICKETS_PER_SECOND: env.nonNegativeInt(500),
+    // Realtime tickets per second across the cluster (0 = unlimited, the default). Off by default
+    // because the load tests showed it does not protect connected users when a realtime pod
+    // crashes — a refused ticket costs the API about as much as a granted one — while it slows
+    // recovery (docs/capacity.md §4). A guard for an API tier known to be smaller than its
+    // realtime tier; refused clients are told to retry after 1–10 s, spread at random.
+    REALTIME_TICKETS_PER_SECOND: env.nonNegativeInt(0),
     BODY_LIMIT_BYTES: env.positiveInt(64 * 1024),
 
     /** Public URL of the web app, used in email links (password reset). */

@@ -14,14 +14,14 @@ peak. With 3× headroom: **30,000 sockets and 180 messages/s**.
 
 | Run | Load | Result | Verdict |
 |---|---|---|---|
-| steady (3 min) | 30,000 sockets, 180 msg/s, every delivery acked | send p50 7 ms, p95 36 ms, p99 131 ms; delivery (send start → frame on the peer's socket) p95 54 ms, p99 267 ms; 64,800/64,800 delivered; 0 errors | **met** |
-| soak (30 min) | same | SOAK_RESULT | SOAK_VERDICT |
-| reconnect storm, deploy | 30,000 sockets on 3 pods, 180 msg/s; one pod drained (SIGTERM) and restarted | DRAIN_RESULT | DRAIN_VERDICT |
-| reconnect storm, crash | same; one pod SIGKILLed | CRASH_RESULT | CRASH_VERDICT |
-| group burst | 1,024-member group (the E2EE cap), all online, 20 posts/s (20,480 deliveries/s) | GROUP_RESULT | GROUP_VERDICT |
+| steady (3 min) | 30,000 sockets, 180 msg/s, every delivery acked | send p50 7 ms, p95 29 ms, p99 131 ms; delivery (send start → frame on the peer's socket) p95 42 ms, p99 240 ms; 64,800/64,800 delivered; 0 errors | **met** |
+| soak (30 min) | same | send p50 8 ms, p95 38 ms, p99 152 ms, max 521 ms; delivery p95 59 ms; 648,000/648,000 delivered; 0 errors; no 10 s window with a send over 1 s; realtime memory did not grow (265 → 243 MB per pod, start vs end, in a second 30-min run — at half the send rate after one API process crashed; that crash is §4's periodic-job fix) | **met** |
+| reconnect storm, deploy | 30,000 sockets on 3 pods, 180 msg/s; one pod drained (SIGTERM) and restarted | every socket back after 31 s (the 30 s jitter window); sends meanwhile p50 9 ms, p95 440 ms; nothing refused or lost | **met** |
+| reconnect storm, crash | same; one pod SIGKILLed | every socket back after 14 s; meanwhile sends of connected users p95 8.9 s for ≈ 20 s (§4) | **recovers; degraded while it does** |
+| group burst | 1,024-member group (the E2EE cap), all online, 20 posts/s (20,480 deliveries/s) | send p50 33 ms, p95 256 ms; delivery p95 267 ms; 1,228,800/1,228,800 delivered; machine 1.6 cores | **met** |
 | channel | 1,005,000 subscribers; a post every 2 s; 300 feed reads/s | publish p50 9 ms, p95 18 ms; feed read p95 8 ms; writes per subscriber per post: 0 (13 posts refused by the channel post rate limit, as designed) | **met** |
-| call surge | 20 new 1:1 calls/s, 30 s each (600 concurrent) | ring p95 13 ms; setup (press call → callee joined) p95 24 ms; CALLS_NOTE | **met** |
-| real MLS | 10 pairs of headless web clients (real encryption, 1 msg/s each way) under the 30,000 / 180 background | CRYPTO_RESULT | CRYPTO_VERDICT |
+| call surge | 20 new 1:1 calls/s, 30 s each (600 concurrent) | ring p95 15 ms; setup (press call → callee joined) p95 28 ms; 2,189 calls (211 skipped because the conversation was already in a call) | **met** |
+| real MLS | 10 pairs of headless web clients (real encryption, 1 msg/s each way) under the 30,000 / 180 background | 20 devices registered (p95 3.2 s), 10 MLS groups set up incl. Welcome (p95 0.8 s); 2,420/2,420 messages decrypted, in order; end-to-end p50 202 ms, p95 404 ms (encryption, API, fan-out, decryption); background p95 256 ms while 20 WebAssembly clients share the 4 cores | **met** |
 
 The machine's CPU was 2.1 of 4 cores at the target load (steady), of which the load
 generators were ~0.3.
@@ -105,16 +105,31 @@ API's ticket endpoint and the remaining pods.
 - **N+1 realtime pods.** With two pods at 15,000 each, a drained pod's clients filled the
   survivor to its cap (19,000 here): 11,000 upgrades were refused with 503 and clients backed
   off for tens of seconds. The pods left after one fails must hold its sockets.
-- **Ticket admission.** A crash has no drain hint: all of a pod's clients reconnect within
-  the backoff's first seconds. Without a limit this starved sends of connected users
-  (p95 8 s). `REALTIME_TICKETS_PER_SECOND` (default 500, cluster-wide, via the shared rate-limit
-  store; fails open if the store is down) answers excess ticket requests with 429 and
-  `Retry-After`; the web client now waits at least that long before its next attempt (it
-  used its backoff alone before — `realtime-client.ts`, unit-tested and mutation-checked):
-  reconnecting takes longer, the users who are connected keep working. Set it to what the API tier sustains alongside normal
-  traffic (≈ 830 connects/s per API process here, minus headroom). CRASH_ADMISSION
-- **Backoff base.** Doubling the client's base delay (2 s) did not shorten recovery; the
-  admission budget is the lever, not the client.
+- **A crash is the expensive case, and its limit is the API's reconnect throughput.** A crash
+  has no drain hint: all of a pod's clients come back within seconds. Every reconnect costs a
+  ticket, a `GET /sync` and catch-up — and the API on this machine sustains ≈ 300 reconnects/s
+  next to normal traffic (the deploy above spreads 10,000 over 30 s and stays at p95 440 ms).
+  Measured, one of three pods (10,000 sockets) SIGKILLed under 180 msg/s:
+
+  | Variant | All back after | Sends of connected users meanwhile |
+  |---|---|---|
+  | no limit (default) | 14 s | p95 8.9 s for ≈ 20 s |
+  | ticket admission 500/s | 25–30 s | p95 10.4–10.6 s for ≈ 40 s |
+  | ticket admission 250/s | 61 s | p95 8.4 s for ≈ 50 s |
+  | no limit, first reconnect spread over 5 s by the client | 14 s | p95 8.9 s (no gain; reverted) |
+
+  **Ticket admission does not help**: a refused ticket costs the API about as much as a granted
+  one (the session is checked first), so refusals do not free capacity, and recovery gets
+  slower. `REALTIME_TICKETS_PER_SECOND` therefore defaults to 0 (off); it remains for an API tier
+  known to be much smaller than its realtime tier. Kept from this work because they are correct
+  and cheap: refused tickets get a `Retry-After` spread over 1–10 s at random (refusals at
+  500/s fell from 9,045 to 3,794), and the web client waits at least that long before trying
+  again (it ignored `Retry-After` before; unit-tested and mutation-checked).
+  **What does help** is capacity: API CPU headroom for one pod's sockets reconnecting within
+  ~15 s, smaller realtime pods (fewer sockets per failure), and a cheaper reconnect — the
+  ticket's session check and the sync are the cost. Measured again in staging (Phase 17), where
+  the API does not share four cores with PostgreSQL and the load generators.
+- **Backoff base.** Doubling the client's base delay (2 s) did not shorten recovery either.
 
 ## 5. The model for later stages
 
