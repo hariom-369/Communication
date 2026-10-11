@@ -55,11 +55,13 @@ describe('PasswordHasher', () => {
     // (e.g. parallel test suites) affects both sides alike instead of skewing one measurement.
     const real: number[] = [];
     const burned: number[] = [];
-    for (let i = 0; i < 5; i += 1) {
+    // Nine pairs: with five, a contention burst covering three samples of one side moved its
+    // median (failed once in the Phase 15 gate while turbo ran every package's tests at once).
+    for (let i = 0; i < 9; i += 1) {
       real.push(await time(() => hasher.verify('guess-guess-guess', stored)));
       burned.push(await time(() => hasher.burn('guess-guess-guess')));
     }
-    const median = (values: number[]) => [...values].sort((a, b) => a - b)[2]!;
+    const median = (values: number[]) => [...values].sort((a, b) => a - b)[4]!;
     expect(median(burned)).toBeGreaterThan(median(real) * 0.5);
   });
 

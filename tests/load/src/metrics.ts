@@ -1,5 +1,14 @@
+import { getRandomValues } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { cpus } from 'node:os';
+
+/**
+ * A uniform number in [0, 1) from the CSPRNG (the repository forbids Math.random everywhere;
+ * nothing here needs it to be secret, but one rule for all code is simpler to keep).
+ */
+export function random(): number {
+  return (getRandomValues(new Uint32Array(1))[0] ?? 0) / 2 ** 32;
+}
 
 /**
  * Latency histogram with logarithmic buckets (about 2 % relative error), mergeable across

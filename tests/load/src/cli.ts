@@ -66,8 +66,8 @@ export interface Context {
   /** Sends a command to every generator; rates are split evenly. */
   all(command: Command): Promise<unknown[]>;
   report(reset: boolean): Promise<MergedReport>;
-  sleep(ms: number): Promise<void>;
-  log(message: string): void;
+  readonly sleep: (ms: number) => Promise<void>;
+  readonly log: (message: string) => void;
 }
 
 export interface MergedReport {

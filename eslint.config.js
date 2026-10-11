@@ -45,6 +45,9 @@ export default tseslint.config(
       '**/pkg/**',
       '**/target/**',
       '**/coverage/**',
+      // Playwright output (git-ignored; an interrupted run leaves trace bundles behind).
+      '**/test-results/**',
+      '**/playwright-report/**',
       '**/.turbo/**',
       '**/node_modules/**',
       'docs/**',

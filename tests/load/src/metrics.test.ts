@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { payloadStamp, sourceAddresses, stampedPayload } from './client.js';
-import { Counters, Histogram, schedule } from './metrics.js';
+import { Counters, Histogram, random, schedule } from './metrics.js';
 
 describe('histogram', () => {
   it('reports quantiles within the bucket resolution', () => {
@@ -84,5 +84,19 @@ describe('source addresses', () => {
     expect(new Set(addresses).size).toBe(600);
     for (const address of addresses) expect(address).toMatch(/^127\.0\.\d+\.\d+$/);
     expect(addresses).not.toContain('127.0.0.1');
+  });
+});
+
+describe('random', () => {
+  it('is uniform-ish in [0, 1) and never throws', () => {
+    let low = 0;
+    for (let i = 0; i < 10_000; i += 1) {
+      const value = random();
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThan(1);
+      if (value < 0.5) low += 1;
+    }
+    expect(low).toBeGreaterThan(4_500);
+    expect(low).toBeLessThan(5_500);
   });
 });

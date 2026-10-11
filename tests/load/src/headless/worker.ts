@@ -91,21 +91,23 @@ const dispatcher = new Agent({
     });
   },
 });
-globalThis.fetch = (async (input: RequestInfo | URL, request?: RequestInit) => {
-  const url = typeof input === 'string' && input.startsWith('/') ? new URL(input, data.api) : input;
+globalThis.fetch = async (input: RequestInfo | URL, request?: RequestInit) => {
+  // The app calls same-origin paths (strings); resolve them against the API.
+  const href = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  const url = new URL(href, data.api);
   const headers = new Headers(request?.headers);
   headers.set('cookie', `__Host-tsid=${data.token}`);
   headers.set('origin', data.origin);
-  const response = await undiciFetch(url as string | URL, {
+  const response = await undiciFetch(url, {
     method: request?.method ?? 'GET',
     headers: Object.fromEntries(headers),
     body: (request?.body ?? null) as string | null,
     dispatcher,
   });
-  const counted = `${request?.method ?? 'GET'} ${new URL(String(url), data.api).pathname.replace(/[0-9a-f-]{36}/g, ':id')} ${String(response.status)}`;
+  const counted = `${request?.method ?? 'GET'} ${url.pathname.replace(/[0-9a-f-]{36}/g, ':id')} ${String(response.status)}`;
   requestCounts.set(counted, (requestCounts.get(counted) ?? 0) + 1);
   if (response.status === 429) {
-    const path = new URL(String(url), data.api).pathname.replace(/[0-9a-f-]{36}/g, ':id');
+    const path = url.pathname.replace(/[0-9a-f-]{36}/g, ':id');
     const key = `${request?.method ?? 'GET'} ${path}`;
     if (!limited.has(key)) {
       limited.add(key);
@@ -117,7 +119,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, request?: RequestInit) => {
     }
   }
   return response as unknown as Response;
-}) as typeof globalThis.fetch;
+};
 const limited = new Set<string>();
 /** Requests by method, path and status (reported on `stop`, for diagnosing client behaviour). */
 const requestCounts = new Map<string, number>();

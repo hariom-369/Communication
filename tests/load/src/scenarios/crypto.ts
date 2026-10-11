@@ -104,13 +104,14 @@ export async function crypto(context: Context): Promise<Record<string, unknown>>
       worker,
       username: user.username,
       userId: user.id,
-      send: (command) => worker.postMessage(command),
+      send: (command) => {
+        worker.postMessage(command);
+      },
       next: (kind, timeoutMs) =>
         new Promise((resolve, reject) => {
-          const timer = setTimeout(
-            () => reject(new Error(`timeout waiting for ${kind}`)),
-            timeoutMs,
-          );
+          const timer = setTimeout(() => {
+            reject(new Error(`timeout waiting for ${kind}`));
+          }, timeoutMs);
           waiting.push({
             kind,
             resolve: (event) => {

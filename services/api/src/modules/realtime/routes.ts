@@ -1,3 +1,5 @@
+import { getRandomValues } from 'node:crypto';
+
 import { AppError } from '@tessera/platform';
 import { idSchema, presenceSchema, realtimeTicketSchema } from '@tessera/validation';
 import { z } from 'zod';
@@ -24,7 +26,9 @@ export interface RealtimeModuleDeps {
  * clients refused together then return spread out instead of together, each time (with the
  * limiter's own value — under a second — they all came back at once; docs/capacity.md §4).
  */
-export function admissionRetryAfterSeconds(random: () => number = Math.random): number {
+export function admissionRetryAfterSeconds(
+  random: () => number = () => (getRandomValues(new Uint32Array(1))[0] ?? 0) / 2 ** 32,
+): number {
   return (
     1 +
     Math.min(

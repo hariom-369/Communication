@@ -7,7 +7,7 @@ import WebSocket from 'ws';
 
 import { ackDelayMs } from '../../../apps/web/src/messaging/ack-delay.js';
 
-import type { Counters, Histogram } from './metrics.js';
+import { random, type Counters, type Histogram } from './metrics.js';
 import type { SeededUser } from './seed.js';
 
 /**
@@ -177,7 +177,11 @@ export class VirtualUser {
   #connecting = false;
   #waiting = false;
 
-  request(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown) {
+  request(
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+    path: string,
+    body?: unknown,
+  ): Promise<ApiResponse> {
     return apiRequest(
       this.#api,
       this.#localAddress,
@@ -239,7 +243,12 @@ export class VirtualUser {
       });
       socket.on('message', (data: WebSocket.RawData) => {
         if (socket !== this.#socket) return; // a replaced socket
-        const frame = JSON.parse(data.toString()) as {
+        const text = Array.isArray(data)
+          ? Buffer.concat(data).toString('utf8')
+          : data instanceof ArrayBuffer
+            ? Buffer.from(new Uint8Array(data)).toString('utf8')
+            : data.toString('utf8');
+        const frame = JSON.parse(text) as {
           type: string;
           afterMs?: number;
           conversationId?: string;
@@ -307,7 +316,7 @@ export class VirtualUser {
   /** Another pod, chosen at random among the others — as a load balancer spreads reconnects. */
   #nextPod(): void {
     const others = this.#realtime.length - 1;
-    if (others > 0) this.#pod += 1 + Math.floor(Math.random() * others);
+    if (others > 0) this.#pod += 1 + Math.floor(random() * others);
   }
 
   #onFrame(frame: {
@@ -412,7 +421,7 @@ export class VirtualUser {
   #backoff(): number {
     const ceiling = Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** this.#attempt);
     this.#attempt += 1;
-    return Math.floor(Math.random() * ceiling);
+    return Math.floor(random() * ceiling);
   }
 
   #scheduleReconnect(delayMs: number): void {

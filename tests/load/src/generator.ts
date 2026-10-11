@@ -1,5 +1,5 @@
 import { VirtualUser, type Endpoints, type UserMetrics } from './client.js';
-import { Counters, Histogram, schedule, type HistogramData } from './metrics.js';
+import { Counters, Histogram, random, schedule, type HistogramData } from './metrics.js';
 import type { SeededUser } from './seed.js';
 
 /**
@@ -115,7 +115,7 @@ function randomPair(): {
   callee: VirtualUser;
 } | null {
   const pool = conversations.filter((c) => c.kind === 'direct' && c.senders.length === 2);
-  const conversation = pool[Math.floor(Math.random() * pool.length)];
+  const conversation = pool[Math.floor(random() * pool.length)];
   if (conversation === undefined) return null;
   const caller = users[conversation.senders[0] ?? 0];
   const callee = users[conversation.senders[1] ?? 0];
@@ -171,10 +171,10 @@ async function handle(command: Command): Promise<unknown> {
       const pool = conversations.filter((c) => c.kind === command.kind && c.senders.length > 0);
       if (pool.length === 0) return { sent: 0 };
       await openLoop(schedule(command.rate, command.durationMs), async () => {
-        const conversation = pool[Math.floor(Math.random() * pool.length)];
+        const conversation = pool[Math.floor(random() * pool.length)];
         if (conversation === undefined) return;
         const sender =
-          users[conversation.senders[Math.floor(Math.random() * conversation.senders.length)] ?? 0];
+          users[conversation.senders[Math.floor(random() * conversation.senders.length)] ?? 0];
         if (sender === undefined) return;
         try {
           await sender.send(conversation.id, command.payloadBytes);
@@ -189,7 +189,7 @@ async function handle(command: Command): Promise<unknown> {
         const pair = randomPair();
         if (pair === null) return;
         const path = fill(command.path, pair.conversation.id, command.channel ?? '');
-        const body =
+        const body: unknown =
           command.body === undefined
             ? undefined
             : JSON.parse(
@@ -198,7 +198,7 @@ async function handle(command: Command): Promise<unknown> {
         const started = Date.now();
         try {
           // Either member (users alternate between API processes by index).
-          const who = Math.random() < 0.5 ? pair.caller : pair.callee;
+          const who = random() < 0.5 ? pair.caller : pair.callee;
           const response = await who.request(command.method, path, body);
           extra.http.record(Date.now() - started);
           metrics.counters.add(`http_${String(response.status)}`);
@@ -213,7 +213,7 @@ async function handle(command: Command): Promise<unknown> {
         user.onEvent = (frame) => {
           if (frame['type'] !== 'call' || frame['state'] !== 'ringing') return;
           const pending = ringing.get(String(frame['conversationId']));
-          if (pending === undefined || pending.callee !== user.user.id) return;
+          if (pending?.callee !== user.user.id) return;
           extra.ring.record(Date.now() - pending.started);
           metrics.counters.add('ring_delivered');
         };

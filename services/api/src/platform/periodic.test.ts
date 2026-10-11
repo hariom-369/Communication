@@ -20,11 +20,10 @@ function setup(pool: Partial<pg.Pool>) {
   return { destination, task, runner };
 }
 
-function lockingClient(): pg.PoolClient {
-  return {
-    query: vi.fn().mockResolvedValue({ rows: [{ ok: true }] }),
-    release: vi.fn(),
-  } as unknown as pg.PoolClient;
+function lockingClient() {
+  const query = vi.fn().mockResolvedValue({ rows: [{ ok: true }] });
+  const release = vi.fn();
+  return { client: { query, release } as unknown as pg.PoolClient, query, release };
 }
 
 const unhandled: unknown[] = [];
@@ -41,7 +40,7 @@ afterEach(() => {
 
 describe('singleton periodic task', () => {
   it('survives a pool that cannot hand out a connection, and tries again next interval', async () => {
-    const client = lockingClient();
+    const { client, release } = lockingClient();
     const connect = vi
       .fn()
       .mockRejectedValueOnce(new Error('timeout exceeded when trying to connect'))
@@ -55,18 +54,18 @@ describe('singleton periodic task', () => {
     expect(task).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1000);
     expect(task).toHaveBeenCalledTimes(1);
-    expect(client.release).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledTimes(1);
     await runner.stop();
   });
 
   it('logs a failing task, unlocks and releases the connection', async () => {
-    const client = lockingClient();
+    const { client, query, release } = lockingClient();
     const { destination, task, runner } = setup({ connect: vi.fn().mockResolvedValue(client) });
     task.mockRejectedValueOnce(new Error('boom'));
     await vi.advanceTimersByTimeAsync(1000);
     expect(destination.lines.some((line) => line.includes('periodic.task_failed'))).toBe(true);
-    expect(client.query).toHaveBeenLastCalledWith('SELECT pg_advisory_unlock($1)', [1]);
-    expect(client.release).toHaveBeenCalledTimes(1);
+    expect(query).toHaveBeenLastCalledWith('SELECT pg_advisory_unlock($1)', [1]);
+    expect(release).toHaveBeenCalledTimes(1);
     await runner.stop();
   });
 });
