@@ -20,7 +20,15 @@ users' sends for ≈ 20 s while its clients reconnect (capacity.md §4). Harness
 
 | Gate | Result |
 |---|---|
-GATE_ROWS
+| Format, lint, typecheck, build | pass (lint after excluding Playwright output an interrupted run left behind — ESLint now ignores `test-results/`) |
+| Unit tests | **656 TypeScript** (api 401, web 150, ui 65, platform 15, load 8, shared 7, realtime 4, validation 3, admin 3) + **78 Rust** — new: ticket admission spread, periodic job failure handling, `Retry-After` honoured, ack delay, harness metrics and random |
+| Integration (real PostgreSQL + Valkey + S3-compatible store + coturn) | **244 passed** (api 225, realtime 19); 2 skipped (IPv6 TURN without IPv6 here; opt-in channel scale test) — new: ticket admission, group receipts (incl. ties), stale/non-member acks, presence refresh, drain with a slow Valkey |
+| End-to-end, user app (Chromium, production build, real services) | E2E_WEB |
+| End-to-end, admin console | **6 passed in each of 3 consecutive runs** |
+| Mutation checks | **8 of 8** seeded faults caught: group receipt condition (always / never), ticket admission removed, `Retry-After` ignored by the client, timing test (`burn` doing nothing), periodic job (old code), drain cleanups (slow-Valkey test), store direct-ingest |
+| Load runs | see "Exit criterion" below and capacity.md §1 |
+| OpenAPI | unchanged (no API contract changes; `Retry-After` on the ticket route was already declared via its rate limit) |
+| `pnpm audit` / gitleaks | no known vulnerabilities / no leaks (full history) |
 
 ### Exit criterion: Stage 2 with 3× headroom
 
@@ -83,6 +91,15 @@ from a killed run holding ports (pid file, port checks); a peer told to send bef
 knew the conversation (the 10 "lost" messages of an early crypto run); reconnects all sent to
 the next pod in order (a load balancer spreads them); a first connect not retried; my own
 security scan during a soak (an 11–20 s tail that a clean rerun did not show).
+
+Tests updated because of this phase's changes: the end-to-end test "a malicious server cannot
+substitute its own call offer" simulated the server only on the HTTP fetch path; since the web
+client decrypts the next pushed message straight from the realtime frame, it now substitutes in
+the WebSocket frame too (`routeWebSocket`) — the client still refuses the forged offer. The
+password-timing unit test takes nine samples instead of five (it failed once while every
+package's tests ran in parallel; it still fails when the dummy hash is skipped). End-to-end runs
+interrupted mid-gate left a coturn, two test identity providers and a Chromium behind, which made
+the next runs fail at port binding; they were killed and the reruns record leftover processes.
 
 ## Security implications (threat-model delta)
 

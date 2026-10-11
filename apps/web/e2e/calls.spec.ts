@@ -231,6 +231,32 @@ test.describe('1:1 calls', () => {
       }
       await route.fulfill({ response, json: page });
     });
+    // …and in the realtime push, which the client decrypts directly when it is the next message
+    // in order (Phase 15) — a malicious server controls both paths.
+    await bob.page.routeWebSocket('**/rt/v1/ws', (client) => {
+      const server = client.connectToServer();
+      client.onMessage((data) => {
+        server.send(data);
+      });
+      server.onMessage((data) => {
+        const frame = JSON.parse(String(data)) as {
+          type: string;
+          message?: { clientMessageId: string; ciphertext: string };
+        };
+        if (frame.type === 'message' && frame.message !== undefined) {
+          if (aliceSends.includes(frame.message.clientMessageId)) {
+            frame.message.ciphertext = attackerOffer;
+            substituted += 1;
+          }
+          client.send(JSON.stringify(frame));
+          return;
+        }
+        client.send(data);
+      });
+    });
+    // The route applies to new connections: reconnect Bob through it.
+    await bob.page.reload();
+    await expect(bob.page.getByRole('status').filter({ hasText: 'Connected' })).toBeVisible();
 
     await alice.page.getByRole('button', { name: 'Video call' }).click();
     await expect(callRegion(alice.page).getByText('Calling…')).toBeVisible();
