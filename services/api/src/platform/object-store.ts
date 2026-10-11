@@ -150,7 +150,7 @@ export class S3ObjectStore implements ObjectStore {
   presignGet(key: string, expiresInSeconds: number): Promise<string> {
     // The response headers are part of the signature: whatever metadata the object carries, the
     // browser receives an opaque download it will not render (defence in depth — objects are
-    // ciphertext stored as application/octet-stream; security review F-07).
+    // ciphertext stored as application/octet-stream; security review F-03).
     return getSignedUrl(
       this.#client,
       new GetObjectCommand({

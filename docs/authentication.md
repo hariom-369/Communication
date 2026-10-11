@@ -27,6 +27,12 @@ an identifier exists (uniform response + timing equalisation).
 - Policy (NIST 800-63B): min 12 chars, max 128, all Unicode (NFKC-normalised), no
   composition rules, blocklist of breached passwords (k-anonymity range query against a
   locally mirrored breached-password corpus, not a live third-party call), no periodic rotation.
+  **As built (Phase 16):** a zxcvbn strength estimate (score ≥ 3, own identifiers refused) plus
+  the breached-password check against `PWNED_PASSWORDS_URL`, a mirror of the Pwned Passwords
+  range API run by us (only the first 5 hex characters of the SHA-1 leave the API; fails open
+  with a warning if the mirror is down; required in production) — `modules/auth/breached.ts`.
+  Adding a passkey to an active account requires a recent re-authentication, like every other
+  credential change (security review F-11).
 - Pepper: HMAC-SHA-256 with a KMS-held key applied before Argon2id (defence if DB leaks
   without KMS access). Pepper rotation via versioned prefix.
 

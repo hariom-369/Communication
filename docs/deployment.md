@@ -75,6 +75,19 @@ ConfigMaps (non-secret) + External Secrets (secret). Config schema validated at 
   users' sends to p95 ≈ 9 s for ≈ 20 s. Ticket admission (`REALTIME_TICKETS_PER_SECOND`, off by
   default) does not help with that and slows recovery (capacity.md §4).
 
+### Settings the security review added (docs/security/review.md)
+
+- **Breached-password mirror** (`PWNED_PASSWORDS_URL`, required in production): the Pwned
+  Passwords range files (16⁵ objects named by SHA-1 prefix, refreshed monthly with the official
+  downloader) served read-only from object storage through an internal endpoint
+  (`GET <url>/range/<prefix>`). Internal only — the API is its only client; it fails open, so
+  alert on `auth.breach_check_unavailable` warnings.
+- **Link-preview fetcher isolation** (F-05): run the fetcher as its own deployment whose only
+  egress is an HTTP egress proxy enforcing the same deny-list; the API pods get no general
+  internet egress (NetworkPolicy).
+- **Realtime pod crash** (F-14): size API headroom and realtime pod sockets from the staging
+  measurements before beta (capacity.md §4).
+
 ## 6. Hardening baseline
 
 Pods: non-root, read-only root FS, drop all capabilities, seccomp `RuntimeDefault`, no

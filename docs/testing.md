@@ -54,7 +54,7 @@ permission prompts and screen picker answered automatically.
 | Authentication bypass | every non-public route called without session → 401; with revoked/expired session → 401 |
 | Authorization bypass | cross-user/object access matrix; admin routes from user sessions |
 | CSRF | cross-site form POST; fetch without CSRF header; wrong Origin; `Sec-Fetch-Site: cross-site` |
-| XSS | payload corpus in every user-controlled string field rendered in UI (names, messages, captions, file names) → no script execution (Playwright asserts no dialog/CSP violation) |
+| XSS | payload corpus in every user-controlled string field rendered in UI (names, messages, captions, file names) → no script execution (Playwright asserts no dialog/CSP violation) — `e2e/chat.spec.ts` (messages) and `e2e/xss.spec.ts` (group names, file names, channel titles and posts; Phase 16) |
 | Injection | SQLi/NoSQLi/command/header injection corpus against validators & queries |
 | SSRF | link-preview fetcher: private IPs, DNS rebinding, redirects to metadata IP, IPv6-mapped, decimal/octal IP encodings |
 | WebSocket hijacking | connection from disallowed Origin; reused ticket; ticket from another session; no ticket |

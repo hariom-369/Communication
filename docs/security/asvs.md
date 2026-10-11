@@ -19,14 +19,14 @@ the reason. Findings referenced as F-nn.
 | Output encoding in the browser | Met | React escaping; `dangerouslySetInnerHTML`, `eval`, `new Function` are lint errors (`eslint.config.js`); rich text rendered from a parsed AST; strict CSP with Trusted Types (`apps/web/vite.config.ts`); XSS payloads in every user-controlled field the UI renders are checked end to end (F-10: was messages only) |
 | Injection: SQL | Met | Kysely query builder and `sql` tagged templates only (bound parameters); Kysely's raw escape hatches are lint errors (F-01) |
 | Injection: OS command, LDAP, XPath, template | N/A | no shell, LDAP, XPath or server-side templates on request paths |
-| Safe deserialisation | Met | JSON only; `__proto__` / `constructor` keys rejected (Fastify poisoning options), unknown keys rejected (strict Zod objects) |
+| Safe deserialisation | Met | JSON only; `__proto__` / `constructor` keys rejected (Fastify poisoning options), unknown keys rejected (strict Zod objects); ids arriving from peers and the server validated as UUIDv7 before they key client state (F-13) |
 
 ## V2 Validation and business logic
 
 | Area | Status | Evidence |
 |---|---|---|
 | Input validation | Met | every route has a Zod schema for params, query and body (`defineRoute`), response schemas too; OpenAPI generated from them |
-| Business logic limits | Met | per-route rate limits on every route (route matrix), per-recipient and new-account limits (moderation.md §0), quotas for media, devices (8), group size (1,024) |
+| Business logic limits | Met | per-route rate limits on every route (route matrix), per-recipient and new-account limits (moderation.md §0), quotas for media, devices (8), group size (1,024); no super-linear regex on user input (F-12 fixed) |
 | Anti-automation | Partial | rate limits keyed per account and per identifier, CGNAT-tolerant flood guard; **no CAPTCHA-style challenge or risk scoring (F-09)** |
 
 ## V3 Web frontend security
@@ -67,7 +67,7 @@ the reason. Findings referenced as F-nn.
 | Multi-factor | Met | passkeys (user verification required, resident keys), TOTP with replay protection, single-use recovery codes stored as SHA-256 digests |
 | Brute force | Met | per-identifier and per-IP limits that fail closed, soft time-based lock (no lockout DoS), uniform timing for unknown accounts (unit-tested, mutation-checked) |
 | Account recovery | Partial | email reset requires the second factor if one is enrolled; reset signs out all sessions. Support-assisted recovery is deferred (identity proofing decision) |
-| Credential changes | Met | step-up within 10 min; security alerts on every device; audited |
+| Credential changes | Met | step-up within 10 min for every credential and factor change — including adding a passkey (F-11, fixed in Phase 16); security alerts on every device; audited |
 | Level 3: hardware-backed authenticators | Partial | admins: single-device security keys only (synced passkeys refused, optional attestation allow-list); users may use any passkey or password + TOTP — L3 for end users is not claimed |
 
 ## V7 Session management — target Level 3

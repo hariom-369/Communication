@@ -271,7 +271,7 @@ the internal review ([security/review.md](security/review.md), findings F-nn).
 | ID | Built and tested | Deployment property (Phase 17) | Not built yet |
 |---|---|---|---|
 | T-01 | rate limits, new-account limits, blocks, reports with franking, privacy controls | — | — |
-| T-02 | `__Host-` HttpOnly cookie, CSP + Trusted Types, session list and revoke, new-login alerts | — | short idle timeout on shared devices (user setting) |
+| T-02 | `__Host-` HttpOnly cookie, CSP + Trusted Types, session list and revoke, new-login alerts; adding any factor (passkey, TOTP, recovery codes) needs a recent re-authentication, so a stolen session cannot make itself permanent (F-11) | — | short idle timeout on shared devices (user setting) |
 | T-03 | device revoke, MLS removal, disappearing messages | — | ASK rotation UX ("Start over" only) |
 | T-04 | E2EE, ASK-signed device certificates, client-enforced group policy, signed commits, fingerprint-substitution refused (E2E) | — | key transparency (S-07, post-GA) |
 | T-05 | admin RBAC, step-up, four-eyes, purpose binding, every admin call audited | break-glass production access | — |
@@ -287,14 +287,14 @@ the internal review ([security/review.md](security/review.md), findings F-nn).
 | T-15 | Origin allow-list, single-use tickets from a CSRF-protected endpoint | — | — |
 | T-16 | new-account limits, behaviour signals, email verification | — | risk-based sign-up friction (F-09), graph-based detection |
 | T-17 | signed release manifest, SW pinning, no rollback | release key custody (runbook), 2-person release approval | reproducible builds, transparency log (F-06) |
-| T-18 | per-route limits, flood guard, ticket admission option, N+1 realtime sizing, backlog 4096 | CDN/WAF/Shield, autoscaling, edge socket caps | — |
+| T-18 | per-route limits, flood guard, ticket admission option, N+1 realtime sizing, backlog 4096, no super-linear regex on user input (F-12) | CDN/WAF/Shield, autoscaling, edge socket caps | — |
 | T-19 | pinned actions, least-privilege CI tokens, secret scan | protected branches, OIDC credentials, admission control | SBOM, image signing, SLSA provenance (F-06) |
 | T-20 | lockfiles, dependency review, install-script allow-list, OSV for npm and Cargo (F-02) | — | `cargo deny` (licences, bans) |
 | T-21 | ciphertext padding, no content in push, retention limits | restricted internal access | sealed sender (S-09, research) |
 | T-22 | encrypted local store, device lock (PIN/passkey), remote revoke | — | — |
 | T-23 | client-side backup encryption, 256-bit keys, alerts | — | backup rollback detection (S-06) |
 | T-24 | MLS generation guard, message id dedupe, idempotent sends | — | — |
-| T-25 | Rust parsing, length limits, fuzz targets run nightly in CI (`fuzz.yml`) | — | — |
+| T-25 | Rust parsing, length limits, fuzz targets run nightly in CI (`fuzz.yml`); ids in decrypted content and server frames validated before they key client state (F-13) | — | — |
 | T-26 | ASK-signed certificates verified by clients | — | — |
 | T-27 | claim rate limits, last-resort KeyPackage | claim-rate alerts | — |
 | T-28 | E2EE limits what can be produced; legal-order workflow | — | — |

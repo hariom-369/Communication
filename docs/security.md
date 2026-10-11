@@ -119,8 +119,8 @@ networks, so thousands of legitimate users can share one IPv4 address. Therefore
 - route limits on **authenticated** routes are keyed per user, not per IP;
 - public routes (sign-up, login, reset) combine a CGNAT-tolerant per-IP limit with strict
   per-identifier limits (per email / username), which are the real brute-force control;
-- risk-based challenges (CAPTCHA-style) for abusive sources are deferred (Phase 12/15; not
-  built in Phase 11).
+- risk-based challenges (CAPTCHA-style) for abusive sources are deferred — not built in Phases
+  11–16; scheduled before public beta (security review F-09).
 
 **Abuse controls (implemented in Phase 11, [moderation.md](moderation.md) §0).** New-account
 limits (first 7 days), per-person report limits (closed on store failure), a per-address limit
@@ -150,6 +150,12 @@ logs. `Server`/`X-Powered-By` headers removed.
 Secret scanning: gitleaks pre-commit + CI; GitHub push protection.
 
 ## 10. Supply chain
+
+**Status (Phase 16 review, F-06):** built — lockfiles with frozen installs, pinned CI actions,
+least-privilege tokens, OSV (npm and Cargo), dependency review, CodeQL, the install-script
+allow-list, signed web releases. **Not built yet** (Phase 17 release pipeline): SBOM, image
+scanning and signing with admission control, SLSA provenance, `cargo deny`, Renovate;
+reproducible builds and a release transparency log may follow GA. The list below is the target.
 
 - **Web releases** are signed (ADR-052): `RELEASE_SIGNING_KEY` (Ed25519, PKCS#8) exists only in
   the release pipeline's secret store; production builds set `RELEASE_REQUIRE_OFFICIAL=1` so an
@@ -211,6 +217,13 @@ in production. Payment state changes are audited (`billing.status_changed`, `bil
 | Nothing | sessionStorage/localStorage for tokens, keys, messages, PII |
 
 ## 13. Specialist review required
+
+Internal review (Phase 16): [security/review.md](security/review.md) (findings, route review,
+scanners), [security/asvs.md](security/asvs.md) (ASVS 5.0 self-assessment),
+[security/route-matrix.md](security/route-matrix.md) (generated), external assessment brief
+[security/audit-brief.md](security/audit-brief.md), disclosure policy
+[security/bug-bounty.md](security/bug-bounty.md).
+
 
 S-01..S-12 in [review-register.md](review-register.md); plus third-party penetration test
 before public beta and annually; bug bounty after GA.

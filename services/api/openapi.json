@@ -8388,13 +8388,19 @@
                             ]
                           },
                           "clientMessageId": {
-                            "type": "string"
+                            "type": "string",
+                            "minLength": 36,
+                            "maxLength": 36
                           },
                           "senderUserId": {
-                            "type": "string"
+                            "type": "string",
+                            "minLength": 36,
+                            "maxLength": 36
                           },
                           "senderDeviceId": {
-                            "type": "string"
+                            "type": "string",
+                            "minLength": 36,
+                            "maxLength": 36
                           },
                           "epoch": {
                             "type": "integer",

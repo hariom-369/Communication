@@ -18,7 +18,7 @@ Date of research pass: 2026-09-27.
 | 8 | WebRTC architecture | [calling.md](calling.md) |
 | 9 | Media architecture | [media.md](media.md) |
 | 10 | Authentication architecture | [authentication.md](authentication.md) |
-| 11 | Security threat model | [threat-model.md](threat-model.md), [security.md](security.md) |
+| 11 | Security threat model | [threat-model.md](threat-model.md), [security.md](security.md); review, ASVS assessment, route matrix, audit brief, disclosure policy in [security/](security/review.md) |
 | 12 | Abuse / moderation architecture | [moderation.md](moderation.md) |
 | 13 | Admin architecture | [admin.md](admin.md) |
 | 14 | Billing architecture | [billing.md](billing.md) |
