@@ -24,6 +24,10 @@ module "network" {
 }
 
 module "storage" {
+  providers = {
+    aws = aws
+    aws.dr = aws.dr
+  }
   source          = "./modules/storage"
   name_prefix     = var.name_prefix
   app_origin      = "https://app.${var.domain}"

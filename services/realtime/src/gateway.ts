@@ -37,6 +37,12 @@ export interface GatewayConfig {
   readonly heartbeatMs: number;
   readonly authTimeoutMs: number;
   readonly sessionRecheckMs: number;
+  /**
+   * After the Valkey subscription was lost and comes back, connected clients are told to
+   * reconnect, spread over this window, so they catch up on what was published meanwhile
+   * (default 15 s).
+   */
+  readonly resyncSpreadMs?: number;
 }
 
 export interface GatewayDeps {
@@ -110,6 +116,19 @@ export class RealtimeGateway {
     });
     deps.subscriber.on('message', (channel: string, payload: string) => {
       this.#onEvent(channel, payload);
+    });
+    // Pub/sub delivers nothing while the subscription is down, and connected clients do not know
+    // they missed events: the API stored the messages, but only a reconnect makes a client catch
+    // up (found by the Valkey-loss drill). When the subscription returns, ask every connection
+    // to reconnect, spread out, exactly as a drain does.
+    let lost = false;
+    deps.subscriber.on('close', () => {
+      lost = true;
+    });
+    deps.subscriber.on('ready', () => {
+      if (!lost) return;
+      lost = false;
+      this.#requestResync();
     });
     this.#timers.push(setInterval(() => void this.#heartbeat(), deps.config.heartbeatMs));
     this.#timers.push(
@@ -548,6 +567,17 @@ export class RealtimeGateway {
    * Graceful shutdown: refuse new connections, ask clients to reconnect after a random delay
    * (spreads the reconnect storm across the other pods), then close what remains.
    */
+  #requestResync(): void {
+    const spread = this.#deps.config.resyncSpreadMs ?? 15_000;
+    this.#deps.logger.warn('realtime.resync_requested', { count: this.#connections.size });
+    this.#metrics?.resyncs.inc();
+    for (const connection of this.#connections) {
+      if (connection.userId === null) continue;
+      const jitter = parseInt(connection.id.slice(0, 8), 16) % Math.max(1, spread);
+      this.#send(connection, { type: 'reconnect', afterMs: jitter });
+    }
+  }
+
   async drain(maxWaitMs: number): Promise<void> {
     this.#draining = true;
     for (const timer of this.#timers) clearInterval(timer);
@@ -589,6 +619,7 @@ interface GatewayMetrics {
   readonly closes: Counter<'code'>;
   readonly events: Counter<'type'>;
   readonly authFailures: Counter;
+  readonly resyncs: Counter;
 }
 
 const KNOWN_CLOSE_CODES = new Set<number>([1000, 1001, 1005, 1006, ...Object.values(CloseCode)]);
@@ -624,6 +655,11 @@ function gatewayMetrics(registry: Registry, gateway: RealtimeGateway): GatewayMe
       name: 'tessera_realtime_events_delivered_total',
       help: 'Events written to client connections, by event type.',
       labelNames: ['type'] as const,
+      registers: [registry],
+    }),
+    resyncs: new Counter({
+      name: 'tessera_realtime_resyncs_total',
+      help: 'Times connected clients were told to reconnect after the Valkey subscription returned.',
       registers: [registry],
     }),
     authFailures: new Counter({

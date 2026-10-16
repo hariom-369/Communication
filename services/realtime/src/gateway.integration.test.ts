@@ -406,6 +406,25 @@ describe('fan-out', () => {
   });
 });
 
+describe('Valkey subscription loss', () => {
+  it('tells connected clients to reconnect (and so catch up) when the subscription returns', async () => {
+    const registry = createMetricsRegistry('realtime');
+    const node = await startNode({ resyncSpreadMs: 200 }, valkey, registry);
+    const user = await createUser();
+    const socket = await connect(node.url, user);
+    await waitForSubscribers(user.userId, 1);
+    // The subscriber connection drops and reconnects (a Valkey restart or failover).
+    node.subscriber.disconnect(true);
+    const hint = await socket.next('reconnect', 5000);
+    expect(hint['afterMs']).toBeGreaterThanOrEqual(0);
+    expect(hint['afterMs']).toBeLessThan(200);
+    expect(await registry.metrics()).toContain(
+      'tessera_realtime_resyncs_total{service="realtime"} 1',
+    );
+    socket.ws.close();
+  });
+});
+
 describe('metrics', () => {
   it('count upgrades by result, open connections, deliveries and closes', async () => {
     const registry = createMetricsRegistry('realtime');

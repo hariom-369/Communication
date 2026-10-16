@@ -1,6 +1,15 @@
 # Disaster recovery
 
-Status: PROPOSED
+Status: **backups, replication and runbooks as built in Phase 17 (infra/terraform, not yet
+applied); procedures drilled locally** — results in [dr-drills/2026-10-16.md](dr-drills/2026-10-16.md).
+
+| Target | How it is met (as built) | Verified |
+|---|---|---|
+| AZ loss | RDS and Valkey Multi-AZ; pods spread over zones with disruption budgets | design; staging |
+| DB corruption / bad migration / operator error | RDS PITR 35 days; expand-only migrations; `verify-audit` and the restore checks before switching (ops/runbooks/dr-restore.md) | restore drill passed locally; RDS restore time: staging |
+| Region loss | replicated RDS automated backups (PITR in ap-south-2), AWS Backup copies, S3 replication with 15-min replication time; cold standby brought up from Terraform (ops/runbooks/dr-region.md) | not drilled (needs two regions) |
+| Valkey loss | disposable; fail-closed auth limits, per-process fallback elsewhere; clients told to reconnect and catch up when it returns | drill passed locally (0 of 12,000 deliveries lost, after the fix it found) |
+| Credential / KMS compromise | ops/runbooks/secrets.md, kms-key.md | tabletop pending |
 
 ## 1. Targets
 
@@ -47,6 +56,10 @@ mailbox affects only undelivered messages (bounded by RPO).
 6. Post-incident: data reconciliation, failback plan.
 
 ## 5. Other runbooks required before beta
+
+**Written in Phase 17** (ops/runbooks/): deploy-rollback, runaway-migration, valkey-loss,
+s3-misconfiguration, kms-key, secrets (rotation, leaks), ddos, account-takeover, csam-escalation,
+incident-response (CERT-In 6 h, DPDP), plus one per alert. The original list:
 
 Bad deploy rollback; runaway migration; Valkey failover; S3 permission misconfiguration;
 KMS key disablement; leaked secret rotation; DDoS; mass account takeover; CSAM report

@@ -70,6 +70,7 @@ async function main(): Promise<void> {
       heartbeatMs: config.HEARTBEAT_SECONDS * 1000,
       authTimeoutMs: config.AUTH_TIMEOUT_MS,
       sessionRecheckMs: config.SESSION_RECHECK_SECONDS * 1000,
+      resyncSpreadMs: config.RESYNC_SPREAD_SECONDS * 1000,
     },
     valkey,
     subscriber,

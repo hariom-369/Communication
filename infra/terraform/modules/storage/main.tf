@@ -1,3 +1,12 @@
+terraform {
+  required_providers {
+    aws = {
+      source                = "hashicorp/aws"
+      configuration_aliases = [aws.dr]
+    }
+  }
+}
+
 # Object storage (docs/media.md §5, docs/deployment.md §5): encrypted attachments (ciphertext
 # only; browsers upload and download with presigned URLs), the breached-password mirror (read
 # only through the VPC endpoint), and audit exports under Object Lock.
@@ -216,7 +225,131 @@ resource "aws_s3_bucket_object_lock_configuration" "audit" {
   }
 }
 
+# --- Cross-region replication of attachments (docs/disaster-recovery.md §1) ---------------------
+
+resource "aws_kms_key" "storage_dr" {
+  provider            = aws.dr
+  description         = "${var.name_prefix} object storage (DR region)"
+  enable_key_rotation = true
+}
+
+resource "aws_s3_bucket" "media_dr" {
+  provider = aws.dr
+  bucket   = "${var.name_prefix}-media-dr"
+}
+
+resource "aws_s3_bucket_public_access_block" "media_dr" {
+  provider                = aws.dr
+  bucket                  = aws_s3_bucket.media_dr.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_versioning" "media_dr" {
+  provider = aws.dr
+  bucket   = aws_s3_bucket.media_dr.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "media_dr" {
+  provider = aws.dr
+  bucket   = aws_s3_bucket.media_dr.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = aws_kms_key.storage_dr.arn
+    }
+    bucket_key_enabled = true
+  }
+}
+
+data "aws_iam_policy_document" "replication_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["s3.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "replication" {
+  name               = "${var.name_prefix}-media-replication"
+  assume_role_policy = data.aws_iam_policy_document.replication_assume.json
+}
+
+data "aws_iam_policy_document" "replication" {
+  statement {
+    actions   = ["s3:GetReplicationConfiguration", "s3:ListBucket"]
+    resources = [aws_s3_bucket.media.arn]
+  }
+  statement {
+    actions   = ["s3:GetObjectVersionForReplication", "s3:GetObjectVersionAcl", "s3:GetObjectVersionTagging"]
+    resources = ["${aws_s3_bucket.media.arn}/*"]
+  }
+  statement {
+    actions   = ["s3:ReplicateObject", "s3:ReplicateDelete", "s3:ReplicateTags"]
+    resources = ["${aws_s3_bucket.media_dr.arn}/*"]
+  }
+  statement {
+    actions   = ["kms:Decrypt"]
+    resources = [aws_kms_key.storage.arn]
+  }
+  statement {
+    actions   = ["kms:Encrypt", "kms:GenerateDataKey"]
+    resources = [aws_kms_key.storage_dr.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "replication" {
+  role   = aws_iam_role.replication.id
+  policy = data.aws_iam_policy_document.replication.json
+}
+
+resource "aws_s3_bucket_replication_configuration" "media" {
+  bucket     = aws_s3_bucket.media.id
+  role       = aws_iam_role.replication.arn
+  depends_on = [aws_s3_bucket_versioning.media, aws_s3_bucket_versioning.media_dr]
+  rule {
+    id     = "dr"
+    status = "Enabled"
+    filter {}
+    delete_marker_replication {
+      status = "Enabled"
+    }
+    source_selection_criteria {
+      sse_kms_encrypted_objects {
+        status = "Enabled"
+      }
+    }
+    destination {
+      bucket = aws_s3_bucket.media_dr.arn
+      encryption_configuration {
+        replica_kms_key_id = aws_kms_key.storage_dr.arn
+      }
+      # Replication within 15 minutes, with metrics to alert on lag (the RPO of attachments).
+      replication_time {
+        status = "Enabled"
+        time {
+          minutes = 15
+        }
+      }
+      metrics {
+        status = "Enabled"
+        event_threshold {
+          minutes = 15
+        }
+      }
+    }
+  }
+}
+
 output "media_bucket" { value = aws_s3_bucket.media.bucket }
+output "media_dr_bucket" { value = aws_s3_bucket.media_dr.bucket }
 output "media_bucket_arn" { value = aws_s3_bucket.media.arn }
 output "pwned_passwords_bucket" { value = aws_s3_bucket.pwned.bucket }
 output "audit_bucket" { value = aws_s3_bucket.audit.bucket }

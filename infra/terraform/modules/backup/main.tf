@@ -119,5 +119,14 @@ resource "aws_backup_selection" "database" {
   resources    = [var.database_arn]
 }
 
+# Point-in-time recovery in the DR region: RDS replicates its automated backups (snapshots and
+# transaction logs) continuously, so a regional restore loses minutes, not a day.
+resource "aws_db_instance_automated_backups_replication" "dr" {
+  provider               = aws.dr
+  source_db_instance_arn = var.database_arn
+  kms_key_id             = aws_kms_key.backup_dr.arn
+  retention_period       = 7
+}
+
 output "vault_arn" { value = aws_backup_vault.primary.arn }
 output "dr_vault_arn" { value = aws_backup_vault.dr.arn }

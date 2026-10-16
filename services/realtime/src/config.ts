@@ -31,6 +31,8 @@ const schema = z
     HEARTBEAT_SECONDS: env.positiveInt(25),
     AUTH_TIMEOUT_MS: env.positiveInt(5000),
     SESSION_RECHECK_SECONDS: env.positiveInt(60),
+    // Window over which clients are told to reconnect after the Valkey subscription returns.
+    RESYNC_SPREAD_SECONDS: env.positiveInt(15),
     // Deploys: clients are told to reconnect at a random moment within this window, spreading
     // the reconnect storm (docs/realtime.md §5; measured in docs/capacity.md §4). 5 s let 15,000
     // clients of one pod hit the API within 5 s and stalled message sends for seconds.

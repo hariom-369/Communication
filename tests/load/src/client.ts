@@ -145,7 +145,10 @@ export class VirtualUser {
   #attempt = 0;
   #stableTimer: NodeJS.Timeout | null = null;
   /** Highest message sequence number seen per conversation (pushed or fetched). */
+  /** Per conversation, the last seq with nothing missing before it (the web client's processedSeq). */
   readonly #seen = new Map<string, number>();
+  /** Seqs received ahead of a gap, until the gap is filled. */
+  readonly #ahead = new Map<string, Set<number>>();
   /** Other server frames (e.g. `call`), for scenarios that wait for them. */
   onEvent: ((frame: { type: string; [key: string]: unknown }) => void) | null = null;
 
@@ -384,8 +387,17 @@ export class VirtualUser {
     this.#ackTimers.set(conversationId, timer);
   }
 
-  #saw(conversationId: string, seq: number): void {
-    if (seq > (this.#seen.get(conversationId) ?? 0)) this.#seen.set(conversationId, seq);
+  /** Records a message; returns false if it had been received already. */
+  #saw(conversationId: string, seq: number): boolean {
+    let done = this.#seen.get(conversationId) ?? 0;
+    const ahead = this.#ahead.get(conversationId) ?? new Set<number>();
+    if (seq <= done || ahead.has(seq)) return false;
+    ahead.add(seq);
+    while (ahead.delete(done + 1)) done += 1;
+    this.#seen.set(conversationId, done);
+    if (ahead.size > 0) this.#ahead.set(conversationId, ahead);
+    else this.#ahead.delete(conversationId);
+    return true;
   }
 
   /**
@@ -399,7 +411,9 @@ export class VirtualUser {
     if (sync.status !== 200) return;
     const { conversations } = sync.body as { conversations: { id: string; lastSeq: number }[] };
     for (const position of conversations) {
-      let after = this.#seen.get(position.id) ?? position.lastSeq;
+      // Conversations are seeded empty, so one never seen yet is caught up from the start (the
+      // web app loads such a conversation's history when it is opened).
+      let after = this.#seen.get(position.id) ?? 0;
       if (!this.#seen.has(position.id)) this.#seen.set(position.id, after);
       while (after < position.lastSeq) {
         const page = await this.request(
@@ -410,9 +424,11 @@ export class VirtualUser {
         if (page.status !== 200) return;
         const { messages } = page.body as { messages: { seq: number }[] };
         if (messages.length === 0) break;
-        for (const message of messages) this.#saw(position.id, message.seq);
-        this.#metrics.counters.add('recovered', messages.length);
-        after = this.#seen.get(position.id) ?? after;
+        let recovered = 0;
+        for (const message of messages) if (this.#saw(position.id, message.seq)) recovered += 1;
+        this.#metrics.counters.add('recovered', recovered);
+        // Always moves forward, even if the server skipped a seq.
+        after = Math.max(this.#seen.get(position.id) ?? after, messages.at(-1)?.seq ?? after);
       }
     }
   }

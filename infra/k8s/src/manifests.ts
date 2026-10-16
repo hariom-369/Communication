@@ -204,6 +204,9 @@ export function realtimeConfig(values: Values): Record<string, string> {
     // Drain window 30 s plus shutdown: terminationGracePeriodSeconds below must exceed it.
     SHUTDOWN_DRAIN_MS: '30000',
     SHUTDOWN_TIMEOUT_MS: '45000',
+    // After a Valkey outage every pod tells its clients to reconnect (to catch up); spread over a
+    // minute so the API is not asked for every socket's ticket at once (docs/dr-drills).
+    RESYNC_SPREAD_SECONDS: '60',
   };
 }
 
