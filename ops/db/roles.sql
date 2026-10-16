@@ -53,11 +53,15 @@ ALTER DEFAULT PRIVILEGES FOR ROLE tessera_migrator IN SCHEMA public
   GRANT USAGE, SELECT ON SEQUENCES TO tessera_app;
 ALTER DEFAULT PRIVILEGES FOR ROLE tessera_migrator IN SCHEMA public
   GRANT SELECT ON TABLES TO tessera_readonly;
+-- Sequence values too, so the read-only role can take a consistent backup (pg_dump).
+ALTER DEFAULT PRIVILEGES FOR ROLE tessera_migrator IN SCHEMA public
+  GRANT SELECT ON SEQUENCES TO tessera_readonly;
 
 -- Tables that exist now.
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO tessera_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO tessera_app;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO tessera_readonly;
+GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO tessera_readonly;
 -- Per-table rules, once the migrations have created the tables (this script runs before the
 -- first migration, to set the default privileges, and after it).
 DO $$

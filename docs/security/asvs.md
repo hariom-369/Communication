@@ -106,7 +106,7 @@ the reason. Findings referenced as F-nn.
 |---|---|---|
 | No custom cryptography | Met | OpenMLS for messaging; RustCrypto / libsodium-family primitives; HPKE (RFC 9180), SFrame (RFC 9605) — crypto-design.md; reviewed against its own rule in review.md |
 | Randomness | Met | CSPRNG only; `Math.random` is a lint error everywhere (including test tooling) |
-| Key management | Partial | key hierarchy documented (crypto-design.md, security.md §9); KMS/HSM custody is a deployment property (Phase 17); release signing key runbook exists |
+| Key management | Partial | key hierarchy documented (crypto-design.md, security.md §9); secrets in Secrets Manager under per-environment KMS keys (infra/terraform), rotation runbook (ops/runbooks/secrets.md); automated rotation and KMS envelope wrapping of the pepper are not built; release signing key runbook exists |
 | Algorithms and agility | Partial | ciphersuite negotiated per group; post-quantum plan (X-Wing) awaiting S-02 |
 | Independent review | Gap until S-13 | external crypto audit (audit-brief.md §2) |
 
@@ -114,8 +114,8 @@ the reason. Findings referenced as F-nn.
 
 | Area | Status | Evidence |
 |---|---|---|
-| TLS to clients | Partial | designed (TLS 1.3/1.2 AEAD only, HSTS preload) at the edge; verified only once staging exists (Phase 17) |
-| Internal TLS | Partial | `sslmode=verify-full` and `rediss://` enforced by production config validation; mesh mTLS is a deployment property (Phase 17) |
+| TLS to clients | Partial | configured in code (CloudFront TLSv1.2_2021, load balancers ELBSecurityPolicy-TLS13-1-2-2021-06, HSTS); verified only once staging exists |
+| Internal TLS | Partial | `sslmode=verify-full` and `rediss://` enforced by production config validation (and by the rendered manifests' config test); in-cluster HTTP between pods (API → fetcher, load balancer → pods) is plain inside the VPC — a service mesh with mTLS is not built |
 
 ## V13 Configuration
 
@@ -123,7 +123,7 @@ the reason. Findings referenced as F-nn.
 |---|---|---|
 | Secure defaults, validated configuration | Met | every service validates its configuration at boot; production refuses test settings (payment test keys, insecure OIDC, missing franking/moderation keys, missing breached-password mirror) |
 | Secrets | Met | none in the repository (gitleaks in CI, history scanned); `.env.example` only |
-| Dependencies and build | Partial | lockfiles, OSV (npm and Cargo, F-02), dependency review, CodeQL, pinned actions; **SBOM, image scanning and signing, provenance not yet built (F-06, Phase 17)** |
+| Dependencies and build | Partial | lockfiles, OSV (npm and Cargo, F-02), dependency review, CodeQL, pinned actions, `cargo deny`; release pipeline with SBOMs, Trivy gate, cosign signatures verified at deploy, BuildKit provenance (F-06, Phase 17); **admission policy and SLSA L3 not built; the pipeline has not run yet** |
 | Unnecessary features | Met | no debug endpoints in production; health endpoints on a separate port |
 
 ## V14 Data protection
@@ -139,7 +139,7 @@ the reason. Findings referenced as F-nn.
 | Area | Status | Evidence |
 |---|---|---|
 | Architecture boundaries | Met | `apps/*` may not import `services/*`; client crypto only in `packages/crypto-core`; table ownership per module (architecture tests) |
-| Dangerous functionality isolated | Partial | the link-preview fetcher has SSRF protection (DNS pinning, address deny-list, limits) but **runs inside the API process (F-05)**; isolating it with an egress proxy is a Phase 17 deployment task |
+| Dangerous functionality isolated | Met | the link-preview fetcher (DNS pinning, address deny-list, limits) runs as its own deployment with no data stores or keys and public-443-only egress; its answers are validated as untrusted (F-05, Phase 17; `fetcher-app.test.ts`, `policy.test.ts`) |
 | Memory safety, concurrency | Met | TypeScript and Rust (no `unsafe` blocks in our crate's source); per-conversation serialisation; idempotent workers |
 
 ## V16 Security logging and error handling

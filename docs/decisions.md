@@ -1284,3 +1284,53 @@ database and generators — conservative, and no substitute for staging measurem
 networks (Phase 17).
 
 **Status.** ACCEPTED (implemented).
+
+## ADR-054 — Deployment as built: one origin per app, generated manifests, an isolated link fetcher, least-privilege roles (Phase 17)
+
+**Context.** ADR-023 proposed EKS behind CloudFront, Terraform and Helm. Building it showed
+constraints the proposal had not met: the web app's CSP allows `connect-src 'self'` and its
+session cookie is `__Host-`, so API, realtime and SFU signalling cannot live on other hostnames;
+there is no Kubernetes or Terraform binary in the development environment, so anything written
+must be checkable without them; and the security review required the link fetcher out of the
+API process (F-05) and a release pipeline with SBOMs, signatures and provenance (F-06).
+
+**Decision.**
+- **One origin per app.** CloudFront `app.<domain>` → one public ALB routing `/api` → API,
+  `/rt` → realtime, everything else → an nginx web tier that also proxies `/sfu` to LiveKit's
+  signalling. The admin console likewise on `admin.<domain>` behind the access proxy and an
+  internal ALB. No NLBs for WebSockets: the ALB carries them (idle timeout above the heartbeat).
+- **The web tier sends the headers the build defines.** The vite configs emit
+  `dist/security-headers.json` from the same `productionHeaders` that `vite preview` applies;
+  `infra/images/nginx/render.mjs` turns it into the nginx configuration (adding the environment's
+  media origin to `connect-src`), so one signed build serves every environment and production
+  sends exactly what the end-to-end tests check. The suite runs through that configuration with
+  `E2E_WEB_SERVER=nginx`. Every file the signed release manifest pins is served (the service
+  worker installs only a complete release).
+- **Manifests are generated, not templated.** `infra/k8s` renders each environment from typed
+  definitions plus a small values file (Terraform output and release digests), in three files:
+  namespaces (bootstrap, cluster administrator), prepare (configuration, secrets, policies,
+  routing, the migration Job) and workloads. Tests enforce the hardening baseline and network
+  isolation, boot each service's own configuration loader on the rendered production settings,
+  and check every alert's runbook and metrics; CI validates against the Kubernetes schemas.
+  Helm and kustomize were not used: their output could not be produced or checked here, and a
+  typed generator makes the policy tests direct.
+- **The link fetcher is its own deployment** of the API image (`dist/fetcher-server.js`): no data
+  stores or keys, a bearer token, a concurrency limit; network policy admits only API pods and
+  allows only public addresses on 443. The API treats its answers as untrusted. The "egress
+  proxy" of security.md §6 is this policy plus the fetcher's own DNS pinning.
+- **Least-privilege database roles** (`ops/db/roles.sql`): migrator, app (no DDL; audit log
+  insert-only), realtime (three tables, read-only), readonly. The migration Job's configuration
+  needs only its database URL.
+- **Releases** are built once per tag (signed web release, five images with BuildKit provenance
+  and SBOM attestations, Trivy gate, CycloneDX SBOMs, keyless cosign), deployed by a separate
+  approved workflow that verifies every signature against the release workflow's identity,
+  applies the migration Job first and waits for it.
+- **Tools in workflows** are release binaries verified against published checksums (the pattern
+  CI already used for gitleaks) rather than third-party actions whose commits could not be
+  verified.
+
+**Consequences.** Production serving is exercised by the end-to-end suite rather than assumed.
+The Terraform and the workflows are written and statically checked but have not run against a
+cloud account or a real tag — the staging bring-up is the first run (launch-readiness.md).
+Open: admission policy (bootstrap), SLSA L3, a service mesh for in-cluster mTLS, automated
+canary analysis, F-14 measured in staging.

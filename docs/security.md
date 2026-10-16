@@ -95,9 +95,15 @@ delivery** (Phase 10, ADR-048), which POSTs only to `https:443` endpoints on an 
 services (`PUSH_SERVICE_HOSTS`), through the same DNS pinning and address deny-list, without
 following redirects (`platform/safe-fetch/post.ts`, mutation-tested).
 
-**Status (Phase 8, ADR-046):** implemented as `services/api/src/platform/safe-fetch` with every
-rule below and an SSRF test suite; it currently runs **inside the API process**. Moving it into an
-isolated service with its own egress proxy is required before the first shared environment.
+**Status (Phase 8, ADR-046; isolated in Phase 17, F-05):** implemented as
+`services/api/src/platform/safe-fetch` with every rule below and an SSRF test suite. In production
+it runs as its own deployment (`dist/fetcher-server.js`, ADR-054): no database, Valkey, object
+storage or keys — only a bearer token shared with the API — and a network policy that admits only
+API pods and lets it reach only public addresses on 443 plus DNS, a second layer under its own
+address checks. The API must use it in production (`LINK_PREVIEW_FETCHER_URL`, refused otherwise)
+and treats its answers as untrusted (strict schema, the same URL rules and length limits). The
+"egress proxy" of the paragraph below is realised as that network policy plus the fetcher's own
+DNS pinning, not as a separate proxy process.
 
 Fetcher runs as an isolated service with egress through a proxy that: resolves DNS itself
 and blocks private, loopback, link-local, CGNAT, multicast and cloud-metadata ranges (IPv4
@@ -147,15 +153,28 @@ logs. `Server`/`X-Powered-By` headers removed.
 | Payment provider keys, webhook secrets | Secrets Manager | on staff change / yearly |
 | Release signing key | Sigstore keyless (OIDC) + HSM-backed key for manifest | per policy |
 
+**As built (Phase 17):** all of these live in AWS Secrets Manager and reach pods through External
+Secrets (contract and rotation steps: ops/runbooks/secrets.md); the keyrings (pepper, secret box,
+franking) rotate by adding a key in front. Automated rotation on the schedules above is not built
+yet — rotation is the runbook's manual procedure — and the pepper and box keys are not yet
+KMS-envelope-wrapped (they are Secrets Manager values encrypted with the environment's KMS key).
+Database access uses separate roles per component (ops/db/roles.sql).
+
 Secret scanning: gitleaks pre-commit + CI; GitHub push protection.
 
 ## 10. Supply chain
 
-**Status (Phase 16 review, F-06):** built — lockfiles with frozen installs, pinned CI actions,
+**Status (Phase 17, F-06):** built — lockfiles with frozen installs, pinned CI actions,
 least-privilege tokens, OSV (npm and Cargo), dependency review, CodeQL, the install-script
-allow-list, signed web releases. **Not built yet** (Phase 17 release pipeline): SBOM, image
-scanning and signing with admission control, SLSA provenance, `cargo deny`, Renovate;
-reproducible builds and a release transparency log may follow GA. The list below is the target.
+allow-list, signed web releases, `cargo deny` (advisories, licenses, bans, sources;
+`packages/crypto-core/deny.toml`), and the release pipeline (`.github/workflows/release.yml`):
+BuildKit SLSA provenance (`mode=max`) and SBOM attestations on every image, CycloneDX SBOMs,
+a Trivy gate, keyless cosign signatures that the deploy workflow verifies against the release
+workflow's identity; Dependabot for npm, Actions, Docker bases, Terraform and Cargo. The pipeline
+has not run yet (it needs the first release tag and the registry). **Not built:** the in-cluster
+admission policy (a bootstrap step, infra/terraform README), SLSA Build L3 (provenance today is the
+build platform's own, L2-level; L3 needs an isolated reusable builder), reproducible builds and a
+release transparency log (may follow GA), Renovate (Dependabot instead). The list below is the target.
 
 - **Web releases** are signed (ADR-052): `RELEASE_SIGNING_KEY` (Ed25519, PKCS#8) exists only in
   the release pipeline's secret store; production builds set `RELEASE_REQUIRE_OFFICIAL=1` so an
