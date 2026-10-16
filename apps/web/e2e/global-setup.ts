@@ -209,6 +209,33 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   await admin.end();
   const databaseUrl = new URL(adminUrl);
   databaseUrl.pathname = '/tessera_e2e';
+  // E2E_DB_ROLES=1 runs the services as the least-privilege roles of ops/db/roles.sql
+  // (migrator for migrations, app for the API, realtime for the gateway), as production does.
+  const roles = process.env['E2E_DB_ROLES'] === '1';
+  const urlAs = (role: string) => {
+    if (!roles) return databaseUrl.toString();
+    const url = new URL(databaseUrl);
+    url.username = role;
+    url.password = '';
+    return url.toString();
+  };
+  const applyRoles = () => {
+    if (!roles) return;
+    const result = spawnSync(
+      'psql',
+      [
+        databaseUrl.toString(),
+        '-q',
+        '-v',
+        'ON_ERROR_STOP=1',
+        '-f',
+        path.join(ROOT, 'ops/db/roles.sql'),
+      ],
+      { encoding: 'utf8' },
+    );
+    if (result.status !== 0) throw new Error(`ops/db/roles.sql failed: ${result.stderr}`);
+  };
+  applyRoles();
 
   // SMTP capture + JSON inbox for tests.
   const inbox: { to: string; subject: string; text: string }[] = [];
@@ -333,7 +360,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     HEALTH_PORT: '29090',
     HOST: '127.0.0.1',
     LOG_LEVEL: 'warn',
-    DATABASE_URL: databaseUrl.toString(),
+    DATABASE_URL: urlAs('tessera_app'),
     VALKEY_URL: valkeyUrl,
     VALKEY_KEY_PREFIX: `e2e-${Date.now().toString(36)}`, // fresh rate-limit state per run
     ALLOWED_ORIGINS: 'http://localhost:4173',
@@ -379,9 +406,15 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   // Test workers use it to reset the per-IP sign-up limit between spec files (support.ts).
   process.env['E2E_VALKEY_KEY_PREFIX'] = apiEnv.VALKEY_KEY_PREFIX;
   const apiDir = path.join(ROOT, 'services/api');
-  const migrate = start('node', ['dist/cli/migrate.js'], apiEnv, apiDir);
+  const migrate = start(
+    'node',
+    ['dist/cli/migrate.js'],
+    { ...apiEnv, DATABASE_URL: urlAs('tessera_migrator') },
+    apiDir,
+  );
   const migrateCode = await new Promise<number | null>((resolve) => migrate.on('exit', resolve));
   if (migrateCode !== 0) throw new Error('E2E database migration failed');
+  applyRoles();
 
   const payments = start(
     'node',
@@ -409,7 +442,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       PORT: '28081',
       HEALTH_PORT: '29091',
       LOG_LEVEL: 'warn',
-      DATABASE_URL: databaseUrl.toString(),
+      DATABASE_URL: urlAs('tessera_realtime'),
       VALKEY_URL: valkeyUrl,
       VALKEY_KEY_PREFIX: apiEnv.VALKEY_KEY_PREFIX,
       ALLOWED_ORIGINS: 'http://localhost:4173',

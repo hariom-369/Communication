@@ -5,9 +5,12 @@ import type { Values } from './values.js';
 
 /** Kinds applied in the second phase, after the migration Job has completed. */
 const WORKLOADS = new Set(['Deployment', 'HorizontalPodAutoscaler', 'PodDisruptionBudget']);
-const FIRST = ['Namespace', 'ServiceAccount', 'ConfigMap', 'ExternalSecret', 'Certificate'];
+const FIRST = ['ServiceAccount', 'ConfigMap', 'ExternalSecret', 'Certificate'];
 
 export interface Rendered {
+  /** Namespaces with their Pod Security levels: applied by a cluster administrator at bootstrap
+   * (the deploy role administers only the namespaces' contents). */
+  readonly namespaces: string;
   /** Namespaces, identities, settings, secrets, network policy, services, routing, monitoring
    * and the release's migration Job. */
   readonly prepare: string;
@@ -31,18 +34,24 @@ function documents(values: Values, list: Manifest[], phase: string): string {
   return `${header}\n${sorted.map((m) => `---\n${stringify(m, { lineWidth: 0 })}`).join('')}`;
 }
 
-/** The environment in two files, applied in order (ops/runbooks/deploy-rollback.md). */
+/** The environment: a bootstrap file and two files applied in order by deploy.yml. */
 export function render(values: Values): Rendered {
   const all = manifests(values);
+  const namespaced = all.filter((m) => m.kind !== 'Namespace');
   return {
+    namespaces: documents(
+      values,
+      all.filter((m) => m.kind === 'Namespace'),
+      'bootstrap: namespaces',
+    ),
     prepare: documents(
       values,
-      all.filter((m) => !WORKLOADS.has(m.kind)),
+      namespaced.filter((m) => !WORKLOADS.has(m.kind)),
       '1 of 2: prepare',
     ),
     workloads: documents(
       values,
-      all.filter((m) => WORKLOADS.has(m.kind)),
+      namespaced.filter((m) => WORKLOADS.has(m.kind)),
       '2 of 2: workloads',
     ),
   };

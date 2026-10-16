@@ -186,7 +186,7 @@ jobs:
           actionlint .github/workflows/*.yml
           for env in staging production; do
             pnpm --filter @tessera/k8s render --values "test-values/$env.json" --out "$RUNNER_TEMP/k8s"
-            kubernetes-validate --strict "$RUNNER_TEMP/k8s/$env-1-prepare.yaml" "$RUNNER_TEMP/k8s/$env-2-workloads.yaml"
+            kubernetes-validate --strict "$RUNNER_TEMP"/k8s/"$env"-*.yaml
           done
       - name: Alert rules (promtool, release binary, checksum verified)
         env:
@@ -199,6 +199,21 @@ jobs:
           grep " $archive\$" sha256sums.txt | sha256sum --check --strict
           tar -xzf "$archive" --strip-components=1 "prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool"
           ./promtool check rules infra/monitoring/alerts.yaml
+      - name: Terraform (release binary, checksum verified; never applied from CI)
+        env:
+          TERRAFORM_VERSION: 1.12.2
+        working-directory: infra/terraform
+        run: |
+          base="https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}"
+          archive="terraform_${TERRAFORM_VERSION}_linux_amd64.zip"
+          curl -sSfL -o "$RUNNER_TEMP/$archive" "$base/$archive"
+          curl -sSfL -o "$RUNNER_TEMP/SHA256SUMS" "$base/terraform_${TERRAFORM_VERSION}_SHA256SUMS"
+          (cd "$RUNNER_TEMP" && grep " $archive\$" SHA256SUMS | sha256sum --check --strict && unzip -q "$archive" terraform)
+          "$RUNNER_TEMP/terraform" fmt -check -recursive -diff
+          "$RUNNER_TEMP/terraform" init -backend=false -input=false
+          "$RUNNER_TEMP/terraform" validate
+          pip install python-hcl2==8.1.4
+          python3 check.py
       - name: Build the service images and run them read-only as non-root
         run: |
           docker build -f infra/images/api.Dockerfile -t tessera-api:ci .

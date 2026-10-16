@@ -1,6 +1,37 @@
 # Observability
 
-Status: PROPOSED · Decision: ADR-026
+Status: metrics, alert rules and health endpoints **as built (Phase 17)**; traces, the log
+pipeline and client telemetry are deployment work not built yet · Decision: ADR-026
+
+## As built
+
+- **Metrics** (`prom-client`, `packages/platform/src/metrics.ts`): every service serves
+  Prometheus text at `/metrics` on its internal health port (never a public one), scraped by
+  PodMonitors (infra/k8s). Labels are bounded by construction (route ids, job names, enum
+  results). Series:
+  - process and Node.js defaults (`tessera_process_*`, `tessera_nodejs_*`: CPU, memory, file
+    descriptors, event-loop lag, GC);
+  - API and admin API: `tessera_http_requests_total{route,method,status_class}`,
+    `tessera_http_request_duration_seconds{route,method}` (route = route id, `unmatched` for
+    unknown paths — raw paths never become labels);
+  - periodic jobs: `tessera_job_runs_total{job,result=ok|failed|skipped}`,
+    `tessera_job_duration_seconds{job}`, `tessera_job_last_success_timestamp_seconds{job}`;
+  - degraded controls: `tessera_breach_check_unavailable_total`,
+    `tessera_rate_limit_store_errors_total`, `tessera_link_previews_total{result}`,
+    `tessera_notify_queue_oldest_due_seconds`;
+  - realtime: `tessera_realtime_connections`, `tessera_realtime_upgrades_total{result}`,
+    `tessera_realtime_closes_total{code}`, `tessera_realtime_events_delivered_total{type}`,
+    `tessera_realtime_auth_failures_total`;
+  - link fetcher: `tessera_fetcher_requests_total{result}`.
+- **Alert rules** (`infra/monitoring/alerts.yaml`, also rendered as a PrometheusRule): the SLOs of
+  §3 as multi-window burn-rate and latency alerts, realtime acceptance, background jobs (failing,
+  stalled), push queue age, and the controls that fail open. Every alert has a severity (`page` or
+  `ticket`) and a runbook in `ops/runbooks/`; `infra/k8s/src/alerts.test.ts` checks that, and that
+  every metric and route an alert uses exists; CI runs `promtool check rules`.
+- **Logs**: structured JSON with the field allow-list (§4) on stdout; shipping (Fluent Bit → Loki
+  or CloudWatch, in India) is a deployment step.
+- **Not built yet**: OpenTelemetry traces, error tracking, client telemetry, Grafana dashboards
+  (the alert expressions are the starting queries), the canary-secret log test (§4).
 
 ## 1. Signals
 

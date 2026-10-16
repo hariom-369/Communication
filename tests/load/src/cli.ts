@@ -13,13 +13,14 @@ import { crypto } from './scenarios/crypto.js';
 import { group } from './scenarios/group.js';
 import { steady } from './scenarios/steady.js';
 import { storm } from './scenarios/storm.js';
+import { valkeyLoss } from './scenarios/valkey-loss.js';
 import { seed, type Seed } from './seed.js';
 import { startStack, type Stack } from './stack.js';
 
 /**
  * Load-test coordinator (docs/load-testing.md):
  *
- *   node dist/cli.js <steady|storm|group|channel|calls|crypto> [options]
+ *   node dist/cli.js <steady|storm|group|channel|calls|crypto|valkey-loss> [options]
  *
  * Starts the services from their production builds, seeds accounts, forks generator processes,
  * runs the scenario and writes a JSON result (and a one-screen summary).
@@ -180,6 +181,7 @@ function assign(data: Seed, generators: number) {
 const SCENARIOS: Record<string, (context: Context) => Promise<Record<string, unknown>>> = {
   steady,
   storm,
+  'valkey-loss': valkeyLoss,
   group,
   channel,
   calls,

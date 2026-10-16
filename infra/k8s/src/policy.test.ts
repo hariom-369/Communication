@@ -23,7 +23,10 @@ describe.each(ENVIRONMENTS)('%s manifests', (environment) => {
   it('have unique names per kind and namespace, and render to YAML', () => {
     const keys = all.map((m) => `${m.kind}/${m.metadata.namespace ?? ''}/${m.metadata.name}`);
     expect(new Set(keys).size).toBe(keys.length);
-    const { prepare, workloads } = render(testValues(environment));
+    const { namespaces, prepare, workloads } = render(testValues(environment));
+    // The deploy role is namespace-scoped: cluster-scoped objects are bootstrap only.
+    expect(namespaces).toContain('kind: Namespace');
+    expect(prepare + workloads).not.toContain('kind: Namespace');
     // Migrations (the Job) are applied and awaited before any workload changes.
     expect(prepare).toContain('kind: Job');
     expect(prepare).not.toContain('kind: Deployment');

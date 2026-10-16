@@ -29,7 +29,8 @@
     "start:admin": "node dist/admin-server.js",
     "start:fetcher": "node dist/fetcher-server.js",
     "start": "node dist/server.js",
-    "security-matrix": "node dist/cli/security-matrix.js ../../docs/security/route-matrix.md"
+    "security-matrix": "node dist/cli/security-matrix.js ../../docs/security/route-matrix.md",
+    "verify-audit": "node dist/cli/verify-audit.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1145.0",

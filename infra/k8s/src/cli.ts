@@ -7,7 +7,8 @@ import { parseValues } from './values.js';
 
 /**
  * Renders an environment: `node dist/cli.js --values <values.json> --out <dir>` writes
- * `<dir>/<environment>-1-prepare.yaml` and `<dir>/<environment>-2-workloads.yaml`. The values file is the Terraform root's `k8s_values` output plus
+ * `<dir>/<environment>-0-namespaces.yaml` (bootstrap, cluster administrator),
+ * `<dir>/<environment>-1-prepare.yaml` and `<dir>/<environment>-2-workloads.yaml` (deploy.yml). The values file is the Terraform root's `k8s_values` output plus
  * the release's image digest (the release workflow assembles it).
  */
 const { values: args } = parseArgs({
@@ -19,8 +20,9 @@ if (args.values === undefined || args.out === undefined) {
 }
 const values = parseValues(JSON.parse(readFileSync(args.values, 'utf8')));
 mkdirSync(args.out, { recursive: true });
-const { prepare, workloads } = render(values);
+const { namespaces, prepare, workloads } = render(values);
 for (const [suffix, text] of [
+  ['0-namespaces', namespaces],
   ['1-prepare', prepare],
   ['2-workloads', workloads],
 ] as const) {

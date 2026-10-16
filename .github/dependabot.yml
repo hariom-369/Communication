@@ -12,3 +12,16 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  # Base images of infra/images (pinned by version; the release records the resolved digests).
+  - package-ecosystem: docker
+    directory: /infra/images
+    schedule:
+      interval: weekly
+  - package-ecosystem: terraform
+    directory: /infra/terraform
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /packages/crypto-core
+    schedule:
+      interval: weekly

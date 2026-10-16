@@ -20,3 +20,8 @@ coverage/
 .tmp/
 test-results/
 playwright-report/
+
+# Terraform working state (never committed; remote state lives in S3)
+**/.terraform/
+*.tfstate
+*.tfstate.*

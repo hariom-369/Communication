@@ -76,6 +76,8 @@ const location = (match, body, cache) =>
     '  }',
   ].join('\n');
 
+// Every file of the build is served: the signed release manifest pins each one (source maps and
+// security-headers.json included), and the service worker and monitors fetch them all.
 const locations = [
   // Hashed build output: cache for a year; a missing asset is a 404, never the app shell.
   location('/assets/', ['try_files $uri =404;'], 'public, max-age=31536000, immutable'),
@@ -85,8 +87,6 @@ const locations = [
     ['try_files $uri =404;'],
     'no-cache',
   ),
-  location('= /security-headers.json', ['return 404;']),
-  location('~ \\.map$', ['return 404;']),
   // Client-side routes fall back to the app shell.
   location('/', ['try_files $uri /index.html;'], 'no-cache'),
 ];

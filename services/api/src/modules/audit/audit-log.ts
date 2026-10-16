@@ -94,7 +94,6 @@ export class AuditLog {
       .execute();
   }
 
-  /** Recomputes the chain; returns the seq of the first broken row, or null if intact. */
   /** Newest first, filtered (admin audit viewer). */
   async page(filter: {
     action?: string | undefined;
@@ -137,24 +136,41 @@ export class AuditLog {
     }));
   }
 
-  async verifyChain(): Promise<string | null> {
-    const rows = await this.#db.selectFrom('audit_log').selectAll().orderBy('seq').execute();
+  /** Recomputes the chain in pages; returns the seq of the first broken row, or null. */
+  async verifyChain(pageSize = 5000): Promise<string | null> {
     let prev: Buffer = GENESIS;
-    for (const row of rows) {
-      const expected = rowHash(prev, {
-        id: row.id,
-        at: row.at.toISOString(),
-        actorKind: row.actor_kind,
-        actorId: row.actor_id,
-        action: row.action,
-        targetKind: row.target_kind,
-        targetId: row.target_id,
-        requestId: row.request_id,
-        details: canonical((row.details ?? {}) as Record<string, unknown>),
-      });
-      if (!row.prev_hash.equals(prev) || !row.hash.equals(expected)) return row.seq;
-      prev = row.hash;
+    let after: string | null = null;
+    for (;;) {
+      let query = this.#db.selectFrom('audit_log').selectAll().orderBy('seq').limit(pageSize);
+      if (after !== null) query = query.where('seq', '>', after);
+      const rows = await query.execute();
+      for (const row of rows) {
+        const expected = rowHash(prev, {
+          id: row.id,
+          at: row.at.toISOString(),
+          actorKind: row.actor_kind,
+          actorId: row.actor_id,
+          action: row.action,
+          targetKind: row.target_kind,
+          targetId: row.target_id,
+          requestId: row.request_id,
+          details: canonical((row.details ?? {}) as Record<string, unknown>),
+        });
+        if (!row.prev_hash.equals(prev) || !row.hash.equals(expected)) return row.seq;
+        prev = row.hash;
+      }
+      const last = rows.at(-1);
+      if (last === undefined || rows.length < pageSize) return null;
+      after = last.seq;
     }
-    return null;
+  }
+
+  /** Rows in the log (for the restore drill's report). */
+  async count(): Promise<number> {
+    const row = await this.#db
+      .selectFrom('audit_log')
+      .select((eb) => eb.fn.countAll<string>().as('n'))
+      .executeTakeFirstOrThrow();
+    return Number(row.n);
   }
 }
