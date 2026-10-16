@@ -11,7 +11,10 @@ data. Measured behaviour during a loss is in [../../docs/dr-drills/](../../docs/
 - Sign-in, sign-up and password reset are refused (their rate limits fail closed — brute-force
   protection must not lapse); other routes fall back to per-process limits.
 - No new realtime connections (tickets live in Valkey) and no live fan-out: messages are still
-  stored and arrive when clients sync.
+  stored, and sockets already open stay open.
+- When Valkey returns, every realtime pod asks its connections to reconnect, spread over
+  `RESYNC_SPREAD_SECONDS` (60 s in production); clients catch up on what they missed (F-15).
+  Expect a ticket and `messaging.sync` spike on the API for about a minute.
 - Pushes queued in Valkey since the last delivery may be lost; the next message wakes devices.
 
 ## Confirm
@@ -29,5 +32,8 @@ ElastiCache events (failover, node replacement), `valkey` in `/readyz`, client e
 
 ## Resolved when
 
-`RateLimitStoreUnavailable` clears, upgrades are accepted again and clients have resynced
-(`messaging.sync` request rate back to its baseline).
+`RateLimitStoreUnavailable` clears, upgrades are accepted again, `tessera_realtime_resyncs_total`
+has increased once per realtime pod (log `realtime.resync_requested`), the connection gauge is
+back to its level before the loss and clients have resynced (`messaging.sync` request rate back
+to its baseline). If a pod did not request a resync (its subscriber never reported the loss),
+restart it: `kubectl -n tessera rollout restart deploy realtime`.

@@ -22,7 +22,7 @@ Date of research pass: 2026-09-27.
 | 12 | Abuse / moderation architecture | [moderation.md](moderation.md) |
 | 13 | Admin architecture | [admin.md](admin.md) |
 | 14 | Billing architecture | [billing.md](billing.md) |
-| 15 | Deployment architecture | [deployment.md](deployment.md), [disaster-recovery.md](disaster-recovery.md), [observability.md](observability.md) |
+| 15 | Deployment architecture | [deployment.md](deployment.md) (as built), [disaster-recovery.md](disaster-recovery.md) and [drill records](dr-drills/2026-10-16.md), [observability.md](observability.md), [runbooks](../ops/runbooks/README.md), [launch readiness](launch-readiness.md) |
 | 16 | Scaling strategy | [scaling.md](scaling.md), [capacity.md](capacity.md) (measured), [load-testing.md](load-testing.md) |
 | 17 | Compliance-readiness checklist | [compliance.md](compliance.md) |
 | 18 | Testing strategy | [testing.md](testing.md) |

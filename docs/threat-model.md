@@ -262,11 +262,14 @@ Valkey is down; an unauthenticated per-address socket cap belongs at the
 edge (WAF/load balancer, Phase 17); capacity figures come from one machine and are re-measured in
 staging.
 
-## 7. Status as built (Phase 16 refresh)
+## 7. Status as built (Phase 16 refresh, Phase 17 delta)
 
 The register (§4) lists the intended mitigations. This is what exists in the code after
 Phase 16, what is a deployment property (Phase 17), and what is still to build — checked during
-the internal review ([security/review.md](security/review.md), findings F-nn).
+the internal review ([security/review.md](security/review.md), findings F-nn). Phase 17 added the
+supply-chain controls of T-17/T-19/T-20, isolated the link-preview fetcher (T-18/SSRF, F-05) and
+fixed live delivery after a Valkey loss (availability, F-15); "deployment property" items are
+written as Terraform and manifests but not yet applied to a real account (deployment.md).
 
 | ID | Built and tested | Deployment property (Phase 17) | Not built yet |
 |---|---|---|---|
@@ -276,7 +279,7 @@ the internal review ([security/review.md](security/review.md), findings F-nn).
 | T-04 | E2EE, ASK-signed device certificates, client-enforced group policy, signed commits, fingerprint-substitution refused (E2E) | — | key transparency (S-07, post-GA) |
 | T-05 | admin RBAC, step-up, four-eyes, purpose binding, every admin call audited | break-glass production access | — |
 | T-06 | Argon2id + pepper, hashed session tokens, ciphertext only | encryption at rest, KMS-held keys | canary records |
-| T-07 | client-encrypted blobs and backups, random keys, opaque downloads (F-03) | Block Public Access, bucket policies, access logs | — |
+| T-07 | client-encrypted blobs and backups, random keys, opaque downloads (F-03) | Block Public Access, bucket policies, access logs (infra/terraform, Phase 17) | — |
 | T-08 | E2EE independent of TLS, DTLS fingerprints via MLS | TLS 1.3, HSTS preload, CT monitoring | — |
 | T-09 | passkeys first, no SMS factor, login alerts | lookalike-domain monitoring | — |
 | T-10 | breached-password check (F-04, Phase 16), rate limits, passkeys, TOTP | breached-password mirror | MFA prompts on risk, credential-stuffing detection (F-09) |
@@ -286,10 +289,10 @@ the internal review ([security/review.md](security/review.md), findings F-nn).
 | T-14 | React escaping, no HTML rendering, strict CSP + Trusted Types, crypto in a worker, XSS payloads in every rendered field (F-10) | user-content origin for document viewers | — |
 | T-15 | Origin allow-list, single-use tickets from a CSRF-protected endpoint | — | — |
 | T-16 | new-account limits, behaviour signals, email verification | — | risk-based sign-up friction (F-09), graph-based detection |
-| T-17 | signed release manifest, SW pinning, no rollback | release key custody (runbook), 2-person release approval | reproducible builds, transparency log (F-06) |
+| T-17 | signed release manifest, SW pinning, no rollback; signed images verified at deploy (Phase 17) | release key custody (ops/runbooks/release-signing-key.md), 2-person release approval (protected environment) | reproducible builds, transparency log (F-06) |
 | T-18 | per-route limits, flood guard, ticket admission option, N+1 realtime sizing, backlog 4096, no super-linear regex on user input (F-12) | CDN/WAF/Shield, autoscaling, edge socket caps | — |
-| T-19 | pinned actions, least-privilege CI tokens, secret scan | protected branches, OIDC credentials, admission control | SBOM, image signing, SLSA provenance (F-06) |
-| T-20 | lockfiles, dependency review, install-script allow-list, OSV for npm and Cargo (F-02) | — | `cargo deny` (licences, bans) |
+| T-19 | pinned actions, least-privilege CI tokens, secret scan; SBOMs, image scan, keyless signing, BuildKit provenance, signature check before deploy, checksum-pinned release tools (Phase 17, F-06) | protected branches, OIDC credentials, cluster admission policy (bootstrap) | SLSA Build L3 |
+| T-20 | lockfiles, dependency review, install-script allow-list, OSV for npm and Cargo (F-02), `cargo deny` licences/bans/sources (Phase 17), Dependabot for npm, Cargo, actions, images and Terraform | — | — |
 | T-21 | ciphertext padding, no content in push, retention limits | restricted internal access | sealed sender (S-09, research) |
 | T-22 | encrypted local store, device lock (PIN/passkey), remote revoke | — | — |
 | T-23 | client-side backup encryption, 256-bit keys, alerts | — | backup rollback detection (S-06) |

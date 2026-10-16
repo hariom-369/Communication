@@ -93,6 +93,11 @@ ServerFrame  { id/in_reply_to, oneof { Ready, Ack, Error, MsgNew, Receipt, Prese
 - On reconnect: `SyncHello` with cursors → server replies with conversations needing sync.
 - Deploys: pods receive SIGTERM → stop accepting, send `Reconnect{after_ms: random(0..30s)}`
   to spread reconnect storms, drain for up to 60 s.
+- Valkey loss (F-15, Phase 17): fan-out runs over Valkey pub/sub, so events published while a
+  pod's subscription is down are lost. When the subscription comes back the pod sends every
+  authenticated connection `reconnect{afterMs: random(0..RESYNC_SPREAD_SECONDS)}` (15 s default,
+  60 s in production); the clients' normal catch-up then fetches what they missed. Counted in
+  `tessera_realtime_resyncs_total`.
 
 ## 6. Limits and abuse controls
 

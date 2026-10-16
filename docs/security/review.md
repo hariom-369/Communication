@@ -27,9 +27,10 @@ defence, or a documented control that is absent), **low** (hardening).
 | F-12 | medium | The bare-domain regex used for link checks (API and web) was quadratic: 64 KiB of `a.a.a…` blocked the event loop for 4 s, per request | **fixed** — linear scan in `@tessera/shared` (timing test) |
 | F-13 | medium | Message references in decrypted content were any string, so a peer could address `__proto__` and corrupt or crash the recipient's timeline state; server-sent sender/device/message ids were unvalidated strings too | **fixed** — all validated as UUIDv7 (regression test) |
 | F-14 | medium | A realtime pod crash slows connected users' sends for ≈ 20 s on the test machine while its clients reconnect (capacity.md §4) | mitigated in Phase 17 by sizing (10–12k sockets per pod, N+1, infra/k8s); measuring API headroom needs staging → open until then |
+| F-15 | medium | Live delivery runs over Valkey pub/sub: after a Valkey loss, events published during the outage were gone and connected clients had no reason to catch up — 3,902 of 12,000 deliveries never arrived in the Phase 17 drill (messages were stored, but unseen until the next reconnect) | **fixed in Phase 17** — a realtime pod whose subscription returns after a loss asks every connection to reconnect with jitter, so clients run their catch-up (integration test, mutation-checked; re-run drill: 0 missing; docs/dr-drills/2026-10-16.md) |
 
 **Open critical or high findings: none.** Open medium findings are scheduled with a phase and are
-listed again in the Phase 16 report.
+listed again in the Phase 16 report. F-15 was found by the Phase 17 Valkey-loss drill.
 
 ## 2. Route review
 
