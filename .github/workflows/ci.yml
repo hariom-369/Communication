@@ -186,7 +186,9 @@ jobs:
           actionlint .github/workflows/*.yml
           for env in staging production; do
             pnpm --filter @tessera/k8s render --values "test-values/$env.json" --out "$RUNNER_TEMP/k8s"
-            kubernetes-validate --strict "$RUNNER_TEMP"/k8s/"$env"-*.yaml
+            # The EKS version of infra/terraform (variables.tf eks_version). Custom resources
+            # (ExternalSecret, PodMonitor, PrometheusRule, Certificate) have no schema here.
+            kubernetes-validate --strict -k 1.34.0 "$RUNNER_TEMP"/k8s/"$env"-*.yaml
           done
       - name: Alert rules (promtool, release binary, checksum verified)
         env:
