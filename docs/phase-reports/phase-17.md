@@ -19,7 +19,7 @@ incident-response exercise — are **not met**. The list is in
 | Integration (real PostgreSQL + Valkey + S3-compatible store + coturn) | **251 passed** (api 230, realtime 21); 2 skipped (IPv6 TURN without IPv6 here; opt-in channel scale test) — new: the API through the isolated fetcher (and a fetcher outage not cached as "no preview"), the fetcher's authentication and limits, audit-chain verification across pages with a tampered row, realtime metrics, **resync after a Valkey subscription loss (F-15)** |
 | End-to-end, user app (Chromium, production build, real services) | **60 passed (1 skipped: opt-in call load test) in each of 3 consecutive runs** |
 | End-to-end, admin console | **6 passed in each of 3 consecutive runs** |
-| End-to-end through the production nginx configuration (`E2E_WEB_SERVER=nginx`) | E2E_NGINX_RESULT |
+| End-to-end through the production nginx configuration (`E2E_WEB_SERVER=nginx`) | **60 passed (1 skipped)** — the full suite, with the web build made for the test media origin |
 | End-to-end with least-privilege database roles (`E2E_DB_ROLES=1`) | 60 passed, 1 skipped (opt-in call load test) |
 | Mutation checks | every new guard fails its test when removed: fetcher token check, response validation, size and concurrency limits (4), the API's compose wiring to the remote fetcher, the 10 manifest policies, audit-chain tamper detection, the Valkey resync |
 | OpenAPI / route matrix | no drift |
