@@ -1,6 +1,6 @@
 # Phase 17 report — Production deployment
 
-**Status: DRAFT — gate results pending.** Verified 2026-10-16.
+**Status: GREEN locally as code; not deployed; launch gates open.** Verified 2026-10-16.
 Everything production needs from this repository is built and checked here: the isolated
 link-preview fetcher, metrics and alert rules, container images, Kubernetes manifests, the
 release and deploy pipelines, Terraform for the AWS accounts, least-privilege database roles,
@@ -20,7 +20,7 @@ incident-response exercise — are **not met**. The list is in
 | End-to-end, user app (Chromium, production build, real services) | **60 passed (1 skipped: opt-in call load test) in each of 3 consecutive runs** |
 | End-to-end, admin console | **6 passed in each of 3 consecutive runs** |
 | End-to-end through the production nginx configuration (`E2E_WEB_SERVER=nginx`) | **60 passed (1 skipped)** — the full suite, with the web build made for the test media origin |
-| End-to-end with least-privilege database roles (`E2E_DB_ROLES=1`) | 60 passed, 1 skipped (opt-in call load test) |
+| End-to-end with least-privilege database roles (`E2E_DB_ROLES=1`: migrations as `tessera_migrator`, API as `tessera_app`, realtime as `tessera_realtime`) | **60 passed (1 skipped)** |
 | Mutation checks | every new guard fails its test when removed: fetcher token check, response validation, size and concurrency limits (4), the API's compose wiring to the remote fetcher, the 10 manifest policies, audit-chain tamper detection, the Valkey resync |
 | OpenAPI / route matrix | no drift |
 | `pnpm audit` / gitleaks | no known vulnerabilities / no leaks (full history) |
