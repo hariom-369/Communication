@@ -11,7 +11,13 @@ all-features = true
 version = 2
 yanked = "deny"
 unmaintained = "all"
-ignore = []
+ignore = [
+  # proc-macro-error2: unmaintained, no vulnerability. A compile-time helper of hax-lib-macros,
+  # reached through libcrux-sha3 → hpke-rs → openmls_rust_crypto; no code of it is in the
+  # shipped WASM. No maintained version exists; remove when OpenMLS's crypto stack drops it.
+  # Reviewed 2026-10-16.
+  { id = "RUSTSEC-2026-0173", reason = "unmaintained compile-time proc-macro helper via openmls_rust_crypto; no runtime code, no upgrade available" },
+]
 
 [licenses]
 version = 2
