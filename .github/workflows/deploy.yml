@@ -1,0 +1,98 @@
+name: Deploy
+
+# Applies a published release to an environment (ops/runbooks/deploy-rollback.md). Production
+# needs the same release to have run in staging and two approvals on the `production`
+# environment. Every image is verified against this repository's release workflow identity
+# before anything is applied; migrations run and must finish before workloads change.
+# Rolling back is deploying the previous release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Release tag (vX.Y.Z)
+        required: true
+      environment:
+        description: Target environment
+        required: true
+        type: choice
+        options: [staging, production]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.release }} to ${{ inputs.environment }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write # AWS role via GitHub OIDC
+    env:
+      RELEASE: ${{ inputs.release }}
+      TARGET: ${{ inputs.environment }}
+      COSIGN_VERSION: 2.5.0
+    steps:
+      - name: Release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          [[ "$RELEASE" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9a-z.-]+)?$ ]] || { echo "bad release $RELEASE"; exit 1; }
+          gh release download "$RELEASE" --repo "$GITHUB_REPOSITORY" --dir release \
+            --pattern "$TARGET-1-prepare.yaml" --pattern "$TARGET-2-workloads.yaml" --pattern digests.tsv
+      - name: cosign (release binary, checksum verified)
+        run: |
+          base="https://github.com/sigstore/cosign/releases/download/v${COSIGN_VERSION}"
+          curl -sSfL -o cosign "$base/cosign-linux-amd64"
+          curl -sSfL -o cosign_checksums.txt "$base/cosign_checksums.txt"
+          sed -n 's/ cosign-linux-amd64$/ cosign/p' cosign_checksums.txt | sha256sum --check --strict
+          chmod 0755 cosign
+      - name: Every image is signed by this repository's release workflow
+        run: |
+          identity="^${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/\.github/workflows/release\.yml@refs/tags/${RELEASE}\$"
+          grep -ohE 'image: [^ ]+@sha256:[a-f0-9]{64}' release/"$TARGET"-*.yaml | sed 's/^image: //' | sort -u |
+            grep -E '/tessera-[a-z-]+@' | while read -r ref; do
+              ./cosign verify --certificate-identity-regexp "$identity" \
+                --certificate-oidc-issuer https://token.actions.githubusercontent.com "$ref" > /dev/null
+              echo "verified $ref"
+            done
+      - name: Cluster credentials (AWS role through GitHub OIDC)
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          DEPLOY_ROLE_ARN: ${{ vars.DEPLOY_ROLE_ARN }}
+          CLUSTER_NAME: ${{ vars.CLUSTER_NAME }}
+        run: |
+          token="$(curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value)"
+          echo "::add-mask::$token"
+          creds="$(aws sts assume-role-with-web-identity --role-arn "$DEPLOY_ROLE_ARN" \
+            --role-session-name "deploy-$GITHUB_RUN_ID" --web-identity-token "$token" \
+            --duration-seconds 3600 --query Credentials --output json)"
+          for key in AccessKeyId SecretAccessKey SessionToken; do
+            value="$(jq -r ".$key" <<< "$creds")"; echo "::add-mask::$value"
+          done
+          {
+            echo "AWS_ACCESS_KEY_ID=$(jq -r .AccessKeyId <<< "$creds")"
+            echo "AWS_SECRET_ACCESS_KEY=$(jq -r .SecretAccessKey <<< "$creds")"
+            echo "AWS_SESSION_TOKEN=$(jq -r .SessionToken <<< "$creds")"
+            echo "AWS_REGION=$AWS_REGION"
+          } >> "$GITHUB_ENV"
+          echo "CLUSTER_NAME=$CLUSTER_NAME" >> "$GITHUB_ENV"
+      - name: Apply (prepare, migrate, then workloads)
+        run: |
+          aws eks update-kubeconfig --name "$CLUSTER_NAME" --kubeconfig "$RUNNER_TEMP/kubeconfig"
+          export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+          kubectl apply --server-side --field-manager=tessera-deploy -f "release/$TARGET-1-prepare.yaml"
+          job="migrate-$(echo "${RELEASE#v}" | tr -c 'a-z0-9-\n' '-')"
+          kubectl -n tessera wait --for=condition=complete "job/$job" --timeout=30m || {
+            kubectl -n tessera logs "job/$job" --tail=100; exit 1; }
+          kubectl apply --server-side --field-manager=tessera-deploy -f "release/$TARGET-2-workloads.yaml"
+          for deploy in api admin-api link-fetcher web admin-web realtime; do
+            kubectl -n tessera rollout status "deploy/$deploy" --timeout=30m
+          done

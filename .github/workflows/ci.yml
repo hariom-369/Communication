@@ -92,7 +92,7 @@ jobs:
         run: |
           python3 -m pip install --user "moto[server]==5.2.3"
           nohup ~/.local/bin/moto_server -H 127.0.0.1 -p 29500 > moto.log 2>&1 &
-          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:29500/ > /dev/null && break; sleep 1; done
+          for _ in $(seq 1 30); do curl -fsS http://127.0.0.1:29500/ > /dev/null && break; sleep 1; done
       - name: coturn for the TURN relay-policy test (infra/calls/turnserver.conf)
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends coturn
       - run: pnpm test:integration
@@ -141,7 +141,7 @@ jobs:
         run: |
           python3 -m pip install --user "moto[server]==5.2.3"
           nohup ~/.local/bin/moto_server -H 127.0.0.1 -p 29500 > moto.log 2>&1 &
-          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:29500/ > /dev/null && break; sleep 1; done
+          for _ in $(seq 1 30); do curl -fsS http://127.0.0.1:29500/ > /dev/null && break; sleep 1; done
       - name: Call infrastructure (coturn; LiveKit built from its pinned, checksum-verified Go module)
         env:
           LIVEKIT_VERSION: v1.13.9
@@ -162,8 +162,73 @@ jobs:
       - name: Release manifest of the built app verifies (signature and every file)
         run: |
           pnpm --filter @tessera/web exec vite preview --port 4173 --strictPort > preview.log 2>&1 &
-          for i in $(seq 1 30); do curl -fsS http://localhost:4173/release.json > /dev/null && break; sleep 1; done
+          for _ in $(seq 1 30); do curl -fsS http://localhost:4173/release.json > /dev/null && break; sleep 1; done
           node apps/web/scripts/verify-release.mjs http://localhost:4173
+
+  deploy-config:
+    name: Images, Kubernetes manifests, alert rules
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @tessera/k8s... --filter @tessera/admin build
+      - name: Render both environments and validate against the Kubernetes schemas
+        run: |
+          pip install kubernetes-validate==1.37.0 actionlint-py==1.7.12.25
+          actionlint .github/workflows/*.yml
+          for env in staging production; do
+            pnpm --filter @tessera/k8s render --values "test-values/$env.json" --out "$RUNNER_TEMP/k8s"
+            kubernetes-validate --strict "$RUNNER_TEMP/k8s/$env-1-prepare.yaml" "$RUNNER_TEMP/k8s/$env-2-workloads.yaml"
+          done
+      - name: Alert rules (promtool, release binary, checksum verified)
+        env:
+          PROMETHEUS_VERSION: 3.5.0
+        run: |
+          base="https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}"
+          archive="prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz"
+          curl -sSfL -o "$archive" "$base/$archive"
+          curl -sSfL -o sha256sums.txt "$base/sha256sums.txt"
+          grep " $archive\$" sha256sums.txt | sha256sum --check --strict
+          tar -xzf "$archive" --strip-components=1 "prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool"
+          ./promtool check rules infra/monitoring/alerts.yaml
+      - name: Build the service images and run them read-only as non-root
+        run: |
+          docker build -f infra/images/api.Dockerfile -t tessera-api:ci .
+          docker build -f infra/images/realtime.Dockerfile -t tessera-realtime:ci .
+          docker build -f infra/images/admin-web.Dockerfile -t tessera-admin-web:ci .
+          # The isolated fetcher needs no dependencies, so it proves the API image boots.
+          docker run -d --name fetcher --read-only --user 65532:65532 --cap-drop ALL \
+            -e FETCHER_TOKEN="$(openssl rand -hex 32)" -p 9090:9090 tessera-api:ci dist/fetcher-server.js
+          docker run -d --name admin-web --read-only --tmpfs /tmp --user 65532:65532 --cap-drop ALL \
+            -p 8081:8081 -p 8080:8080 tessera-admin-web:ci
+          for url in http://127.0.0.1:9090/readyz http://127.0.0.1:8081/readyz; do
+            for _ in $(seq 1 30); do curl -sf "$url" && break; sleep 1; done
+            curl -sf "$url"
+          done
+          curl -sfI http://127.0.0.1:8080/ | grep -i '^content-security-policy:'
+          docker run --rm --entrypoint /nodejs/bin/node tessera-realtime:ci -e "import('/app/dist/config.js').then(() => process.exit(0))"
+
+  rust-supply-chain:
+    name: Crypto core dependencies (cargo deny)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: cargo deny (advisories, licenses, bans, sources; packages/crypto-core/deny.toml)
+        working-directory: packages/crypto-core
+        run: |
+          cargo install cargo-deny --version 0.20.2 --locked
+          cargo deny --locked check
 
   secrets:
     name: Secret scan

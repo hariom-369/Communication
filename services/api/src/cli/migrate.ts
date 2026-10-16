@@ -1,13 +1,12 @@
-import { createLogger } from '@tessera/platform';
+import { createLogger, loadMigrations, migrate } from '@tessera/platform';
 
-import { loadApiConfig } from '../config.js';
+import { loadMigrateConfig } from '../migrate-config.js';
 import { MIGRATIONS_DIR } from '../paths.js';
 import { createDatabase } from '../platform/db.js';
-import { loadMigrations, migrate } from '@tessera/platform';
 
 /** Pre-deploy migration job entry point (docs/deployment.md §3). */
 async function main(): Promise<number> {
-  const config = loadApiConfig(process.env);
+  const config = loadMigrateConfig(process.env);
   const logger = createLogger({
     service: 'api-migrate',
     level: config.LOG_LEVEL,

@@ -108,6 +108,8 @@ export async function startIntegrationApp(
     ticketsPerSecond?: number;
     /** Breached-password mirror (range API); default none. */
     pwnedPasswordsUrl?: string;
+    /** Isolated link-preview fetcher (fetcher-app.ts); default in-process fetching. */
+    linkPreviewFetcher?: { url: string; token: string };
   } = {},
 ): Promise<IntegrationApp> {
   const adminUrl = requireEnv('TEST_DATABASE_URL');
@@ -191,6 +193,12 @@ export async function startIntegrationApp(
       ...(options.pwnedPasswordsUrl === undefined
         ? {}
         : { PWNED_PASSWORDS_URL: options.pwnedPasswordsUrl }),
+      ...(options.linkPreviewFetcher === undefined
+        ? {}
+        : {
+            LINK_PREVIEW_FETCHER_URL: options.linkPreviewFetcher.url,
+            LINK_PREVIEW_FETCHER_TOKEN: options.linkPreviewFetcher.token,
+          }),
       ...(options.payments === undefined ? {} : billingTestConfig(options.payments)),
     },
     { db, valkey, mailer, logger, media, moderationKey },

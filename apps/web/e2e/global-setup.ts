@@ -1,7 +1,16 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createECDH, randomBytes } from 'node:crypto';
-import { createWriteStream, existsSync, readFileSync } from 'node:fs';
+import {
+  chmodSync,
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer, type Server } from 'node:http';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -124,6 +133,36 @@ async function waitFor(url: string, timeoutMs = 30_000): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw new Error(`Timed out waiting for ${url}`);
+}
+
+function startNginx(webDir: string): ChildProcess {
+  const work = mkdtempSync(path.join(tmpdir(), 'tessera-nginx-'));
+  // Started as root (CI containers), nginx's workers run as an unprivileged user that must be
+  // able to buffer request bodies here.
+  mkdirSync(path.join(work, 'tmp'), { mode: 0o777 });
+  chmodSync(work, 0o755);
+  chmodSync(path.join(work, 'tmp'), 0o777);
+  const conf = path.join(work, 'nginx.conf');
+  const rendered = spawnSync(
+    'node',
+    [
+      path.join(ROOT, 'infra/images/nginx/render.mjs'),
+      '--app=web',
+      `--headers=${path.join(webDir, 'dist/security-headers.json')}`,
+      `--root=${path.join(webDir, 'dist')}`,
+      `--sfu-upstream=127.0.0.1:${SFU_PORT}`,
+      `--proxy=/api/=127.0.0.1:${API_PORT}`,
+      '--proxy=/rt/=127.0.0.1:28081',
+      '--port=4173',
+      '--health-port=28092',
+      `--pid=${path.join(work, 'nginx.pid')}`,
+      `--temp=${path.join(work, 'tmp')}`,
+    ],
+    { encoding: 'utf8' },
+  );
+  if (rendered.status !== 0) throw new Error(`nginx config: ${rendered.stderr}`);
+  writeFileSync(conf, rendered.stdout);
+  return start('nginx', ['-c', conf, '-e', 'stderr', '-g', 'daemon off;'], {}, webDir);
 }
 
 function start(
@@ -385,17 +424,24 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   if (!existsSync(path.join(webDir, 'dist', 'index.html'))) {
     throw new Error('Run `pnpm build` before the E2E tests.');
   }
-  const web = start(
-    'pnpm',
-    ['exec', 'vite', 'preview', '--host', 'localhost'],
-    {
-      TESSERA_API_URL: `http://127.0.0.1:${API_PORT}`,
-      TESSERA_REALTIME_URL: 'ws://127.0.0.1:28081',
-      TESSERA_MEDIA_ORIGIN: s3.origin,
-      TESSERA_SFU_URL: `ws://127.0.0.1:${SFU_PORT}`,
-    },
-    webDir,
-  );
+  // E2E_WEB_SERVER=nginx serves the same build through the production web server's generated
+  // configuration (infra/images/nginx) instead of `vite preview`. The build must then have been
+  // made with TESSERA_MEDIA_ORIGIN set to the test store, since nginx sends the headers the build
+  // wrote.
+  const web =
+    process.env['E2E_WEB_SERVER'] === 'nginx'
+      ? startNginx(webDir)
+      : start(
+          'pnpm',
+          ['exec', 'vite', 'preview', '--host', 'localhost'],
+          {
+            TESSERA_API_URL: `http://127.0.0.1:${API_PORT}`,
+            TESSERA_REALTIME_URL: 'ws://127.0.0.1:28081',
+            TESSERA_MEDIA_ORIGIN: s3.origin,
+            TESSERA_SFU_URL: `ws://127.0.0.1:${SFU_PORT}`,
+          },
+          webDir,
+        );
   await waitFor('http://localhost:4173/');
 
   return async () => {

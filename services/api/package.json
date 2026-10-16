@@ -3,6 +3,20 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "default": "./dist/config.js"
+    },
+    "./migrate-config": {
+      "types": "./dist/migrate-config.d.ts",
+      "default": "./dist/migrate-config.js"
+    },
+    "./fetcher-config": {
+      "types": "./dist/fetcher-config.d.ts",
+      "default": "./dist/fetcher-config.js"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",

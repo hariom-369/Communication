@@ -99,6 +99,24 @@ function serviceWorkerBuild(outDir: string, write: boolean): InlineConfig {
   };
 }
 
+/**
+ * Writes the production response headers next to the build (`dist/security-headers.json`), so
+ * the server that serves the bundle in production (infra/images, nginx) sends exactly these.
+ */
+function securityHeaders(): Plugin {
+  return {
+    name: 'tessera-security-headers',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'security-headers.json',
+        source: `${JSON.stringify(productionHeaders, null, 2)}\n`,
+      });
+    },
+  };
+}
+
 function serviceWorker(): Plugin {
   let outDir = 'dist';
   let isBuild = false;
@@ -141,7 +159,7 @@ function serviceWorker(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), serviceWorker()],
+  plugins: [react(), serviceWorker(), securityHeaders()],
   worker: { format: 'es' },
   build: {
     sourcemap: true,

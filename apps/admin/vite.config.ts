@@ -1,5 +1,5 @@
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 
 /**
  * The admin console (docs/admin.md, ADR-050): a static bundle on its own origin, separate from
@@ -38,10 +38,28 @@ const productionHeaders = {
     'camera=(), microphone=(), display-capture=(), geolocation=(), payment=(), usb=(), clipboard-read=()',
 };
 
+/**
+ * Writes the production response headers next to the build (`dist/security-headers.json`), so
+ * the server that serves the bundle in production (infra/images, nginx) sends exactly these.
+ */
+function securityHeaders(): Plugin {
+  return {
+    name: 'tessera-security-headers',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'security-headers.json',
+        source: `${JSON.stringify(productionHeaders, null, 2)}\n`,
+      });
+    },
+  };
+}
+
 const proxy = { '/admin/v1': { target: ADMIN_API_TARGET, changeOrigin: false, xfwd: true } };
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), securityHeaders()],
   build: {
     sourcemap: true,
     modulePreload: { polyfill: false }, // the polyfill injects inline script

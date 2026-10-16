@@ -1,0 +1,52 @@
+# cargo-deny policy for the crypto core (security review F-06; docs/security.md §10).
+# CI runs `cargo deny check` (advisories need the RustSec database, fetched there); locally
+# `cargo deny check licenses bans sources` works offline once the index is cached.
+
+[graph]
+all-features = true
+
+[advisories]
+# Every RustSec advisory fails the check, unmaintained crates included; an exception needs an
+# entry here with the advisory id and the reason, reviewed like code.
+version = 2
+yanked = "deny"
+unmaintained = "all"
+ignore = []
+
+[licenses]
+version = 2
+# Permissive licenses and MPL-2.0 (file-level copyleft, compatible with shipping the WASM build).
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Unlicense",
+]
+confidence-threshold = 0.9
+
+[licenses.private]
+# Our own crate (publish = false) is not a dependency.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = false
+# Cryptography comes from the audited stacks the design names (crypto-design.md); these would
+# be a second, unreviewed implementation of the same primitives.
+deny = [
+  { crate = "openssl", reason = "RustCrypto and OpenMLS's providers only (crypto-design.md)" },
+  { crate = "openssl-sys", reason = "RustCrypto and OpenMLS's providers only (crypto-design.md)" },
+  { crate = "ring", reason = "one implementation per primitive; RustCrypto is the one in use" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

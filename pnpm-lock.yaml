@@ -194,6 +194,22 @@ importers:
         specifier: 3.19.14
         version: 3.19.14
 
+  infra/k8s:
+    dependencies:
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+    devDependencies:
+      '@tessera/api':
+        specifier: workspace:*
+        version: link:../../services/api
+      '@tessera/realtime':
+        specifier: workspace:*
+        version: link:../../services/realtime
+
   packages/crypto-core: {}
 
   packages/platform:

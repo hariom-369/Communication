@@ -1,0 +1,16 @@
+# Keep build contexts small and free of secrets and local state.
+**/node_modules
+**/dist
+**/.turbo
+**/test-results
+**/playwright-report
+**/target
+.git
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.*.example
+*.log
+# The web images copy the builds (made by the release workflow before `docker build`).
+!apps/web/dist
+!apps/admin/dist

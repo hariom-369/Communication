@@ -3,6 +3,7 @@ packages:
   - 'services/*'
   - 'apps/*'
   - 'tests/*'
+  - 'infra/k8s'
 
 # Supply-chain control: dependency install scripts are blocked unless listed here.
 onlyBuiltDependencies: []

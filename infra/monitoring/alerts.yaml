@@ -1,0 +1,157 @@
+# Prometheus alerting and recording rules for the SLOs in docs/observability.md §3.
+# Loaded as a PrometheusRule by infra/k8s (render) and directly checkable with `promtool check
+# rules`. Every alert names a severity (page: wake someone; ticket: next working hours) and a
+# runbook under ops/runbooks/ — infra/k8s/src/alerts.test.ts checks both, and that every metric
+# used here is one the services export.
+groups:
+  - name: tessera-slo-recording
+    interval: 30s
+    rules:
+      # Error ratios (5xx / all) of message submission and of the whole user API.
+      - record: tessera:send_errors:ratio_rate5m
+        expr: sum(rate(tessera_http_requests_total{service="api",route="messaging.send",status_class="5xx"}[5m])) / clamp_min(sum(rate(tessera_http_requests_total{service="api",route="messaging.send"}[5m])), 1e-9)
+      - record: tessera:send_errors:ratio_rate30m
+        expr: sum(rate(tessera_http_requests_total{service="api",route="messaging.send",status_class="5xx"}[30m])) / clamp_min(sum(rate(tessera_http_requests_total{service="api",route="messaging.send"}[30m])), 1e-9)
+      - record: tessera:send_errors:ratio_rate1h
+        expr: sum(rate(tessera_http_requests_total{service="api",route="messaging.send",status_class="5xx"}[1h])) / clamp_min(sum(rate(tessera_http_requests_total{service="api",route="messaging.send"}[1h])), 1e-9)
+      - record: tessera:send_errors:ratio_rate6h
+        expr: sum(rate(tessera_http_requests_total{service="api",route="messaging.send",status_class="5xx"}[6h])) / clamp_min(sum(rate(tessera_http_requests_total{service="api",route="messaging.send"}[6h])), 1e-9)
+      - record: tessera:api_errors:ratio_rate5m
+        expr: sum(rate(tessera_http_requests_total{service="api",status_class="5xx"}[5m])) / clamp_min(sum(rate(tessera_http_requests_total{service="api"}[5m])), 1e-9)
+      - record: tessera:api_errors:ratio_rate1h
+        expr: sum(rate(tessera_http_requests_total{service="api",status_class="5xx"}[1h])) / clamp_min(sum(rate(tessera_http_requests_total{service="api"}[1h])), 1e-9)
+      - record: tessera:send_latency:p95_5m
+        expr: histogram_quantile(0.95, sum by (le) (rate(tessera_http_request_duration_seconds_bucket{service="api",route="messaging.send"}[5m])))
+
+  - name: tessera-slo
+    rules:
+      # Message submit availability 99.9 % (budget 0.1 %): 2 % of the 30-day budget in 1 h pages
+      # (burn rate 14.4), 5 % in 6 h opens a ticket (burn rate 6).
+      - alert: MessageSubmitErrorBudgetBurnFast
+        expr: tessera:send_errors:ratio_rate1h > 14.4 * 0.001 and tessera:send_errors:ratio_rate5m > 14.4 * 0.001
+        for: 2m
+        labels: { severity: page }
+        annotations:
+          summary: Message sends are failing fast enough to spend 2 % of the monthly error budget in an hour.
+          runbook_url: ops/runbooks/api-errors.md
+      - alert: MessageSubmitErrorBudgetBurnSlow
+        expr: tessera:send_errors:ratio_rate6h > 6 * 0.001 and tessera:send_errors:ratio_rate30m > 6 * 0.001
+        for: 15m
+        labels: { severity: ticket }
+        annotations:
+          summary: Message sends are failing fast enough to spend 5 % of the monthly error budget in six hours.
+          runbook_url: ops/runbooks/api-errors.md
+      - alert: MessageSubmitLatencyHigh
+        expr: tessera:send_latency:p95_5m > 0.4
+        for: 10m
+        labels: { severity: page }
+        annotations:
+          summary: Message submit p95 latency is above 400 ms (SLO 250 ms).
+          runbook_url: ops/runbooks/api-errors.md
+      - alert: ApiErrorBudgetBurnFast
+        expr: tessera:api_errors:ratio_rate1h > 14.4 * 0.001 and tessera:api_errors:ratio_rate5m > 14.4 * 0.001
+        for: 2m
+        labels: { severity: page }
+        annotations:
+          summary: The user API answers 5xx fast enough to spend 2 % of the monthly error budget in an hour.
+          runbook_url: ops/runbooks/api-errors.md
+      # Realtime connection success 99.5 %: upgrades refused because pods are full or draining
+      # count as failures (a pod crash or a too-small tier, docs/capacity.md §4).
+      - alert: RealtimeConnectionSuccessLow
+        expr: sum(rate(tessera_realtime_upgrades_total{result="accepted"}[5m])) / clamp_min(sum(rate(tessera_realtime_upgrades_total{result=~"accepted|full|draining"}[5m])), 1e-9) < 0.98
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: Fewer than 98 % of WebSocket upgrades are accepted.
+          runbook_url: ops/runbooks/realtime.md
+      - alert: RealtimeSlowConsumersHigh
+        expr: sum(rate(tessera_realtime_closes_total{code="1013"}[10m])) > 1
+        for: 10m
+        labels: { severity: ticket }
+        annotations:
+          summary: More than one connection per second is closed as a slow consumer.
+          runbook_url: ops/runbooks/realtime.md
+      - alert: NotifyQueueAgeHigh
+        expr: max(tessera_notify_queue_oldest_due_seconds) > 120
+        for: 10m
+        labels: { severity: ticket }
+        annotations:
+          summary: Due pushes have waited more than 2 minutes (SLO 30 s p95).
+          runbook_url: ops/runbooks/background-jobs.md
+
+  - name: tessera-jobs
+    rules:
+      - alert: BackgroundJobFailing
+        expr: sum by (job) (increase(tessera_job_runs_total{result="failed"}[15m])) > 2
+        labels: { severity: ticket }
+        annotations:
+          summary: Background job {{ $labels.job }} failed more than twice in 15 minutes.
+          runbook_url: ops/runbooks/background-jobs.md
+      # Singleton jobs run on one pod at a time (advisory lock), so the cluster-wide maximum of
+      # the last success is what counts. Hourly jobs get a longer threshold.
+      - alert: BackgroundJobStalled
+        expr: time() - max by (job) (tessera_job_last_success_timestamp_seconds{job!="notify_sweeper"}) > 1800
+        labels: { severity: page }
+        annotations:
+          summary: Background job {{ $labels.job }} has not succeeded for 30 minutes.
+          runbook_url: ops/runbooks/background-jobs.md
+      - alert: HourlyJobStalled
+        expr: time() - max by (job) (tessera_job_last_success_timestamp_seconds{job="notify_sweeper"}) > 3 * 3600
+        labels: { severity: ticket }
+        annotations:
+          summary: The hourly notification sweeper has not succeeded for 3 hours.
+          runbook_url: ops/runbooks/background-jobs.md
+
+  - name: tessera-degraded-controls
+    rules:
+      # Controls that fail open or degrade must be visible when they do (docs/security/review.md).
+      - alert: RateLimitStoreUnavailable
+        expr: sum(rate(tessera_rate_limit_store_errors_total[5m])) > 0
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: Rate limits are decided without Valkey (sign-in fails closed meanwhile).
+          runbook_url: ops/runbooks/valkey-loss.md
+      - alert: BreachedPasswordCheckUnavailable
+        expr: sum(increase(tessera_breach_check_unavailable_total[15m])) > 0
+        labels: { severity: ticket }
+        annotations:
+          summary: New passwords were accepted without the breached-password check (mirror unreachable).
+          runbook_url: ops/runbooks/breached-password-mirror.md
+      - alert: LinkFetcherUnauthorizedRequests
+        expr: sum(increase(tessera_fetcher_requests_total{result="unauthorized"}[10m])) > 0
+        labels: { severity: ticket }
+        annotations:
+          summary: The link-preview fetcher refused requests without the API's token.
+          runbook_url: ops/runbooks/link-fetcher.md
+      - alert: LinkPreviewsUnavailable
+        expr: sum(rate(tessera_link_previews_total{result="unavailable"}[10m])) > 0.2 * sum(rate(tessera_link_previews_total{result=~"fetched|refused|unavailable"}[10m]))
+        for: 10m
+        labels: { severity: ticket }
+        annotations:
+          summary: More than 20 % of link previews fail because the fetcher service cannot be reached.
+          runbook_url: ops/runbooks/link-fetcher.md
+
+  - name: tessera-processes
+    rules:
+      - alert: ServiceTargetDown
+        expr: up{namespace="tessera"} == 0
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: '{{ $labels.pod }} has not answered a metrics scrape for 5 minutes.'
+          runbook_url: ops/runbooks/deploy-rollback.md
+      - alert: EventLoopLagHigh
+        expr: max by (pod) (tessera_nodejs_eventloop_lag_p99_seconds{namespace="tessera"}) > 0.5
+        for: 10m
+        labels: { severity: ticket }
+        annotations:
+          summary: '{{ $labels.pod }} event loop p99 lag above 500 ms.'
+          runbook_url: ops/runbooks/api-errors.md
+      - alert: FileDescriptorsNearLimit
+        expr: max by (pod) (tessera_process_open_fds{namespace="tessera"} / tessera_process_max_fds{namespace="tessera"}) > 0.8
+        for: 10m
+        labels: { severity: ticket }
+        annotations:
+          summary: '{{ $labels.pod }} uses more than 80 % of its file descriptors.'
+          runbook_url: ops/runbooks/realtime.md

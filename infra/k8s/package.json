@@ -1,0 +1,21 @@
+{
+  "name": "@tessera/k8s",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Kubernetes manifests for Tessera, generated per environment from typed definitions (docs/deployment.md \u00a74).",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "render": "node dist/cli.js"
+  },
+  "dependencies": {
+    "yaml": "2.9.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@tessera/api": "workspace:*",
+    "@tessera/realtime": "workspace:*"
+  }
+}
