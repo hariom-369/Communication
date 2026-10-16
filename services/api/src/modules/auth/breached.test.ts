@@ -11,14 +11,16 @@ const sha1 = (value: string) =>
 
 function checker(respond: (url: string) => Response | Promise<Response>) {
   const destination = new MemoryDestination();
+  const onUnavailable = vi.fn();
   // The checker always passes the URL as a string.
   const fetchMock = vi.fn((input: string) => Promise.resolve(respond(input)));
   const breached = new RangeApiBreachedPasswords({
     baseUrl: 'https://pwned.internal/',
     logger: createLogger({ service: 'test', level: 'info', errorDetails: false, destination }),
     fetch: fetchMock as unknown as typeof fetch,
+    onUnavailable,
   });
-  return { breached, fetchMock, destination };
+  return { breached, fetchMock, destination, onUnavailable };
 }
 
 describe('breached-password check (range API mirror)', () => {
@@ -42,8 +44,11 @@ describe('breached-password check (range API mirror)', () => {
   });
 
   it('fails open (and says so in the log) when the mirror cannot answer', async () => {
-    const { breached, destination } = checker(() => new Response('', { status: 503 }));
+    const { breached, destination, onUnavailable } = checker(
+      () => new Response('', { status: 503 }),
+    );
     expect(await breached.isBreached('anything')).toBe(false);
+    expect(onUnavailable).toHaveBeenCalledTimes(1);
     expect(destination.lines.some((line) => line.includes('auth.breach_check_unavailable'))).toBe(
       true,
     );

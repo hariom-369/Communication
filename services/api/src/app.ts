@@ -1,7 +1,7 @@
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import swagger from '@fastify/swagger';
-import type { Logger } from '@tessera/platform';
+import type { Logger, Registry } from '@tessera/platform';
 import { newId } from '@tessera/shared';
 import Fastify, { type FastifyInstance } from 'fastify';
 import {
@@ -12,6 +12,7 @@ import {
 
 import { CSRF_HEADER, installCsrfProtection } from './platform/http/csrf.js';
 import { installErrorHandling } from './platform/http/errors.js';
+import { installHttpMetrics } from './platform/http/metrics.js';
 import { installRequestLogging } from './platform/http/request-logging.js';
 import {
   registerRoutes,
@@ -35,6 +36,8 @@ export interface AppOptions {
   readonly standing?: AccountStandingCheck;
   /** Per-address flood guard, requests per minute (default 1200). */
   readonly ipFloodLimitPerMinute?: number;
+  /** Request metrics are recorded into this registry when given. */
+  readonly metrics?: Registry;
 }
 
 /** Builds the HTTP application. No I/O happens here; dependencies are injected. */
@@ -70,6 +73,7 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   installErrorHandling(app, options.logger);
   installSecurityHeaders(app, { hsts: options.hsts });
   installRequestLogging(app, options.logger);
+  if (options.metrics !== undefined) installHttpMetrics(app, options.metrics);
 
   await app.register(cors, {
     origin: [...options.allowedOrigins],

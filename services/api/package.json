@@ -13,6 +13,7 @@
     "staff": "node dist/cli/staff.js",
     "admin": "node dist/cli/admin.js",
     "start:admin": "node dist/admin-server.js",
+    "start:fetcher": "node dist/fetcher-server.js",
     "start": "node dist/server.js",
     "security-matrix": "node dist/cli/security-matrix.js ../../docs/security/route-matrix.md"
   },

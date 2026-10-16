@@ -23,6 +23,17 @@ export {
   type LoggerOptions,
 } from './logger.js';
 export {
+  Counter,
+  Gauge,
+  Histogram,
+  LATENCY_BUCKETS,
+  Registry,
+  createMetricsRegistry,
+  jobMetrics,
+  type JobMetrics,
+  type JobResult,
+} from './metrics.js';
+export {
   MigrationError,
   loadMigrations,
   migrate,

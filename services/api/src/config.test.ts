@@ -31,6 +31,8 @@ const production = {
   // Shapes only (not real keys): franking key ring, moderation HPKE key pair.
   FRANKING_KEYS: `f1:${Buffer.alloc(32, 7).toString('base64')}`,
   PWNED_PASSWORDS_URL: 'https://pwned.internal.example',
+  LINK_PREVIEW_FETCHER_URL: 'http://link-fetcher.tessera.svc.cluster.local:8080',
+  LINK_PREVIEW_FETCHER_TOKEN: 'x'.repeat(43),
   MODERATION_HPKE_PUBLIC_KEY: Buffer.alloc(65, 4).toString('base64url'),
   MODERATION_HPKE_PRIVATE_KEY: Buffer.alloc(32, 9).toString('base64url'),
 };
@@ -76,6 +78,18 @@ describe('api config', () => {
   it('requires the breached-password check in production', () => {
     const { PWNED_PASSWORDS_URL: _url, ...rest } = production;
     expect(issueKeys(rest)).toEqual(['PWNED_PASSWORDS_URL']);
+  });
+
+  it('requires the isolated link-preview fetcher in production, with its token', () => {
+    const { LINK_PREVIEW_FETCHER_URL: _url, LINK_PREVIEW_FETCHER_TOKEN: _t, ...rest } = production;
+    expect(issueKeys(rest)).toEqual(['LINK_PREVIEW_FETCHER_URL']);
+    const { LINK_PREVIEW_FETCHER_TOKEN: _token, ...noToken } = production;
+    expect(issueKeys({ ...noToken, NODE_ENV: 'development' })).toEqual([
+      'LINK_PREVIEW_FETCHER_TOKEN',
+    ]);
+    expect(issueKeys({ ...production, LINK_PREVIEW_FETCHER_TOKEN: 'short' })).toEqual([
+      'LINK_PREVIEW_FETCHER_TOKEN',
+    ]);
   });
 
   it('rejects insecure production settings', () => {

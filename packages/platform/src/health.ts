@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import type { Registry } from 'prom-client';
 
 import type { Logger } from './logger.js';
 
@@ -20,6 +21,8 @@ export interface HealthServerOptions {
   state: HealthState;
   logger: Logger;
   checkTimeoutMs: number;
+  /** Served at `/metrics` in the Prometheus text format when given. */
+  metrics?: Registry;
 }
 
 type CheckStatus = 'ok' | 'fail' | 'timeout';
@@ -51,6 +54,15 @@ export function createHealthServer(options: HealthServerOptions): FastifyInstanc
       .code(ok ? 200 : 503)
       .send({ status: ok ? 'ok' : 'unavailable', checks: Object.fromEntries(results) });
   });
+
+  const registry = options.metrics;
+  if (registry !== undefined)
+    app.get('/metrics', async (_request, reply) =>
+      reply
+        .code(200)
+        .header('content-type', registry.contentType)
+        .send(await registry.metrics()),
+    );
 
   return app;
 }

@@ -1,4 +1,10 @@
-import { createHealthServer, createLifecycle, createLogger } from '@tessera/platform';
+import {
+  createHealthServer,
+  createLifecycle,
+  createLogger,
+  createMetricsRegistry,
+  jobMetrics,
+} from '@tessera/platform';
 
 import { buildApp } from './app.js';
 import { composeModules } from './compose.js';
@@ -15,6 +21,7 @@ import {
   ResilientRateLimiter,
   ValkeyRateLimiter,
 } from './platform/rate-limit.js';
+import { apiMetrics } from './platform/service-metrics.js';
 import { createValkey, valkeyHealthCheck } from './platform/valkey.js';
 
 async function main(): Promise<void> {
@@ -29,6 +36,9 @@ async function main(): Promise<void> {
     drainDelayMs: config.SHUTDOWN_DRAIN_MS,
     shutdownTimeoutMs: config.SHUTDOWN_TIMEOUT_MS,
   });
+  const registry = createMetricsRegistry('api');
+  const metrics = apiMetrics(registry);
+  const jobs = jobMetrics(registry);
 
   const database = createDatabase({
     connectionString: config.DATABASE_URL,
@@ -60,6 +70,7 @@ async function main(): Promise<void> {
     new ValkeyRateLimiter(valkey, `${config.VALKEY_KEY_PREFIX}:rl`),
     new InProcessRateLimiter(),
     (error) => {
+      metrics.rateLimitStoreErrors.inc();
       logger.warn('rate_limit.store_unavailable', logger.errorFields(error));
     },
   );
@@ -74,6 +85,7 @@ async function main(): Promise<void> {
     state: lifecycle,
     logger,
     checkTimeoutMs: 2_000,
+    metrics: registry,
   });
   lifecycle.onShutdown({ name: 'health', run: () => health.close() });
 
@@ -115,6 +127,7 @@ async function main(): Promise<void> {
     logger,
     media,
     moderationKey,
+    metrics,
   });
 
   const sweeper = startSingletonTask({
@@ -123,6 +136,7 @@ async function main(): Promise<void> {
     intervalMs: 5 * 60_000,
     pool: database.pool,
     logger,
+    metrics: jobs,
     task: async () => {
       await modules.messaging.sweep();
       await modules.keys.sweep();
@@ -140,6 +154,7 @@ async function main(): Promise<void> {
     intervalMs: config.CHANNEL_SCHEDULER_INTERVAL_MS,
     pool: database.pool,
     logger,
+    metrics: jobs,
     task: async () => {
       await modules.channels.runDue();
       if (Date.now() - lastRollUp >= 5 * 60_000) {
@@ -157,6 +172,7 @@ async function main(): Promise<void> {
     intervalMs: config.CALL_SWEEP_INTERVAL_MS,
     pool: database.pool,
     logger,
+    metrics: jobs,
     task: async () => {
       await modules.calls.sweep();
     },
@@ -170,11 +186,13 @@ async function main(): Promise<void> {
     intervalMs: config.NOTIFY_INTERVAL_MS,
     pool: database.pool,
     logger,
+    metrics: jobs,
     task: async () => {
       // Keep going while full batches come back, so a burst drains without waiting a tick each.
       for (let round = 0; round < 10; round += 1) {
         if ((await modules.notifications.drain()) < 200) break;
       }
+      metrics.notifyQueueAge.set(await modules.notifications.oldestDueSeconds());
     },
   });
   lifecycle.onShutdown({ name: 'notify_worker', run: () => notifyWorker.stop() });
@@ -184,6 +202,7 @@ async function main(): Promise<void> {
     intervalMs: 3_600_000,
     pool: database.pool,
     logger,
+    metrics: jobs,
     task: async () => {
       await modules.notifications.sweep();
     },
@@ -197,6 +216,7 @@ async function main(): Promise<void> {
     intervalMs: config.MODERATION_SWEEP_INTERVAL_MS,
     pool: database.pool,
     logger,
+    metrics: jobs,
     task: async () => {
       await modules.moderation.sweep();
     },
@@ -214,6 +234,7 @@ async function main(): Promise<void> {
     sessions: modules.sessions,
     standing: modules.moderation,
     ipFloodLimitPerMinute: config.IP_FLOOD_LIMIT_PER_MINUTE,
+    metrics: registry,
   });
   lifecycle.onShutdown({ name: 'http', run: () => app.close() });
 

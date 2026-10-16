@@ -1,6 +1,6 @@
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
-import type { Logger } from '@tessera/platform';
+import type { Logger, Registry } from '@tessera/platform';
 import { newId } from '@tessera/shared';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
@@ -13,6 +13,7 @@ import {
 } from './platform/http/admin-routes.js';
 import { CSRF_HEADER, installCsrfProtection } from './platform/http/csrf.js';
 import { installErrorHandling } from './platform/http/errors.js';
+import { installHttpMetrics } from './platform/http/metrics.js';
 import { installRequestLogging } from './platform/http/request-logging.js';
 import { installSecurityHeaders } from './platform/http/security-headers.js';
 import type { RateLimiter } from './platform/rate-limit.js';
@@ -27,6 +28,8 @@ export interface AdminAppOptions {
   readonly routes: readonly AdminRouteDefinition[];
   readonly sessions: AdminAuthenticator;
   readonly audit: AdminAuditSink;
+  /** Request metrics are recorded into this registry when given. */
+  readonly metrics?: Registry;
 }
 
 /**
@@ -52,6 +55,7 @@ export async function buildAdminApp(options: AdminAppOptions): Promise<FastifyIn
   installErrorHandling(app, options.logger);
   installSecurityHeaders(app, { hsts: options.hsts });
   installRequestLogging(app, options.logger);
+  if (options.metrics !== undefined) installHttpMetrics(app, options.metrics);
   await app.register(cors, {
     origin: [...options.allowedOrigins],
     credentials: true,

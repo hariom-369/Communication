@@ -1,6 +1,11 @@
 import { createServer } from 'node:http';
 
-import { createHealthServer, createLifecycle, createLogger } from '@tessera/platform';
+import {
+  createHealthServer,
+  createLifecycle,
+  createLogger,
+  createMetricsRegistry,
+} from '@tessera/platform';
 import { Redis } from 'ioredis';
 import pg from 'pg';
 
@@ -54,6 +59,7 @@ async function main(): Promise<void> {
     },
   });
 
+  const metrics = createMetricsRegistry('realtime');
   const gateway = new RealtimeGateway({
     config: {
       allowedOrigins: config.ALLOWED_ORIGINS,
@@ -69,6 +75,7 @@ async function main(): Promise<void> {
     subscriber,
     db,
     logger,
+    metrics,
   });
 
   const http = createServer((_request, response) => {
@@ -106,6 +113,7 @@ async function main(): Promise<void> {
     state: lifecycle,
     logger,
     checkTimeoutMs: 2000,
+    metrics,
   });
   lifecycle.onShutdown({ name: 'health', run: () => health.close() });
 

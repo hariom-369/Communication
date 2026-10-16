@@ -68,6 +68,11 @@ const schema = z
     LISTEN_BACKLOG: env.positiveInt(4096),
     // Mirror of the Pwned Passwords range API (docs/authentication.md §2.1); required in production.
     PWNED_PASSWORDS_URL: env.url(['https:', 'http:']).optional(),
+    // The isolated link-preview fetcher (fetcher-server.ts, security review F-05); required in
+    // production, where the API must not connect to user-supplied URLs itself. Cluster-internal
+    // (the service mesh adds mTLS), authenticated with a shared bearer token.
+    LINK_PREVIEW_FETCHER_URL: env.url(['https:', 'http:']).optional(),
+    LINK_PREVIEW_FETCHER_TOKEN: z.string().min(32).max(256).optional(),
     // Realtime tickets per second across the cluster (0 = unlimited, the default). Off by default
     // because the load tests showed it does not protect connected users when a realtime pod
     // crashes — a refused ticket costs the API about as much as a granted one — while it slows
@@ -361,7 +366,22 @@ const schema = z
         message: 'Admin sessions last at most 8 hours, idle at most 30 minutes (docs/admin.md §1)',
       });
     }
+    if (
+      config.LINK_PREVIEW_FETCHER_URL !== undefined &&
+      config.LINK_PREVIEW_FETCHER_TOKEN === undefined
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['LINK_PREVIEW_FETCHER_TOKEN'],
+        message: 'Required with LINK_PREVIEW_FETCHER_URL',
+      });
     if (config.NODE_ENV !== 'production') return;
+    if (config.LINK_PREVIEW_FETCHER_URL === undefined)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['LINK_PREVIEW_FETCHER_URL'],
+        message: 'Required in production (link previews are fetched by the isolated fetcher)',
+      });
     if (config.PWNED_PASSWORDS_URL === undefined)
       ctx.addIssue({
         code: 'custom',

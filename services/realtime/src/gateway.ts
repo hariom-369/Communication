@@ -2,7 +2,7 @@ import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { randomUUID } from 'node:crypto';
 
-import type { Logger } from '@tessera/platform';
+import { Counter, Gauge, type Logger, type Registry } from '@tessera/platform';
 import {
   clientFrameSchema,
   MAX_CLIENT_FRAME_BYTES,
@@ -47,6 +47,8 @@ export interface GatewayDeps {
   readonly subscriber: Redis;
   readonly db: pg.Pool;
   readonly logger: Logger;
+  /** Connection, upgrade, close and delivery metrics are recorded here when given. */
+  readonly metrics?: Registry;
 }
 
 /** Application close codes (4000–4999). */
@@ -94,9 +96,11 @@ export class RealtimeGateway {
   /** Cleanups of closed connections still writing to Valkey (awaited before shutdown ends). */
   readonly #cleanups = new Set<Promise<void>>();
   #draining = false;
+  readonly #metrics: GatewayMetrics | null;
 
   constructor(deps: GatewayDeps) {
     this.#deps = deps;
+    this.#metrics = deps.metrics === undefined ? null : gatewayMetrics(deps.metrics, this);
     this.#server = new WebSocketServer({
       noServer: true,
       maxPayload: MAX_CLIENT_FRAME_BYTES,
@@ -127,24 +131,30 @@ export class RealtimeGateway {
       socket.destroy();
     };
     const path = (request.url ?? '').split('?')[0];
+    const upgrades = this.#metrics?.upgrades;
     if (path !== this.#deps.config.path) {
+      upgrades?.inc({ result: 'not_found' });
       reject(404, 'Not Found');
       return;
     }
     if (this.#draining) {
+      upgrades?.inc({ result: 'draining' });
       reject(503, 'Service Unavailable');
       return;
     }
     const origin = request.headers.origin;
     if (origin === undefined || !this.#deps.config.allowedOrigins.includes(origin)) {
+      upgrades?.inc({ result: 'forbidden_origin' });
       this.#deps.logger.warn('realtime.origin_rejected', { ok: false });
       reject(403, 'Forbidden');
       return;
     }
     if (this.#connections.size >= this.#deps.config.maxConnections) {
+      upgrades?.inc({ result: 'full' });
       reject(503, 'Service Unavailable');
       return;
     }
+    upgrades?.inc({ result: 'accepted' });
     this.#server.handleUpgrade(request, socket, head, (ws) => {
       this.#accept(ws);
     });
@@ -186,7 +196,8 @@ export class RealtimeGateway {
         });
       });
     });
-    socket.on('close', () => {
+    socket.on('close', (code: number) => {
+      this.#metrics?.closes.inc({ code: closeLabel(code) });
       clearTimeout(authTimer);
       const cleanup = this.#remove(connection).finally(() => {
         this.#cleanups.delete(cleanup);
@@ -268,6 +279,7 @@ export class RealtimeGateway {
       !(await this.#sessionsValid([claims.data.sessionId], db)).has(claims.data.sessionId)
     ) {
       logger.info('realtime.auth_failed', { ok: false });
+      this.#metrics?.authFailures.inc();
       connection.socket.close(CloseCode.unauthenticated, 'Invalid ticket');
       return;
     }
@@ -372,6 +384,7 @@ export class RealtimeGateway {
       return;
     }
     for (const connection of connections) this.#send(connection, event);
+    this.#metrics?.events.inc({ type: event.type }, connections.size);
   }
 
   #send(connection: Connection, frame: ServerFrame): void {
@@ -569,4 +582,54 @@ function rawToString(data: RawData): string {
   if (Buffer.isBuffer(data)) return data.toString('utf8');
   if (Array.isArray(data)) return Buffer.concat(data).toString('utf8');
   return Buffer.from(data).toString('utf8');
+}
+
+interface GatewayMetrics {
+  readonly upgrades: Counter<'result'>;
+  readonly closes: Counter<'code'>;
+  readonly events: Counter<'type'>;
+  readonly authFailures: Counter;
+}
+
+const KNOWN_CLOSE_CODES = new Set<number>([1000, 1001, 1005, 1006, ...Object.values(CloseCode)]);
+
+/** Close codes as a bounded label: ours and the common protocol ones, everything else `other`. */
+function closeLabel(code: number): string {
+  return KNOWN_CLOSE_CODES.has(code) ? String(code) : 'other';
+}
+
+function gatewayMetrics(registry: Registry, gateway: RealtimeGateway): GatewayMetrics {
+  new Gauge({
+    name: 'tessera_realtime_connections',
+    help: 'Open WebSocket connections on this node (authenticated or not).',
+    registers: [registry],
+    collect() {
+      this.set(gateway.connectionCount);
+    },
+  });
+  return {
+    upgrades: new Counter({
+      name: 'tessera_realtime_upgrades_total',
+      help: 'WebSocket upgrade requests by result.',
+      labelNames: ['result'] as const,
+      registers: [registry],
+    }),
+    closes: new Counter({
+      name: 'tessera_realtime_closes_total',
+      help: 'Closed connections by close code (4429 too many, 1013 slow consumer, 1012 restart).',
+      labelNames: ['code'] as const,
+      registers: [registry],
+    }),
+    events: new Counter({
+      name: 'tessera_realtime_events_delivered_total',
+      help: 'Events written to client connections, by event type.',
+      labelNames: ['type'] as const,
+      registers: [registry],
+    }),
+    authFailures: new Counter({
+      name: 'tessera_realtime_auth_failures_total',
+      help: 'Connections closed because their ticket was invalid, used or expired.',
+      registers: [registry],
+    }),
+  };
 }

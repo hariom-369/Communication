@@ -4,6 +4,7 @@ import {
   createHealthServer,
   createLifecycle,
   createLogger,
+  createMetricsRegistry,
   loadMigrations,
   migrationsHealthCheck,
 } from '@tessera/platform';
@@ -77,6 +78,7 @@ async function main(): Promise<void> {
     },
   );
   const migrations = await loadMigrations(MIGRATIONS_DIR);
+  const registry = createMetricsRegistry('admin-api');
   const health = createHealthServer({
     checks: [
       databaseHealthCheck(database.pool),
@@ -86,6 +88,7 @@ async function main(): Promise<void> {
     state: lifecycle,
     logger,
     checkTimeoutMs: 2_000,
+    metrics: registry,
   });
   lifecycle.onShutdown({ name: 'health', run: () => health.close() });
   const mailer = new SmtpMailer(config.SMTP_URL, config.EMAIL_FROM);
@@ -137,6 +140,7 @@ async function main(): Promise<void> {
     routes: admin.routes,
     sessions: admin.sessions,
     audit: modules.audit,
+    metrics: registry,
   });
   lifecycle.onShutdown({ name: 'http', run: () => app.close() });
   await health.listen({ host: config.HOST, port: config.ADMIN_HEALTH_PORT });

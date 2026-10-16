@@ -460,6 +460,11 @@ export class NotificationsService {
   }
 
   /** Housekeeping: old alerts, expired mutes, subscriptions of ended sessions or devices. */
+  /** Seconds the oldest due push has waited (the queue-age SLO, docs/observability.md §3). */
+  async oldestDueSeconds(now = new Date()): Promise<number> {
+    return (await this.#queue.oldestDueMs(now.getTime())) / 1000;
+  }
+
   async sweep(now = new Date()): Promise<void> {
     const cutoff = new Date(now.getTime() - this.#config.alertRetentionDays * 24 * 3600 * 1000);
     await this.#db.deleteFrom('security_alerts').where('created_at', '<', cutoff).execute();

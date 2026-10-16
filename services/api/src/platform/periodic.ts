@@ -1,4 +1,4 @@
-import type { Logger } from '@tessera/platform';
+import type { JobMetrics, Logger } from '@tessera/platform';
 import type pg from 'pg';
 
 /**
@@ -12,6 +12,7 @@ export function startSingletonTask(options: {
   pool: pg.Pool;
   logger: Logger;
   task: () => Promise<unknown>;
+  metrics?: JobMetrics;
 }): { stop: () => Promise<void> } {
   let running: Promise<void> | undefined;
   let stopped = false;
@@ -21,18 +22,25 @@ export function startSingletonTask(options: {
     // connection at all: a pool timeout while the database was briefly saturated used to reject
     // here unhandled and take the whole API process down (found by the Phase 15 soak).
     let client: pg.PoolClient | undefined;
+    const started = performance.now();
+    const seconds = () => (performance.now() - started) / 1000;
     try {
       client = await options.pool.connect();
       const locked = await client.query<{ ok: boolean }>('SELECT pg_try_advisory_lock($1) AS ok', [
         options.lockKey,
       ]);
-      if (locked.rows[0]?.ok !== true) return;
+      if (locked.rows[0]?.ok !== true) {
+        options.metrics?.observe(options.name, 'skipped', 0);
+        return;
+      }
       try {
         await options.task();
       } finally {
         await client.query('SELECT pg_advisory_unlock($1)', [options.lockKey]);
       }
+      options.metrics?.observe(options.name, 'ok', seconds());
     } catch (error) {
+      options.metrics?.observe(options.name, 'failed', seconds());
       options.logger.error('periodic.task_failed', {
         component: options.name,
         ...options.logger.errorFields(error),

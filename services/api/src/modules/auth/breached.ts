@@ -25,17 +25,21 @@ export class RangeApiBreachedPasswords implements BreachedPasswords {
   readonly #logger: Logger;
   readonly #timeoutMs: number;
   readonly #fetch: typeof fetch;
+  readonly #onUnavailable: () => void;
 
   constructor(options: {
     baseUrl: string;
     logger: Logger;
     timeoutMs?: number;
     fetch?: typeof fetch;
+    /** Called each time the check fails open (a metric; alerts watch it). */
+    onUnavailable?: () => void;
   }) {
     this.#base = options.baseUrl.replace(/\/$/, '');
     this.#logger = options.logger;
     this.#timeoutMs = options.timeoutMs ?? 2000;
     this.#fetch = options.fetch ?? fetch;
+    this.#onUnavailable = options.onUnavailable ?? (() => undefined);
   }
 
   async isBreached(password: string): Promise<boolean> {
@@ -57,6 +61,7 @@ export class RangeApiBreachedPasswords implements BreachedPasswords {
       return false;
     } catch (error) {
       this.#logger.warn('auth.breach_check_unavailable', this.#logger.errorFields(error));
+      this.#onUnavailable();
       return false;
     }
   }

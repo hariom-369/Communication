@@ -90,7 +90,6 @@ export class NotifyQueue {
     }
   }
 
-  /** Removes and returns entries that are due. */
   /** Pending (coalesced) pushes and channel fan-out jobs (admin health view). */
   async depth(): Promise<number> {
     const [queued, fanout] = await Promise.all([
@@ -100,6 +99,13 @@ export class NotifyQueue {
     return queued + fanout;
   }
 
+  /** How long the oldest due entry has been due, in ms (0 when nothing is due). */
+  async oldestDueMs(now = Date.now()): Promise<number> {
+    const [, score] = await this.#valkey.zrange(this.#queue, '0', '0', 'WITHSCORES');
+    return score === undefined ? 0 : Math.max(0, now - Number(score));
+  }
+
+  /** Removes and returns entries that are due. */
   async claimDue(now: number, limit: number): Promise<QueueEntry[]> {
     const keys = (await this.#valkey.eval(CLAIM, 1, this.#queue, String(now), String(limit))) as
       string[] | null;

@@ -4,7 +4,13 @@ import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { createLogger, loadMigrations, migrate } from '@tessera/platform';
+import {
+  createLogger,
+  createMetricsRegistry,
+  loadMigrations,
+  migrate,
+  type Registry,
+} from '@tessera/platform';
 import { MemoryDestination } from '@tessera/platform/testing';
 import { newId } from '@tessera/shared';
 import { REALTIME_SUBPROTOCOL, userChannel, type RealtimeEvent } from '@tessera/validation';
@@ -51,6 +57,7 @@ const nodes: Node[] = [];
 async function startNode(
   overrides: Partial<GatewayConfig> = {},
   commands: Redis = valkey,
+  metrics?: Registry,
 ): Promise<Node> {
   const subscriber = new Redis(requireEnv('TEST_VALKEY_URL'));
   const gateway = new RealtimeGateway({
@@ -69,6 +76,7 @@ async function startNode(
     subscriber,
     db,
     logger,
+    ...(metrics === undefined ? {} : { metrics }),
   });
   const server = createServer((_req, res) => res.writeHead(404).end());
   server.on('upgrade', (request, socket, head) => {
@@ -395,6 +403,35 @@ describe('fan-out', () => {
     await socket.next('conversation');
     expect(socket.frames.filter((frame) => frame['type'] === 'message')).toEqual([]);
     socket.ws.close();
+  });
+});
+
+describe('metrics', () => {
+  it('count upgrades by result, open connections, deliveries and closes', async () => {
+    const registry = createMetricsRegistry('realtime');
+    const node = await startNode({}, valkey, registry);
+    await expect(open(node.url, { origin: 'https://evil.example' })).rejects.toThrow('HTTP 403');
+    const user = await createUser();
+    const socket = await connect(node.url, user);
+    await waitForSubscribers(user.userId, 1);
+    await publish(user.userId, { type: 'conversation', conversationId: randomUUID() });
+    await socket.next('conversation');
+    let text = await registry.metrics();
+    expect(text).toContain('tessera_realtime_connections{service="realtime"} 1');
+    expect(text).toContain(
+      'tessera_realtime_upgrades_total{result="accepted",service="realtime"} 1',
+    );
+    expect(text).toContain(
+      'tessera_realtime_upgrades_total{result="forbidden_origin",service="realtime"} 1',
+    );
+    expect(text).toContain(
+      'tessera_realtime_events_delivered_total{type="conversation",service="realtime"} 1',
+    );
+    socket.ws.close(1000);
+    await socket.closed;
+    await expect.poll(async () => (await registry.metrics()).includes('code="1000"')).toBe(true);
+    text = await registry.metrics();
+    expect(text).toContain('tessera_realtime_connections{service="realtime"} 0');
   });
 });
 

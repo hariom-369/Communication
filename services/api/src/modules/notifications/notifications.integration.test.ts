@@ -237,6 +237,18 @@ describe('push delivery', () => {
     expect(row.last_success_at).not.toBeNull();
   });
 
+  it('reports how long the oldest due push has waited (queue-age SLO)', async () => {
+    const [alice, bob] = [await user(), await user()];
+    const conversationId = await direct(alice, bob);
+    await subscribe(bob);
+    await send(alice, conversationId);
+    const later = new Date(Date.now() + 60_000);
+    // Due after the 5 s coalescing window, so it has waited at least 50 s a minute from now.
+    expect(await env.modules.notifications.oldestDueSeconds(later)).toBeGreaterThan(50);
+    await env.modules.notifications.drain(later);
+    expect(await env.modules.notifications.oldestDueSeconds(later)).toBe(0);
+  });
+
   it('coalesces bursts and delays (never drops) the push after one was just sent', async () => {
     const [alice, bob] = [await user(), await user()];
     const conversationId = await direct(alice, bob);

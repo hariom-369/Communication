@@ -58,7 +58,9 @@ import { FrankingTagger } from './platform/franking.js';
 import type { ObjectStore } from './platform/object-store.js';
 import type { RouteDefinition, SessionAuthenticator } from './platform/http/routes.js';
 import { ValkeyRealtimePublisher } from './platform/realtime-publisher.js';
+import { remoteLinkPreviewFetcher } from './platform/safe-fetch/remote.js';
 import { parseKeyring, SecretBox } from './platform/secrets.js';
+import type { ApiMetrics } from './platform/service-metrics.js';
 
 /**
  * Composition root: the only place that knows every module. Modules receive their collaborators
@@ -117,6 +119,8 @@ export type ModuleConfig = Pick<
       | 'BILLING_SELLER_STATE'
       | 'BILLING_SAC_CODE'
       | 'PWNED_PASSWORDS_URL'
+      | 'LINK_PREVIEW_FETCHER_URL'
+      | 'LINK_PREVIEW_FETCHER_TOKEN'
     >
   >;
 
@@ -129,6 +133,8 @@ export interface ModuleInfrastructure {
   readonly media: ObjectStore;
   /** HPKE key report bundles are encrypted to (loaded asynchronously; null when unset). */
   readonly moderationKey?: ModerationKey | null;
+  /** Counters for controls that fail open or degrade (alerts depend on them). */
+  readonly metrics?: ApiMetrics;
 }
 
 export interface Modules {
@@ -201,6 +207,9 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
           breached: new RangeApiBreachedPasswords({
             baseUrl: config.PWNED_PASSWORDS_URL,
             logger: infra.logger,
+            ...(infra.metrics === undefined
+              ? {}
+              : { onUnavailable: () => infra.metrics?.breachCheckUnavailable.inc() }),
           }),
         }),
   });
@@ -233,7 +242,23 @@ export function composeModules(config: ModuleConfig, infra: ModuleInfrastructure
     infra.logger,
   );
   groups.useSpaces(communities);
-  const previews = new LinkPreviewer(infra.valkey, config.VALKEY_KEY_PREFIX);
+  // Production fetches previews through the isolated fetcher (F-05); elsewhere in process.
+  const previews = new LinkPreviewer(
+    infra.valkey,
+    config.VALKEY_KEY_PREFIX,
+    config.LINK_PREVIEW_FETCHER_URL === undefined || config.LINK_PREVIEW_FETCHER_TOKEN === undefined
+      ? undefined
+      : remoteLinkPreviewFetcher({
+          baseUrl: config.LINK_PREVIEW_FETCHER_URL,
+          token: config.LINK_PREVIEW_FETCHER_TOKEN,
+        }),
+    {
+      logger: infra.logger,
+      ...(infra.metrics === undefined
+        ? {}
+        : { onResult: (result) => infra.metrics?.linkPreviews.inc({ result }) }),
+    },
+  );
   const channels = new ChannelsService({
     db: infra.db,
     valkey: infra.valkey,
