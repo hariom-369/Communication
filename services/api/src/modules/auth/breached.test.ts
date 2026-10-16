@@ -11,9 +11,8 @@ const sha1 = (value: string) =>
 
 function checker(respond: (url: string) => Response | Promise<Response>) {
   const destination = new MemoryDestination();
-  const fetchMock = vi.fn((input: string | URL | Request) =>
-    Promise.resolve(respond(String(input))),
-  );
+  // The checker always passes the URL as a string.
+  const fetchMock = vi.fn((input: string) => Promise.resolve(respond(input)));
   const breached = new RangeApiBreachedPasswords({
     baseUrl: 'https://pwned.internal/',
     logger: createLogger({ service: 'test', level: 'info', errorDetails: false, destination }),
@@ -33,7 +32,7 @@ describe('breached-password check (range API mirror)', () => {
       `https://pwned.internal/range/${hash.slice(0, 5)}`,
       expect.objectContaining({ redirect: 'error' }),
     );
-    expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain(hash.slice(5));
+    expect(fetchMock.mock.calls[0]?.[0]).not.toContain(hash.slice(5));
   });
 
   it('is not fooled by other suffixes or padding entries', async () => {

@@ -19,6 +19,7 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@tessera/shared": "workspace:*",
     "@types/pg": "8.23.1",
     "@types/ws": "8.18.1"
   }

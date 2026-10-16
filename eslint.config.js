@@ -20,8 +20,7 @@ const restrictedSyntax = [
   {
     // Kysely's escape hatches put text into SQL unparameterised (docs/security.md §4). Use the
     // query builder or the `sql` tagged template, whose interpolations are bound parameters.
-    selector:
-      "CallExpression[callee.object.name='sql'][callee.property.name=/^(raw|lit|unsafe)$/]",
+    selector: "CallExpression[callee.object.name='sql'][callee.property.name=/^(raw|lit|unsafe)$/]",
     message: 'Unparameterised SQL is forbidden (docs/security.md §4). Use bound parameters.',
   },
 ];

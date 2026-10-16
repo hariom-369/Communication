@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import { createLogger, loadMigrations, migrate } from '@tessera/platform';
 import { MemoryDestination } from '@tessera/platform/testing';
+import { newId } from '@tessera/shared';
 import { REALTIME_SUBPROTOCOL, userChannel, type RealtimeEvent } from '@tessera/validation';
 import { Redis } from 'ioredis';
 import pg from 'pg';
@@ -248,9 +249,10 @@ async function waitForSubscribers(userId: string, count: number): Promise<void> 
 const sampleMessage = (seq: number) => ({
   seq,
   kind: 'application' as const,
-  clientMessageId: randomUUID(),
-  senderUserId: randomUUID(),
-  senderDeviceId: randomUUID(),
+  // Server-sent ids are UUIDv7, and clients refuse anything else (F-13).
+  clientMessageId: newId(),
+  senderUserId: newId(),
+  senderDeviceId: newId(),
   epoch: 0,
   ciphertext: 'AAAA',
   serverTime: new Date().toISOString(),
