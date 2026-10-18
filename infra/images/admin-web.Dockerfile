@@ -11,7 +11,7 @@ COPY infra/images/nginx/render.mjs ./
 COPY apps/admin/dist/security-headers.json ./
 RUN node render.mjs --app=admin --headers=security-headers.json > nginx.conf
 
-FROM nginxinc/nginx-unprivileged:1.28-alpine
+FROM nginxinc/nginx-unprivileged:1.31-alpine
 COPY --from=config /src/nginx.conf /etc/nginx/nginx.conf
 COPY apps/admin/dist /usr/share/nginx/html
 USER 65532:65532
