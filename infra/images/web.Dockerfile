@@ -17,7 +17,7 @@ ARG MEDIA_ORIGIN
 RUN test -n "${MEDIA_ORIGIN}" && node render.mjs --app=web --headers=security-headers.json \
       --sfu-upstream="${SFU_UPSTREAM}" --media-origin="${MEDIA_ORIGIN}" > nginx.conf
 
-FROM nginxinc/nginx-unprivileged:1.28-alpine
+FROM nginxinc/nginx-unprivileged:1.31-alpine
 COPY --from=config /src/nginx.conf /etc/nginx/nginx.conf
 COPY apps/web/dist /usr/share/nginx/html
 USER 65532:65532
