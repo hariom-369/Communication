@@ -12,6 +12,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    groups:
+      # init and analyze fail when their versions differ.
+      codeql:
+        patterns: ['github/codeql-action/*']
   # Base images of infra/images (pinned by version; the release records the resolved digests).
   - package-ecosystem: docker
     directory: /infra/images

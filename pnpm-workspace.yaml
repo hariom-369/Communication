@@ -12,3 +12,11 @@ onlyBuiltDependencies: []
 overrides:
   # GHSA-68fv-2mgg-jv7q (event-loop DoS on crafted source maps); via vitest coverage and the build.
   source-map-js: '>=1.2.2'
+  # GHSA-333x-w4r6-6crp, GHSA-w74x-v6f9-j3xg, GHSA-wjr9-j795-jxcr, GHSA-xhq7-xmqj-769h (URI parsing);
+  # via fastify's ajv compiler (4.x) and lighthouse's ajv (3.x).
+  'fast-uri@4': '^4.2.3'
+  'fast-uri@3': '^3.1.9'
+  # GHSA-4qv8-2p9j-2685, GHSA-f72v-6w45-q472, GHSA-xjj6-f33q-929c; via jsdom (admin unit tests).
+  'undici@8': '^8.12.2'
+  # GHSA-85x2-q946-cp5h, GHSA-8c8m-p3m8-cjg8, GHSA-m943-m63m-w62w; via smtp-server (test mail sink).
+  'nodemailer@10': '^10.1.4'

@@ -1,0 +1,10 @@
+# OSV scan exceptions for Cargo.lock, kept in step with deny.toml (same advisories, same reasons;
+# reviewed like code).
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0387"
+reason = "crypto-bigint 0.5 is reached only through P-256/P-384 (elliptic-curve 0.13 via OpenMLS); the core enforces ciphersuite 0x0001 (X25519, Ed25519) and refuses other suites, so those curves never execute. The fix needs an OpenMLS major update. Reviewed 2026-10-26."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0173"
+reason = "proc-macro-error2 is unmaintained (no vulnerability); compile-time helper via openmls_rust_crypto, no runtime code, no maintained version. Reviewed 2026-10-16."

@@ -22,7 +22,7 @@
     "ioredis": "6.0.0",
     "pg": "8.23.0",
     "ws": "8.22.0",
-    "zod": "4.6.5"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@tessera/shared": "workspace:*",
