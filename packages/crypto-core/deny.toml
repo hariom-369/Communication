@@ -16,6 +16,13 @@ ignore = [
   # reached through libcrux-sha3 → hpke-rs → openmls_rust_crypto; no code of it is in the
   # shipped WASM. No maintained version exists; remove when OpenMLS's crypto stack drops it.
   # Reviewed 2026-10-16.
+  # crypto-bigint 0.5 (timing variability): reached only through elliptic-curve 0.13 for P-256 and
+  # P-384 (p256/p384 via openmls_rust_crypto, hpke-rs-rust-crypto, openmls_basic_credential). The
+  # core uses ciphersuite 0x0001 only (X25519, Ed25519) and refuses key packages and groups of any
+  # other suite (client.rs: key_package.ciphersuite(), group.ciphersuite()), so no P-256/P-384
+  # operation runs. The fix (0.7.6) needs elliptic-curve 0.14, which OpenMLS 0.6 does not use;
+  # remove when it does. Reviewed 2026-10-26.
+  { id = "RUSTSEC-2026-0387", reason = "P-256/P-384 only; ciphersuite 0x0001 enforced, those curves never execute; fix needs an OpenMLS major update" },
   { id = "RUSTSEC-2026-0173", reason = "unmaintained compile-time proc-macro helper via openmls_rust_crypto; no runtime code, no upgrade available" },
 ]
 

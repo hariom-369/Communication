@@ -25,7 +25,7 @@ module "network" {
 
 module "storage" {
   providers = {
-    aws = aws
+    aws    = aws
     aws.dr = aws.dr
   }
   source          = "./modules/storage"
@@ -63,9 +63,9 @@ module "eks" {
 }
 
 module "edge" {
-  source    = "./modules/edge"
+  source = "./modules/edge"
   providers = {
-    aws = aws
+    aws        = aws
     aws.global = aws.global
   }
   name               = local.name
@@ -75,9 +75,9 @@ module "edge" {
 }
 
 module "backup" {
-  source    = "./modules/backup"
+  source = "./modules/backup"
   providers = {
-    aws = aws
+    aws    = aws
     aws.dr = aws.dr
   }
   name         = local.name

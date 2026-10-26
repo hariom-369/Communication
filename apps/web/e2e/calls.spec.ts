@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
 import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import type * as LivekitClient from 'livekit-client';
@@ -362,15 +364,21 @@ async function inspector(browser: Browser, callId: string) {
     new URL('../node_modules/livekit-client/dist/livekit-client.umd.js', import.meta.url),
     'utf8',
   );
-  await page.route('http://localhost:28997/**', (route) =>
-    route.request().url().endsWith('/livekit.js')
-      ? route.fulfill({ contentType: 'text/javascript', body: client })
-      : route.fulfill({
-          contentType: 'text/html',
-          body: '<!doctype html><title>inspector</title><script src="/livekit.js"></script>',
-        }),
-  );
-  await page.goto('http://localhost:28997/');
+  // Served by a real loopback server, not request interception: a page with no network address
+  // counts as public, and Chromium's Local Network Access then blocks it from reaching the SFU
+  // on 127.0.0.1.
+  const server = createServer((request, response) => {
+    if (request.url === '/livekit.js') {
+      response.writeHead(200, { 'content-type': 'text/javascript' }).end(client);
+    } else {
+      response
+        .writeHead(200, { 'content-type': 'text/html' })
+        .end('<!doctype html><title>inspector</title><script src="/livekit.js"></script>');
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  context.on('close', () => server.close());
+  await page.goto(`http://127.0.0.1:${String((server.address() as AddressInfo).port)}/`);
   await page.evaluate(
     async ({ url, token }) => {
       const lk = (window as unknown as { LivekitClient: typeof LivekitClient }).LivekitClient;

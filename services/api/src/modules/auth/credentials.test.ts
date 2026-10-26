@@ -63,7 +63,9 @@ describe('PasswordHasher', () => {
     }
     const median = (values: number[]) => [...values].sort((a, b) => a - b)[4]!;
     expect(median(burned)).toBeGreaterThan(median(real) * 0.5);
-  });
+    // Twenty production-cost Argon2id runs: ~2–5 s on an idle machine, more on a CI runner that is
+    // compiling the crypto core at the same time (timed out at the 5 s default in a clean checkout).
+  }, 30_000);
 
   it('rejects malformed pepper configuration', () => {
     expect(() => parsePepper('p1:short')).toThrow();

@@ -93,7 +93,7 @@ export function trackCspViolations(page: Page): string[] {
 
 /**
  * Resets the per-IP sign-up and email-verification limits (30/hour each). Every browser in the
- * suite signs up from 127.0.0.1, so spec files that create many accounts call this first; the
+ * suite signs up from the loopback address, so spec files that create many accounts call this first; the
  * limits themselves are tested in the API integration tests. Speaks RESP directly (no client
  * dependency).
  */
@@ -101,9 +101,14 @@ export async function resetSignUpLimits(): Promise<void> {
   const prefix = process.env['E2E_VALKEY_KEY_PREFIX'];
   const url = new URL(process.env['TEST_VALKEY_URL'] ?? 'redis://localhost:6379');
   if (prefix === undefined) throw new Error('E2E_VALKEY_KEY_PREFIX is not set (global setup)');
+  // The browser reaches `localhost` over IPv4 or, where the machine has it, IPv6 (GitHub's
+  // runners): the API keys those as `ip:127.0.0.1` and `ip6:0:0:0:0::/64` (rateLimitSubject).
+  const subjects = ['ip:127.0.0.1', 'ip6:0:0:0:0::/64'];
   const args = [
     'DEL',
-    ...['signup', 'verify'].map((p) => `${prefix}:rl:accounts.${p}.ip:ip:127.0.0.1`),
+    ...['signup', 'verify'].flatMap((p) =>
+      subjects.map((subject) => `${prefix}:rl:accounts.${p}.ip:${subject}`),
+    ),
   ];
   const command = `*${args.length}\r\n${args.map((a) => `$${Buffer.byteLength(a)}\r\n${a}\r\n`).join('')}`;
   await new Promise<void>((resolve, reject) => {

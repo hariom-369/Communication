@@ -36,8 +36,8 @@ resource "aws_subnet" "public" {
   vpc_id            = aws_vpc.this.id
   cidr_block        = local.subnets.public[count.index]
   availability_zone = var.azs[count.index]
-  tags              = {
-    Name = "${var.name}-public-${var.azs[count.index]}"
+  tags = {
+    Name                     = "${var.name}-public-${var.azs[count.index]}"
     "kubernetes.io/role/elb" = "1"
   }
 }
@@ -47,8 +47,8 @@ resource "aws_subnet" "private" {
   vpc_id            = aws_vpc.this.id
   cidr_block        = local.subnets.private[count.index]
   availability_zone = var.azs[count.index]
-  tags              = {
-    Name = "${var.name}-private-${var.azs[count.index]}"
+  tags = {
+    Name                              = "${var.name}-private-${var.azs[count.index]}"
     "kubernetes.io/role/internal-elb" = "1"
   }
 }

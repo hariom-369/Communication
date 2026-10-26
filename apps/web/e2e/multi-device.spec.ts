@@ -194,7 +194,10 @@ test.describe('multiple devices', () => {
     await expect(alice.page.getByRole('list').getByText(/ on /)).toBeVisible();
     await turnOnBackups(alice.page);
     await alice.page.getByRole('button', { name: 'Unlock with a passkey' }).click();
-    await expect(alice.page.getByText('Your passkey can now unlock backups.')).toBeVisible();
+    // Re-authentication, a PRF assertion and the key wrap: over 5 s on a busy CI runner.
+    await expect(alice.page.getByText('Your passkey can now unlock backups.')).toBeVisible({
+      timeout: 15_000,
+    });
     await expect(
       alice.page.getByRole('list', { name: 'Ways to unlock backups' }).getByRole('listitem'),
     ).toHaveCount(2);

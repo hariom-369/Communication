@@ -16,10 +16,16 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   timeout: 60_000,
-  reporter: [['list']],
+  // In CI: failures also as annotations on the run (readable without the full log), and stop
+  // after five, so a broken environment reports its errors instead of reaching the job timeout.
+  reporter: process.env['CI'] === undefined ? [['list']] : [['list'], ['github']],
+  maxFailures: process.env['CI'] === undefined ? 0 : 5,
   use: {
     baseURL: WEB_URL,
     trace: 'retain-on-failure',
+    // Full Chromium in headless mode, not the separate headless-shell build Playwright uses by
+    // default: push notifications and group-call media need the full browser.
+    ...(executablePath === undefined ? { channel: 'chromium' } : {}),
     launchOptions: {
       ...(executablePath === undefined ? {} : { executablePath }),
       // Calls: synthetic camera and microphone, permission prompts and the screen picker
