@@ -88,8 +88,14 @@ interface Credentials {
   key: Buffer;
 }
 
-function message(method: number, attributes: Buffer[], credentials?: Credentials): Buffer {
-  const transaction = randomBytes(12);
+function message(
+  method: number,
+  attributes: Buffer[],
+  credentials?: Credentials,
+  // IPv6 XOR-PEER-ADDRESS is masked with the transaction id, so the attribute and the header must
+  // use the same one (a mismatch made the server decode a different, public address).
+  transaction: Buffer = randomBytes(12),
+): Buffer {
   const header = Buffer.alloc(20);
   header.writeUInt16BE(method, 0);
   header.writeUInt32BE(COOKIE, 4);
@@ -139,8 +145,13 @@ class TurnClient {
   readonly #socket: Socket = createSocket('udp4');
   #credentials: Credentials | undefined;
 
-  request(method: number, attributes: Buffer[], signed = true): Promise<Response> {
-    const packet = message(method, attributes, signed ? this.#credentials : undefined);
+  request(
+    method: number,
+    attributes: Buffer[],
+    signed = true,
+    transaction?: Buffer,
+  ): Promise<Response> {
+    const packet = message(method, attributes, signed ? this.#credentials : undefined, transaction);
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         reject(new Error('TURN request timed out'));
@@ -171,7 +182,12 @@ class TurnClient {
 
   permit(ip: string): Promise<Response> {
     const transaction = randomBytes(12);
-    return this.request(0x0008, [attribute(ATTR.peer, xorAddress(ip, 9, transaction))]);
+    return this.request(
+      0x0008,
+      [attribute(ATTR.peer, xorAddress(ip, 9, transaction))],
+      true,
+      transaction,
+    );
   }
 
   close(): void {
