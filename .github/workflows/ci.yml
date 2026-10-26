@@ -162,6 +162,12 @@ jobs:
       - run: pnpm build
       - run: pnpm --filter @tessera/web exec playwright install --with-deps chromium
       - run: pnpm --filter @tessera/web test:e2e
+      - name: Call infrastructure logs (on failure)
+        if: failure()
+        run: |
+          for log in /tmp/tessera-e2e-sfu.log /tmp/tessera-e2e-turn.log; do
+            echo "== $log"; tail -n 100 "$log" || true
+          done
       - name: Admin console end to end (test identity provider, virtual security keys)
         run: pnpm --filter @tessera/admin test:e2e
       - name: Release manifest of the built app verifies (signature and every file)

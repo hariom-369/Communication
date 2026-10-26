@@ -23,6 +23,9 @@ export default defineConfig({
   use: {
     baseURL: WEB_URL,
     trace: 'retain-on-failure',
+    // Full Chromium in headless mode, not the separate headless-shell build Playwright uses by
+    // default: push notifications and group-call media need the full browser.
+    ...(executablePath === undefined ? { channel: 'chromium' } : {}),
     launchOptions: {
       ...(executablePath === undefined ? {} : { executablePath }),
       // Calls: synthetic camera and microphone, permission prompts and the screen picker
