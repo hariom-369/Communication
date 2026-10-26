@@ -16,7 +16,10 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   timeout: 60_000,
-  reporter: [['list']],
+  // In CI: failures also as annotations on the run (readable without the full log), and stop
+  // after five, so a broken environment reports its errors instead of reaching the job timeout.
+  reporter: process.env['CI'] === undefined ? [['list']] : [['list'], ['github']],
+  maxFailures: process.env['CI'] === undefined ? 0 : 5,
   use: {
     baseURL: WEB_URL,
     trace: 'retain-on-failure',
