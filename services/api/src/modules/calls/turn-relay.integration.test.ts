@@ -74,6 +74,12 @@ function xorAddress(ip: string, port: number, transaction: Buffer): Buffer {
 }
 
 function ipv6Bytes(ip: string): Buffer {
+  // An embedded IPv4 tail (::ffff:10.0.0.5) is two groups, not one hex group.
+  const embedded = /^(.*:)(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(ip);
+  if (embedded !== null) {
+    const [b0, b1, b2, b3] = embedded.slice(2).map(Number) as [number, number, number, number];
+    ip = `${embedded[1]!}${((b0 << 8) | b1).toString(16)}:${((b2 << 8) | b3).toString(16)}`;
+  }
   const [head = '', tail = ''] = ip.split('::');
   const left = head === '' ? [] : head.split(':');
   const right = tail === '' ? [] : tail.split(':');
