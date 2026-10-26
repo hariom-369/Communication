@@ -1,6 +1,16 @@
-# OSV scan exceptions for Cargo.lock, kept in step with deny.toml (same advisories, same reasons;
-# reviewed like code).
+# OSV scan exceptions for Cargo.lock (reviewed like code). OSV reads the whole lockfile, which also
+# lists optional dependencies the build never enables; cargo deny (deny.toml) checks the graph
+# that is actually compiled, so entries for never-built crates appear here only.
 
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0330"
+reason = "libcrux-kem 0.0.9 is locked only as a dependency of hpke-rs-libcrux, the optional libcrux backend of hpke-rs, which this crate never enables: `cargo tree -i hpke-rs-libcrux --target all --all-features` finds no path, native or wasm32. No update path (hpke-rs-libcrux 0.7.0 requires =0.0.9). Reviewed 2026-10-26."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0331"
+reason = "Same crate and reason as RUSTSEC-2026-0330: libcrux-kem is never compiled into the crypto core. Reviewed 2026-10-26."
+
+# Also in deny.toml:
 [[IgnoredVulns]]
 id = "RUSTSEC-2026-0387"
 reason = "crypto-bigint 0.5 is reached only through P-256/P-384 (elliptic-curve 0.13 via OpenMLS); the core enforces ciphersuite 0x0001 (X25519, Ed25519) and refuses other suites, so those curves never execute. The fix needs an OpenMLS major update. Reviewed 2026-10-26."
